@@ -61,6 +61,14 @@ async function main() {
             <label for="questions">Questions per iteration</label>
             <input id="questions" type="number" min="1" max="8" value="${settings.research.questionsPerIteration}" />
           </div>
+          <div>
+            <label for="iterations">Iterations</label>
+            <input id="iterations" type="number" min="1" max="10" value="${settings.research.iterations}" />
+          </div>
+          <div>
+            <label for="concurrency">Concurrency</label>
+            <input id="concurrency" type="number" min="1" max="8" value="${settings.research.concurrency}" />
+          </div>
         </div>
 
         <p><button type="submit">Start research</button></p>
@@ -101,6 +109,8 @@ function collectSettings() {
     research: {
       strategy: value('#strategy'),
       questionsPerIteration: Number(value('#questions') || 3),
+      iterations: Number(value('#iterations') || 2),
+      concurrency: Number(value('#concurrency') || 2),
     },
   };
 }

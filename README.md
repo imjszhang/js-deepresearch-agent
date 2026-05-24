@@ -56,7 +56,11 @@ npm exec jdr -- research "Compare SearXNG and Brave Search APIs" \
   --provider openai-compatible \
   --model gpt-4o-mini \
   --base-url https://api.openai.com/v1 \
-  --search-base-url http://127.0.0.1:8080
+  --search-base-url http://127.0.0.1:8080 \
+  --strategy source-based \
+  --iterations 2 \
+  --questions 3 \
+  --concurrency 2
 ```
 
 ## Configuration
@@ -68,8 +72,18 @@ Runtime settings are stored in the local SQLite database under `data/`. Values f
 - LLM base URL: `https://api.openai.com/v1`
 - Search engine: `searxng`
 - Search base URL: `http://127.0.0.1:8080`
+- Research strategy: `source-based`
+- Research iterations: `2`
+- Research questions per iteration: `3`
+- Research concurrency: `2`
 
 SearXNG is the only implemented search adapter in this MVP. DuckDuckGo, Tavily, and Brave Search are represented in the adapter metadata for later implementation.
+
+Available research strategies are exposed through `/api/strategies` and shared by the web UI:
+
+- `rapid`: fast research that searches the original query plus a few follow-up questions.
+- `source-based`: default iterative research that generates source-informed follow-up questions.
+- `parallel`: broad research that runs generated questions with controlled concurrency.
 
 Use the web UI, `.env`, or `jdr config set <key> <value>` to update them.
 

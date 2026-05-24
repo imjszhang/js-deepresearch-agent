@@ -4,9 +4,9 @@ import { formatHistory, getDeepValue, parseArgs, setDeepValue } from '../src/cli
 
 describe('CLI utilities', () => {
   it('parses positional args and flags', () => {
-    const parsed = parseArgs(['hello', 'world', '--strategy', 'quick', '--json']);
+    const parsed = parseArgs(['hello', 'world', '--strategy', 'rapid', '--json']);
     assert.deepEqual(parsed.args, ['hello', 'world']);
-    assert.equal(parsed.flags.strategy, 'quick');
+    assert.equal(parsed.flags.strategy, 'rapid');
     assert.equal(parsed.flags.json, true);
   });
 

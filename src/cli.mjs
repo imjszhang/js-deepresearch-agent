@@ -149,6 +149,8 @@ function settingsFromFlags(flags) {
     'searxng-url': 'search.baseUrl',
     strategy: 'research.strategy',
     questions: 'research.questionsPerIteration',
+    iterations: 'research.iterations',
+    concurrency: 'research.concurrency',
   };
 
   for (const [flag, key] of Object.entries(mappings)) {
@@ -168,7 +170,7 @@ function printHelp() {
 js-deepresearch-agent
 
 Commands:
-  research "query" [--search-base-url http://127.0.0.1:8080] [--strategy source-based] [--output report.md] [--json] [--no-save]
+  research "query" [--search-base-url http://127.0.0.1:8080] [--strategy source-based|rapid|parallel] [--iterations 2] [--questions 3] [--concurrency 2] [--output report.md] [--json] [--no-save]
   config get [key]
   config set <key> <value>
   history [list]
