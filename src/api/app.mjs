@@ -2,6 +2,7 @@ import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { providerMetadata } from '../llm/provider-factory.mjs';
+import { strategyMetadata } from '../research/strategies.mjs';
 import { searchEngineMetadata } from '../search/search-factory.mjs';
 import { createServices } from '../bootstrap.mjs';
 
@@ -43,6 +44,10 @@ export function createApp(db) {
 
   app.get('/api/search-engines', (_req, res) => {
     res.json(searchEngineMetadata);
+  });
+
+  app.get('/api/strategies', (_req, res) => {
+    res.json(strategyMetadata);
   });
 
   app.post('/api/research', (req, res) => {

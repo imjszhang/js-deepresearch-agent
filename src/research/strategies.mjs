@@ -1,13 +1,38 @@
 import { generateQuestions } from './question-generator.mjs';
 
-export async function runStrategy({ strategy, query, settings, llm, search, signal, emit }) {
-  if (strategy === 'quick') {
-    return runQuick({ query, search, signal, emit });
+export const strategyRegistry = {
+  quick: {
+    id: 'quick',
+    label: 'Quick',
+    description: 'Search the original query once before synthesizing a report.',
+    run: runQuick,
+  },
+  'source-based': {
+    id: 'source-based',
+    label: 'Source Based',
+    description: 'Generate focused research questions and search them sequentially.',
+    run: runSourceBased,
+  },
+  parallel: {
+    id: 'parallel',
+    label: 'Parallel',
+    description: 'Generate focused research questions and search them in parallel.',
+    run: runParallel,
+  },
+};
+
+export const strategyMetadata = Object.values(strategyRegistry).map(({ id, label, description }) => ({
+  id,
+  label,
+  description,
+}));
+
+export async function runStrategy({ strategy, ...context }) {
+  const entry = strategyRegistry[strategy];
+  if (!entry) {
+    throw new Error(`Unsupported research strategy: ${strategy}`);
   }
-  if (strategy === 'parallel') {
-    return runParallel({ query, settings, llm, search, signal, emit });
-  }
-  return runSourceBased({ query, settings, llm, search, signal, emit });
+  return entry.run(context);
 }
 
 async function runQuick({ query, search, signal, emit }) {

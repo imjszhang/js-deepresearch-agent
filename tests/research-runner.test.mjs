@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { ResearchRunner } from '../src/research/research-runner.mjs';
+import { runStrategy, strategyMetadata } from '../src/research/strategies.mjs';
 
 describe('ResearchRunner', () => {
   it('runs quick research with injected LLM and search adapters', async () => {
@@ -43,5 +44,20 @@ describe('ResearchRunner', () => {
     assert.match(result.report, /test report/);
     assert.equal(result.sources.length, 1);
     assert.equal(events[0].message, 'Research started');
+  });
+
+  it('exposes available research strategies as metadata', () => {
+    assert.deepEqual(strategyMetadata.map((strategy) => strategy.id), [
+      'quick',
+      'source-based',
+      'parallel',
+    ]);
+  });
+
+  it('rejects unsupported research strategies', async () => {
+    await assert.rejects(
+      runStrategy({ strategy: 'unknown' }),
+      /Unsupported research strategy: unknown/,
+    );
   });
 });

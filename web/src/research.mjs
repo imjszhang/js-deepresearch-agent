@@ -9,10 +9,11 @@ main().catch((error) => {
 });
 
 async function main() {
-  const [settings, providers, searchEngines] = await Promise.all([
+  const [settings, providers, searchEngines, strategies] = await Promise.all([
     apiGet('/api/settings'),
     apiGet('/api/providers'),
     apiGet('/api/search-engines'),
+    apiGet('/api/strategies'),
   ]);
 
   app.innerHTML = `
@@ -54,13 +55,7 @@ async function main() {
           </div>
           <div>
             <label for="strategy">Strategy</label>
-            <select id="strategy">
-              ${options([
-                { id: 'quick', label: 'Quick' },
-                { id: 'source-based', label: 'Source Based' },
-                { id: 'parallel', label: 'Parallel' },
-              ], settings.research.strategy)}
-            </select>
+            <select id="strategy">${options(strategies, settings.research.strategy)}</select>
           </div>
           <div>
             <label for="questions">Questions per iteration</label>
