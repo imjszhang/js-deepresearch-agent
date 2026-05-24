@@ -77,6 +77,7 @@ Supported `.env` keys:
 
 - `PORT`
 - `LLM_PROVIDER`
+- `LLM_MODEL`
 - `OPENAI_API_KEY`
 - `OPENAI_BASE_URL`
 - `OLLAMA_BASE_URL`

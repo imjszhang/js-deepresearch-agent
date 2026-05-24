@@ -15,6 +15,11 @@ export function settingsFromEnv(env = process.env) {
     llm.provider = provider;
   }
 
+  const model = readEnv('LLM_MODEL');
+  if (model) {
+    llm.model = model;
+  }
+
   const openAiApiKey = readEnv('OPENAI_API_KEY');
   if (openAiApiKey) {
     llm.apiKey = openAiApiKey;

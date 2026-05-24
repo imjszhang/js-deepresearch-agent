@@ -53,6 +53,18 @@ EXISTING=from-file
     assert.equal(overrides.search.apiKey, 'search-key');
   });
 
+  it('maps llm env vars to settings overrides', () => {
+    const overrides = settingsFromEnv({
+      LLM_PROVIDER: 'ollama',
+      LLM_MODEL: 'qwen2.5:7b',
+      OLLAMA_BASE_URL: 'http://127.0.0.1:11434',
+    });
+
+    assert.equal(overrides.llm.provider, 'ollama');
+    assert.equal(overrides.llm.model, 'qwen2.5:7b');
+    assert.equal(overrides.llm.baseUrl, 'http://127.0.0.1:11434');
+  });
+
   it('applies env overrides when reading settings from the store', () => {
     const db = migrateDb(new Database(':memory:'));
     const store = new SettingsStore(db);
