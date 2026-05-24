@@ -50,8 +50,15 @@ export function settingsFromEnv(env = process.env) {
     search.apiKey = searchApiKey;
   }
 
+  const research = {};
+  const workDir = readEnv('WORK_DIR');
+  if (workDir) {
+    research.workDir = workDir;
+  }
+
   return {
     ...(Object.keys(llm).length ? { llm } : {}),
     ...(Object.keys(search).length ? { search } : {}),
+    ...(Object.keys(research).length ? { research } : {}),
   };
 }

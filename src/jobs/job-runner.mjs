@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { ResearchRunner } from '../research/research-runner.mjs';
+import { saveResearchToWorkDir } from '../research/work-output.mjs';
 
 export class JobRunner {
   constructor({ settingsStore, researchRepository, logRepository, sourceRepository, eventBus }) {
@@ -46,6 +47,13 @@ export class JobRunner {
       });
 
       this.sourceRepository.addMany(id, result.sources);
+      saveResearchToWorkDir({
+        settings,
+        strategy: settings.research.strategy,
+        query,
+        result,
+        researchId: id,
+      });
       const record = this.researchRepository.updateStatus(id, 'completed', {
         report: result.report,
         completedAt: new Date().toISOString(),

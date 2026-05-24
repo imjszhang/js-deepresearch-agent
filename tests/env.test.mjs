@@ -65,6 +65,14 @@ EXISTING=from-file
     assert.equal(overrides.llm.baseUrl, 'http://127.0.0.1:11434');
   });
 
+  it('maps work directory env vars to settings overrides', () => {
+    const overrides = settingsFromEnv({
+      WORK_DIR: '/tmp/custom-work',
+    });
+
+    assert.equal(overrides.research.workDir, '/tmp/custom-work');
+  });
+
   it('applies env overrides when reading settings from the store', () => {
     const db = migrateDb(new Database(':memory:'));
     const store = new SettingsStore(db);

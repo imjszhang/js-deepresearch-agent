@@ -5,6 +5,7 @@ import { createServices } from './bootstrap.mjs';
 import { createApp } from './api/app.mjs';
 import { getDb } from './storage/db.mjs';
 import { ResearchRunner } from './research/research-runner.mjs';
+import { saveResearchToWorkDir } from './research/work-output.mjs';
 import { formatHistory, getDeepValue, parseArgs, setDeepValue } from './cli-utils.mjs';
 
 const services = createServices(getDb());
@@ -63,6 +64,19 @@ async function researchCommand(argv) {
     },
   });
 
+  let artifacts = null;
+  if (!flags['no-work-dir']) {
+    artifacts = saveResearchToWorkDir({
+      settings,
+      strategy: settings.research.strategy,
+      query,
+      result,
+    });
+    if (!flags.json) {
+      console.error(`[info] Artifacts saved to ${artifacts.sessionDir}`);
+    }
+  }
+
   if (!flags['no-save']) {
     const record = services.researchRepository.create({
       id: cryptoRandomId(),
@@ -81,7 +95,7 @@ async function researchCommand(argv) {
   }
 
   if (flags.json) {
-    console.log(JSON.stringify(result, null, 2));
+    console.log(JSON.stringify({ ...result, artifacts }, null, 2));
   } else {
     console.log(result.report);
   }
@@ -148,6 +162,7 @@ function settingsFromFlags(flags) {
     'search-api-key': 'search.apiKey',
     'searxng-url': 'search.baseUrl',
     strategy: 'research.strategy',
+    'work-dir': 'research.workDir',
     questions: 'research.questionsPerIteration',
     iterations: 'research.iterations',
     concurrency: 'research.concurrency',
@@ -170,7 +185,7 @@ function printHelp() {
 js-deepresearch-agent
 
 Commands:
-  research "query" [--search-base-url http://127.0.0.1:8080] [--strategy source-based|rapid|parallel] [--iterations 2] [--questions 3] [--concurrency 2] [--output report.md] [--json] [--no-save]
+  research "query" [--search-base-url http://127.0.0.1:8080] [--strategy source-based|rapid|parallel] [--iterations 2] [--questions 3] [--concurrency 2] [--work-dir work_dir] [--output report.md] [--json] [--no-save] [--no-work-dir]
   config get [key]
   config set <key> <value>
   history [list]

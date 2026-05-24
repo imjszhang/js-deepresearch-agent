@@ -20,6 +20,7 @@ export const defaultSettings = Object.freeze({
     iterations: 2,
     questionsPerIteration: 3,
     concurrency: 2,
+    workDir: 'work_dir',
   },
 });
 
