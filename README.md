@@ -2,7 +2,7 @@
 
 Local single-user deep research agent built with Node.js, Express, Vite, and SQLite.
 
-The app can run research jobs from either a web UI or a CLI. It uses an OpenAI-compatible chat completions API or Ollama for generation, and SearXNG for search.
+The app can run research jobs from either a web UI or a CLI. It uses an OpenAI-compatible chat completions API or Ollama for generation, and a pluggable search backend for source discovery.
 
 ## Features
 
@@ -10,12 +10,13 @@ The app can run research jobs from either a web UI or a CLI. It uses an OpenAI-c
 - CLI commands for running research, updating settings, and viewing history.
 - Local SQLite storage for settings, research history, logs, and sources.
 - Pluggable provider shape for OpenAI-compatible and Ollama LLM backends.
+- Pluggable search adapter shape; the current MVP ships with SearXNG.
 
 ## Requirements
 
 - Node.js 20 or newer.
 - npm.
-- A running SearXNG instance, defaulting to `http://127.0.0.1:8080`.
+- A search backend. The current MVP supports SearXNG, defaulting to `http://127.0.0.1:8080`.
 - Either an OpenAI-compatible API key/base URL or a local Ollama server.
 
 ## Getting Started
@@ -43,7 +44,7 @@ The Vite dev server proxies `/api` requests to `http://127.0.0.1:3000`.
 npm exec jdr -- help
 npm exec jdr -- config get
 npm exec jdr -- config set llm.apiKey "YOUR_API_KEY"
-npm exec jdr -- config set search.searxngUrl "http://127.0.0.1:8080"
+npm exec jdr -- config set search.baseUrl "http://127.0.0.1:8080"
 npm exec jdr -- research "Explain the current state of local-first AI research" --output report.md
 npm exec jdr -- history list
 ```
@@ -54,22 +55,36 @@ You can also override settings for one run:
 npm exec jdr -- research "Compare SearXNG and Brave Search APIs" \
   --provider openai-compatible \
   --model gpt-4o-mini \
-  --base-url https://api.openai.com/v1
+  --base-url https://api.openai.com/v1 \
+  --search-base-url http://127.0.0.1:8080
 ```
 
 ## Configuration
 
-Runtime settings are stored in the local SQLite database under `data/`. The default settings are:
+Runtime settings are stored in the local SQLite database under `data/`. Values from `.env` are loaded automatically on startup and override saved settings when present. The default settings are:
 
 - LLM provider: `openai-compatible`
 - LLM model: `gpt-4o-mini`
 - LLM base URL: `https://api.openai.com/v1`
 - Search engine: `searxng`
-- SearXNG URL: `http://127.0.0.1:8080`
+- Search base URL: `http://127.0.0.1:8080`
 
-Use the web UI or `jdr config set <key> <value>` to update them.
+SearXNG is the only implemented search adapter in this MVP. DuckDuckGo, Tavily, and Brave Search are represented in the adapter metadata for later implementation.
 
-Do not commit API keys or local database files. `.env.example` documents common local values, but the current app reads most runtime configuration from the database and CLI flags.
+Use the web UI, `.env`, or `jdr config set <key> <value>` to update them.
+
+Supported `.env` keys:
+
+- `PORT`
+- `LLM_PROVIDER`
+- `OPENAI_API_KEY`
+- `OPENAI_BASE_URL`
+- `OLLAMA_BASE_URL`
+- `SEARCH_ENGINE`
+- `SEARCH_BASE_URL`
+- `SEARCH_API_KEY`
+
+Do not commit API keys or local database files. `.env.example` documents common local values.
 
 ## Scripts
 

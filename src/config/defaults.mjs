@@ -9,7 +9,8 @@ export const defaultSettings = Object.freeze({
   },
   search: {
     engine: 'searxng',
-    searxngUrl: 'http://127.0.0.1:8080',
+    baseUrl: 'http://127.0.0.1:8080',
+    apiKey: '',
     maxResults: 8,
     language: 'en',
     safeSearch: true,
@@ -23,9 +24,15 @@ export const defaultSettings = Object.freeze({
 });
 
 export function mergeSettings(overrides = {}) {
+  const searchOverrides = { ...(overrides.search || {}) };
+  if (searchOverrides.baseUrl === undefined && searchOverrides.searxngUrl !== undefined) {
+    searchOverrides.baseUrl = searchOverrides.searxngUrl;
+  }
+  delete searchOverrides.searxngUrl;
+
   return {
     llm: { ...defaultSettings.llm, ...(overrides.llm || {}) },
-    search: { ...defaultSettings.search, ...(overrides.search || {}) },
+    search: { ...defaultSettings.search, ...searchOverrides },
     research: { ...defaultSettings.research, ...(overrides.research || {}) },
   };
 }

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import './config/bootstrap-env.mjs';
 import fs from 'node:fs';
 import { createServices } from './bootstrap.mjs';
 import { createApp } from './api/app.mjs';
@@ -143,7 +144,9 @@ function settingsFromFlags(flags) {
     'base-url': 'llm.baseUrl',
     'api-key': 'llm.apiKey',
     search: 'search.engine',
-    'searxng-url': 'search.searxngUrl',
+    'search-base-url': 'search.baseUrl',
+    'search-api-key': 'search.apiKey',
+    'searxng-url': 'search.baseUrl',
     strategy: 'research.strategy',
     questions: 'research.questionsPerIteration',
   };
@@ -165,7 +168,7 @@ function printHelp() {
 js-deepresearch-agent
 
 Commands:
-  research "query" [--strategy source-based] [--output report.md] [--json] [--no-save]
+  research "query" [--search-base-url http://127.0.0.1:8080] [--strategy source-based] [--output report.md] [--json] [--no-save]
   config get [key]
   config set <key> <value>
   history [list]

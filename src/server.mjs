@@ -1,3 +1,4 @@
+import './config/bootstrap-env.mjs';
 import { createApp } from './api/app.mjs';
 import { getDb } from './storage/db.mjs';
 

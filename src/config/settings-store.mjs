@@ -1,4 +1,5 @@
 import { defaultSettings, mergeSettings } from './defaults.mjs';
+import { settingsFromEnv } from './env-overrides.mjs';
 
 const SETTINGS_KEY = 'app';
 
@@ -9,15 +10,17 @@ export class SettingsStore {
 
   get() {
     const row = this.db.prepare('SELECT value FROM settings WHERE key = ?').get(SETTINGS_KEY);
-    if (!row) {
-      return mergeSettings();
+    let stored = {};
+
+    if (row) {
+      try {
+        stored = JSON.parse(row.value);
+      } catch {
+        stored = {};
+      }
     }
 
-    try {
-      return mergeSettings(JSON.parse(row.value));
-    } catch {
-      return mergeSettings();
-    }
+    return mergeSettings(this.withEnvOverrides(stored));
   }
 
   save(settings) {
@@ -44,5 +47,16 @@ export class SettingsStore {
 
   reset() {
     return this.save(defaultSettings);
+  }
+
+  withEnvOverrides(stored = {}) {
+    const envOverrides = settingsFromEnv();
+
+    return {
+      ...stored,
+      llm: { ...(stored.llm || {}), ...(envOverrides.llm || {}) },
+      search: { ...(stored.search || {}), ...(envOverrides.search || {}) },
+      research: { ...(stored.research || {}), ...(envOverrides.research || {}) },
+    };
   }
 }

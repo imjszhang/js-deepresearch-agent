@@ -49,8 +49,8 @@ async function main() {
             <select id="searchEngine">${options(searchEngines, settings.search.engine)}</select>
           </div>
           <div>
-            <label for="searxngUrl">SearXNG URL</label>
-            <input id="searxngUrl" value="${escapeAttr(settings.search.searxngUrl)}" />
+            <label for="searchBaseUrl">Search base URL</label>
+            <input id="searchBaseUrl" value="${escapeAttr(settings.search.baseUrl)}" />
           </div>
           <div>
             <label for="strategy">Strategy</label>
@@ -101,7 +101,7 @@ function collectSettings() {
     },
     search: {
       engine: value('#searchEngine'),
-      searxngUrl: value('#searxngUrl'),
+      baseUrl: value('#searchBaseUrl'),
     },
     research: {
       strategy: value('#strategy'),

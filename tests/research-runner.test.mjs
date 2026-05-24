@@ -19,7 +19,7 @@ describe('ResearchRunner', () => {
         },
         search: {
           engine: 'searxng',
-          searxngUrl: 'mock://search',
+          baseUrl: 'mock://search',
           maxResults: 2,
         },
         research: {
