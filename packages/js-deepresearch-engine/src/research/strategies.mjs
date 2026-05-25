@@ -1,7 +1,7 @@
 import { formatSourcesForQuestionContext, generateQuestions } from './question-generator.mjs';
 import { searchQuestions } from './search-executor.mjs';
 
-export const strategyRegistry = {
+const strategyRegistry = {
   rapid: {
     id: 'rapid',
     label: 'Rapid',
@@ -37,25 +37,52 @@ export const strategyRegistry = {
   },
 };
 
-export const strategyMetadata = Object.values(strategyRegistry).map(({
-  id,
-  label,
-  description,
-  requiresLlm,
-  supportsIterations,
-  supportsConcurrency,
-  speed,
-  depth,
-}) => ({
-  id,
-  label,
-  description,
-  requiresLlm,
-  supportsIterations,
-  supportsConcurrency,
-  speed,
-  depth,
-}));
+function buildStrategyMetadata() {
+  return Object.values(strategyRegistry).map(({
+    id,
+    label,
+    description,
+    requiresLlm,
+    supportsIterations,
+    supportsConcurrency,
+    speed,
+    depth,
+  }) => ({
+    id,
+    label,
+    description,
+    requiresLlm,
+    supportsIterations,
+    supportsConcurrency,
+    speed,
+    depth,
+  }));
+}
+
+export let strategyMetadata = buildStrategyMetadata();
+
+export { strategyRegistry };
+
+export function registerStrategy(id, entry) {
+  if (!id || typeof id !== 'string') {
+    throw new Error('Strategy id is required.');
+  }
+  if (typeof entry.run !== 'function') {
+    throw new Error(`Strategy "${id}" requires a run function.`);
+  }
+  strategyRegistry[id] = {
+    id,
+    label: entry.label || id,
+    description: entry.description || '',
+    requiresLlm: entry.requiresLlm ?? true,
+    supportsIterations: entry.supportsIterations ?? false,
+    supportsConcurrency: entry.supportsConcurrency ?? true,
+    speed: entry.speed || 'balanced',
+    depth: entry.depth || 'balanced',
+    run: entry.run,
+  };
+  strategyMetadata = buildStrategyMetadata();
+}
 
 export async function runStrategy({ strategy, ...context }) {
   const entry = strategyRegistry[strategy];

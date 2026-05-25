@@ -1,4 +1,4 @@
-import { defaultSettings, mergeSettings } from './defaults.mjs';
+import { defaultSettings, mergeSettings } from 'js-deepresearch-engine';
 import { settingsFromEnv } from './env-overrides.mjs';
 
 const SETTINGS_KEY = 'app';

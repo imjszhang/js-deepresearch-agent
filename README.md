@@ -150,18 +150,24 @@ Do not commit API keys or local database files. `.env.example` documents common 
 
 ## Project Structure
 
+This repository is an npm workspace. The agent application lives at the root; the embeddable research runtime is in `packages/js-deepresearch-engine`.
+
 ```text
+packages/js-deepresearch-engine/
+  src/        Embeddable research engine (LLM, search, strategies, runner)
+  tests/      Engine unit tests
+
 src/
   api/        Express app and HTTP routes
-  config/     Default settings and persistence
+  config/     Env loading and SQLite-backed settings persistence
   jobs/       Research job orchestration
-  llm/        LLM provider adapters
-  research/   Research strategies and report building
-  search/     Search engine adapters
   storage/    SQLite repositories and migrations
+  cli.mjs     CLI entry point
 web/          Vite frontend
-tests/        Node test suite
+tests/        Agent integration tests
 ```
+
+After `npm install`, the agent links the local engine package via `workspace:*`. Changes to the engine are picked up without publishing to npm.
 
 ## Git Hygiene
 

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { mergeSettings } from '../src/config/defaults.mjs';
+import { mergeSettings } from 'js-deepresearch-engine';
 
 describe('settings defaults', () => {
   it('normalizes legacy SearXNG URL setting to a generic search base URL', () => {

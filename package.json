@@ -7,12 +7,15 @@
     "js-deepresearch-agent": "src/cli.mjs",
     "jdr": "src/cli.mjs"
   },
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "server": "node src/server.mjs",
     "build": "vite build",
     "preview": "node src/server.mjs",
-    "test": "node --test tests/*.test.mjs",
+    "test": "npm run test -w js-deepresearch-engine && node --test tests/*.test.mjs",
     "test:watch": "node --test --watch tests/*.test.mjs",
     "lint": "eslint ."
   },
@@ -37,6 +40,7 @@
     "LICENSE"
   ],
   "dependencies": {
+    "js-deepresearch-engine": "workspace:*",
     "better-sqlite3": "^12.10.0",
     "dompurify": "^3.4.5",
     "express": "^5.2.1",

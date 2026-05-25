@@ -1,4 +1,4 @@
-import { parseJsEyesSkills } from '../search/engines/js-eyes.mjs';
+import { parseJsEyesSkills } from 'js-deepresearch-engine';
 
 export function settingsFromEnv(env = process.env) {
   function readEnv(name) {

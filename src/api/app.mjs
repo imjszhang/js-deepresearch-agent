@@ -1,9 +1,11 @@
 import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { providerMetadata } from '../llm/provider-factory.mjs';
-import { strategyMetadata } from '../research/strategies.mjs';
-import { searchEngineMetadata } from '../search/search-factory.mjs';
+import {
+  providerMetadata,
+  searchEngineMetadata,
+  strategyMetadata,
+} from 'js-deepresearch-engine';
 import { createServices } from '../bootstrap.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

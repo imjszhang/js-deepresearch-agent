@@ -1,6 +1,5 @@
 import crypto from 'node:crypto';
-import { ResearchRunner } from '../research/research-runner.mjs';
-import { saveResearchToWorkDir } from '../research/work-output.mjs';
+import { ResearchRunner, saveResearchToWorkDir } from 'js-deepresearch-engine';
 
 export class JobRunner {
   constructor({ settingsStore, researchRepository, logRepository, sourceRepository, eventBus }) {

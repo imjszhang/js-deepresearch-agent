@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { ResearchRunner } from '../src/research/research-runner.mjs';
-import { runStrategy, strategyMetadata } from '../src/research/strategies.mjs';
+import { ResearchRunner, runStrategy, strategyMetadata } from '../src/index.mjs';
 
 describe('ResearchRunner', () => {
   it('runs rapid research with injected LLM and search adapters', async () => {

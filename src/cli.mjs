@@ -4,8 +4,7 @@ import fs from 'node:fs';
 import { createServices } from './bootstrap.mjs';
 import { createApp } from './api/app.mjs';
 import { getDb } from './storage/db.mjs';
-import { ResearchRunner } from './research/research-runner.mjs';
-import { saveResearchToWorkDir } from './research/work-output.mjs';
+import { ResearchRunner, saveResearchToWorkDir } from 'js-deepresearch-engine';
 import { formatHistory, getDeepValue, parseArgs, setDeepValue } from './cli-utils.mjs';
 
 const services = createServices(getDb());
