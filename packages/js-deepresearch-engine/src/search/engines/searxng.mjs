@@ -1,6 +1,9 @@
 export class SearxngSearchEngine {
   constructor(config) {
     this.config = config;
+    this.capabilities = {
+      maxQuestionConcurrency: null,
+    };
   }
 
   async search(query, { signal } = {}) {

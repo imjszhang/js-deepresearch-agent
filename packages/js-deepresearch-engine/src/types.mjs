@@ -24,6 +24,7 @@
  * @property {number} [jsEyesMaxPages]
  * @property {number} [jsEyesTimeoutMs]
  * @property {Record<string, unknown>} [jsEyesArgs]
+ * @property {Record<string, unknown>} [options]
  */
 
 /**

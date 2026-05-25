@@ -5,6 +5,7 @@
 > 类型：架构设计 / 功能实现 / 问题排查
 > 来源：Cursor Agent 对话
 > 更新：2026-05-25 — 补充多 Skill 串行查询与结果合并
+> 更新：2026-05-26 — **架构已被统一 facade 取代**，详见 [`journal/2026-05-26/js-eyes-search-decoupling.md`](../2026-05-26/js-eyes-search-decoupling.md) 与 [`js-eyes-cli-skill-flags.md`](../2026-05-26/js-eyes-cli-skill-flags.md)
 
 ---
 

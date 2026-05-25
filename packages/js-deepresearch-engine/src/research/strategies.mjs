@@ -1,5 +1,6 @@
 import { formatSourcesForQuestionContext, generateQuestions } from './question-generator.mjs';
 import { searchQuestions } from './search-executor.mjs';
+import { resolveSearchConcurrency } from '../search/search-capabilities.mjs';
 
 const strategyRegistry = {
   rapid: {
@@ -94,7 +95,7 @@ export async function runStrategy({ strategy, ...context }) {
 
 async function runRapid({ query, settings, llm, search, signal, emit }) {
   const followUpCount = Math.min(getQuestionCount(settings), 3);
-  const concurrency = getConcurrency(settings, followUpCount + 1);
+  const concurrency = getConcurrency(settings, search, followUpCount + 1);
 
   emit('Generating rapid follow-up questions', 10);
   const followUps = await generateQuestions({
@@ -121,7 +122,7 @@ async function runRapid({ query, settings, llm, search, signal, emit }) {
 async function runSourceBased({ query, settings, llm, search, signal, emit }) {
   const iterations = getIterationCount(settings);
   const count = getQuestionCount(settings);
-  const concurrency = getConcurrency(settings, count + 1);
+  const concurrency = getConcurrency(settings, search, count + 1);
   const findings = [];
 
   for (let iteration = 1; iteration <= iterations; iteration += 1) {
@@ -158,7 +159,7 @@ async function runSourceBased({ query, settings, llm, search, signal, emit }) {
 async function runParallel({ query, settings, llm, search, signal, emit }) {
   const iterations = getIterationCount(settings);
   const count = getQuestionCount(settings);
-  const concurrency = getConcurrency(settings, count + 1);
+  const concurrency = getConcurrency(settings, search, count + 1);
   const findings = [];
 
   for (let iteration = 1; iteration <= iterations; iteration += 1) {
@@ -200,8 +201,8 @@ function getQuestionCount(settings) {
   return positiveInteger(settings.research?.questionsPerIteration, 3);
 }
 
-function getConcurrency(settings, fallback) {
-  return positiveInteger(settings.research?.concurrency, fallback);
+function getConcurrency(settings, search, fallback) {
+  return resolveSearchConcurrency(search, settings, fallback);
 }
 
 function positiveInteger(value, fallback) {

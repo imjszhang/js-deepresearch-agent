@@ -32,3 +32,5 @@ export {
   resolveJsEyesSkills,
   resolveSpawnTarget,
 } from './search/engines/js-eyes.mjs';
+export { normalizeSearchConfig } from './search/normalize-search-config.mjs';
+export { resolveSearchConcurrency } from './search/search-capabilities.mjs';

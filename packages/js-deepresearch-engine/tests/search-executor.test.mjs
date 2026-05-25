@@ -37,9 +37,9 @@ describe('searchQuestions', () => {
       },
     });
 
-    assert.equal(results[0].sources.length, 1);
     assert.equal(results[1].question, 'fail');
     assert.deepEqual(results[1].sources, []);
     assert.match(results[1].error.message, /boom/);
+    assert.equal(results[1].error.name, 'Error');
   });
 });

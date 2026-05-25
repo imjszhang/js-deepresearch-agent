@@ -5,7 +5,13 @@ import { createServices } from './bootstrap.mjs';
 import { createApp } from './api/app.mjs';
 import { getDb } from './storage/db.mjs';
 import { ResearchRunner, saveResearchToWorkDir } from 'js-deepresearch-engine';
-import { formatHistory, getDeepValue, parseArgs, setDeepValue } from './cli-utils.mjs';
+import {
+  applyResearchFlags,
+  formatHistory,
+  getDeepValue,
+  parseArgs,
+  setDeepValue,
+} from './cli-utils.mjs';
 
 const services = createServices(getDb());
 
@@ -150,29 +156,7 @@ function serveCommand(argv) {
 }
 
 function settingsFromFlags(flags) {
-  const settings = services.settingsStore.get();
-  const mappings = {
-    provider: 'llm.provider',
-    model: 'llm.model',
-    'base-url': 'llm.baseUrl',
-    'api-key': 'llm.apiKey',
-    search: 'search.engine',
-    'search-base-url': 'search.baseUrl',
-    'search-api-key': 'search.apiKey',
-    'searxng-url': 'search.baseUrl',
-    strategy: 'research.strategy',
-    'work-dir': 'research.workDir',
-    questions: 'research.questionsPerIteration',
-    iterations: 'research.iterations',
-    concurrency: 'research.concurrency',
-  };
-
-  for (const [flag, key] of Object.entries(mappings)) {
-    if (flags[flag] !== undefined) {
-      setDeepValue(settings, key, flags[flag]);
-    }
-  }
-  return settings;
+  return applyResearchFlags(services.settingsStore.get(), flags);
 }
 
 function cryptoRandomId() {
@@ -184,7 +168,7 @@ function printHelp() {
 js-deepresearch-agent
 
 Commands:
-  research "query" [--search-base-url http://127.0.0.1:8080] [--strategy source-based|rapid|parallel] [--iterations 2] [--questions 3] [--concurrency 2] [--work-dir work_dir] [--output report.md] [--json] [--no-save] [--no-work-dir]
+  research "query" [--search js-eyes|searxng] [--js-eyes-skill skillA,skillB] [--js-eyes-server-url ws://localhost:18080] [--search-base-url http://127.0.0.1:8080] [--strategy source-based|rapid|parallel] [--iterations 2] [--questions 3] [--concurrency 2] [--work-dir work_dir] [--output report.md] [--json] [--no-save] [--no-work-dir]
   config get [key]
   config set <key> <value>
   history [list]

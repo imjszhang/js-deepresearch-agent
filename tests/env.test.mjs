@@ -72,6 +72,8 @@ EXISTING=from-file
     assert.equal(overrides.search.jsEyesServerUrl, 'ws://127.0.0.1:18080');
     assert.equal(overrides.search.jsEyesMaxPages, 3);
     assert.equal(overrides.search.jsEyesTimeoutMs, 45000);
+    assert.equal(overrides.search.options.jsEyesCli, 'custom-js-eyes');
+    assert.deepEqual(overrides.search.options.jsEyesSkills, ['js-xiaohongshu-ops-skill']);
   });
 
   it('maps comma-separated JS Eyes skills to an array', () => {

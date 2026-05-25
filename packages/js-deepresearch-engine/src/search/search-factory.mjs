@@ -1,5 +1,6 @@
 import { JsEyesCliSearchEngine } from './engines/js-eyes.mjs';
 import { SearxngSearchEngine } from './engines/searxng.mjs';
+import { normalizeSearchConfig } from './normalize-search-config.mjs';
 
 const searchEngines = new Map();
 
@@ -67,6 +68,7 @@ registerSearchEngine('js-eyes', {
     label: 'JS Eyes',
     requiresBrowser: true,
     supportsServerUrl: true,
+    maxQuestionConcurrency: 1,
   },
-  create: (config) => new JsEyesCliSearchEngine(config),
+  create: (config) => new JsEyesCliSearchEngine(normalizeSearchConfig(config)),
 });

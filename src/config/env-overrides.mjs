@@ -1,4 +1,4 @@
-import { parseJsEyesSkills } from 'js-deepresearch-engine';
+import { parseJsEyesSkills, normalizeSearchConfig } from 'js-deepresearch-engine';
 
 export function settingsFromEnv(env = process.env) {
   function readEnv(name) {
@@ -92,7 +92,7 @@ export function settingsFromEnv(env = process.env) {
 
   return {
     ...(Object.keys(llm).length ? { llm } : {}),
-    ...(Object.keys(search).length ? { search } : {}),
+    ...(Object.keys(search).length ? { search: normalizeSearchConfig(search) } : {}),
     ...(Object.keys(research).length ? { research } : {}),
   };
 }

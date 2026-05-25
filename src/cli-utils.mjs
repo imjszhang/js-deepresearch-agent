@@ -1,3 +1,5 @@
+import { normalizeSearchConfig, parseJsEyesSkills } from 'js-deepresearch-engine';
+
 export function parseArgs(argv) {
   const args = [];
   const flags = {};
@@ -45,6 +47,48 @@ export function formatHistory(records) {
     new Date(record.createdAt).toLocaleString(),
     record.query,
   ].join('  ')).join('\n');
+}
+
+export function applyResearchFlags(settings, flags) {
+  const mappings = {
+    provider: 'llm.provider',
+    model: 'llm.model',
+    'base-url': 'llm.baseUrl',
+    'api-key': 'llm.apiKey',
+    search: 'search.engine',
+    'search-base-url': 'search.baseUrl',
+    'search-api-key': 'search.apiKey',
+    'searxng-url': 'search.baseUrl',
+    strategy: 'research.strategy',
+    'work-dir': 'research.workDir',
+    questions: 'research.questionsPerIteration',
+    iterations: 'research.iterations',
+    concurrency: 'research.concurrency',
+    'js-eyes-cli': 'search.jsEyesCli',
+    'js-eyes-server-url': 'search.jsEyesServerUrl',
+    'js-eyes-max-pages': 'search.jsEyesMaxPages',
+    'js-eyes-timeout-ms': 'search.jsEyesTimeoutMs',
+  };
+
+  for (const [flag, key] of Object.entries(mappings)) {
+    if (flags[flag] !== undefined) {
+      setDeepValue(settings, key, flags[flag]);
+    }
+  }
+
+  const jsEyesSkillValue = flags['js-eyes-skill'] ?? flags['js-eyes-skills'];
+  if (jsEyesSkillValue !== undefined) {
+    const jsEyesSkills = parseJsEyesSkills(jsEyesSkillValue);
+    settings.search ||= {};
+    settings.search.jsEyesSkills = jsEyesSkills;
+    settings.search.jsEyesSkill = jsEyesSkills[0];
+  }
+
+  if (settings.search) {
+    settings.search = normalizeSearchConfig(settings.search);
+  }
+
+  return settings;
 }
 
 function coerceValue(value) {

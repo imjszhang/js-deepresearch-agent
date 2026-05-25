@@ -30,7 +30,7 @@ export async function searchQuestions({
       try {
         results[index] = await searchQuestion({ question, search, signal });
       } catch (error) {
-        results[index] = { question, sources: [], error };
+        results[index] = { question, sources: [], error: serializeSearchError(error) };
       } finally {
         completed += 1;
         onProgress({ question, completed, total: uniqueQuestions.length });
@@ -40,6 +40,14 @@ export async function searchQuestions({
 
   await Promise.all(Array.from({ length: maxConcurrency }, () => worker()));
   return results;
+}
+
+function serializeSearchError(error) {
+  if (!error) return null;
+  return {
+    name: error.name,
+    message: error.message,
+  };
 }
 
 function uniqueNonEmptyStrings(values) {

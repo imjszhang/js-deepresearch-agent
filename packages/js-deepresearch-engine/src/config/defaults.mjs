@@ -1,3 +1,5 @@
+import { normalizeSearchConfig } from '../search/normalize-search-config.mjs';
+
 export const defaultSettings = Object.freeze({
   llm: {
     provider: 'openai-compatible',
@@ -22,6 +24,7 @@ export const defaultSettings = Object.freeze({
     jsEyesMaxPages: 1,
     jsEyesTimeoutMs: 120000,
     jsEyesArgs: {},
+    options: {},
   },
   research: {
     strategy: 'source-based',
@@ -39,9 +42,12 @@ export function mergeSettings(overrides = {}) {
   }
   delete searchOverrides.searxngUrl;
 
-  return {
+  const merged = {
     llm: { ...defaultSettings.llm, ...(overrides.llm || {}) },
     search: { ...defaultSettings.search, ...searchOverrides },
     research: { ...defaultSettings.research, ...(overrides.research || {}) },
   };
+
+  merged.search = normalizeSearchConfig(merged.search);
+  return merged;
 }

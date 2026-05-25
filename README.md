@@ -61,6 +61,12 @@ npm exec jdr -- research "Compare SearXNG and Brave Search APIs" \
   --iterations 2 \
   --questions 3 \
   --concurrency 2
+
+# Override JS Eyes skills for one run without editing .env
+npm exec jdr -- research "openclaw" \
+  --search js-eyes \
+  --js-eyes-skill js-x-ops-skill,js-zhihu-ops-skill \
+  --strategy rapid
 ```
 
 ## Configuration
@@ -81,7 +87,13 @@ SearXNG is the default search adapter. JS Eyes is also available as a browser-ba
 
 ### JS Eyes Search Provider
 
-Set `SEARCH_ENGINE=js-eyes` to run searches through an external JS Eyes skill instead of SearXNG. This project treats JS Eyes as a productized local dependency: it calls the `js-eyes` CLI, reads JSON from stdout, and normalizes the returned items into research sources. It does not install skills, start the JS Eyes server, install browser extensions, or manage site login.
+Set `SEARCH_ENGINE=js-eyes` to run searches through the JS Eyes unified search facade instead of SearXNG. Deep research calls:
+
+```bash
+js-eyes search "query" --skills js-x-ops-skill --max-results 8 --max-pages 1 --server ws://localhost:18080 --json
+```
+
+The provider reads unified `items[]` from stdout and maps them into research sources. Platform-specific CLI flags, browser tab orchestration, and payload normalization live in js-eyes—not in deepresearch.
 
 Before using this provider:
 
@@ -108,7 +120,13 @@ To search multiple sites in one research run, provide comma-separated skill IDs:
 JS_EYES_SKILL=js-zhihu-ops-skill,js-xiaohongshu-ops-skill
 ```
 
-Each configured skill is queried serially through the JS Eyes CLI. Results are interleaved across skills, deduplicated by URL, and capped by the global `maxResults` setting. If one skill fails, the provider returns results from the skills that succeeded; the search only fails when every configured skill fails. Each skill uses the full `JS_EYES_TIMEOUT_MS` budget independently, so two skills can take up to twice the configured timeout. Enable and log in to each target site separately, for example `js-eyes skills enable js-zhihu-ops-skill` and `js-eyes skills enable js-xiaohongshu-ops-skill`.
+Or pass skills only for the current CLI run:
+
+```bash
+npm exec jdr -- research "openclaw" --search js-eyes --js-eyes-skill js-x-ops-skill,js-zhihu-ops-skill
+```
+
+Each configured skill is queried serially through the unified JS Eyes search command. Results are interleaved across skills, deduplicated by URL, and capped by the global `maxResults` setting. If one skill fails, the provider returns results from the skills that succeeded; the search only fails when every configured skill fails. Browser-backed providers automatically cap question concurrency to 1.
 
 For Xiaohongshu-only search, set `JS_EYES_SKILL=js-xiaohongshu-ops-skill`. On Linux and macOS, leave `JS_EYES_CLI=js-eyes` when the CLI is on `PATH`. On Windows, the provider resolves npm global shims such as `js-eyes.cmd` automatically; set `JS_EYES_CLI` to an absolute path only when the CLI is installed outside `PATH`. Prefer `ws://localhost:18080` over `127.0.0.1` if your local JS Eyes server binds to localhost. Common failures usually mean the CLI is not on `PATH`, the skill is not enabled, the server or extension is disconnected, the site login expired, policy/egress blocked navigation, or the target site triggered a risk check. Use `js-eyes doctor --json` and the JS Eyes skill records for diagnosis.
 

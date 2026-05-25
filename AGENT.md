@@ -72,6 +72,12 @@ npm exec jdr -- research "Explain the current state of local-first AI research"
 | `--search-base-url` | `search.baseUrl` | SearXNG 等服务地址 |
 | `--searxng-url` | `search.baseUrl` | `--search-base-url` 别名 |
 | `--search-api-key` | `search.apiKey` | 搜索 API Key |
+| `--js-eyes-skill` | `search.jsEyesSkills` | 单次运行指定 JS Eyes skill，逗号分隔多 skill |
+| `--js-eyes-skills` | `search.jsEyesSkills` | `--js-eyes-skill` 别名 |
+| `--js-eyes-cli` | `search.jsEyesCli` | JS Eyes CLI 路径或命令名 |
+| `--js-eyes-server-url` | `search.jsEyesServerUrl` | JS Eyes WebSocket 地址 |
+| `--js-eyes-max-pages` | `search.jsEyesMaxPages` | JS Eyes 搜索页数 |
+| `--js-eyes-timeout-ms` | `search.jsEyesTimeoutMs` | JS Eyes 单次搜索超时（毫秒） |
 | `--strategy` | `research.strategy` | `source-based` \| `rapid` \| `parallel` |
 | `--iterations` | `research.iterations` | 迭代轮数 |
 | `--questions` | `research.questionsPerIteration` | 每轮生成问题数 |
@@ -95,6 +101,13 @@ npm exec jdr -- research "Compare SearXNG and Brave Search APIs" \
   --questions 3 \
   --concurrency 2 \
   --output report.md
+
+# 单次运行临时指定 JS Eyes skill（不写入 .env / SQLite）
+npm exec jdr -- research "openclaw" \
+  --search js-eyes \
+  --js-eyes-skill js-x-ops-skill,js-zhihu-ops-skill \
+  --js-eyes-server-url ws://localhost:18080 \
+  --strategy rapid
 ```
 
 ### 输出行为
@@ -279,7 +292,15 @@ Agent 选型建议：
 
 ### 搜索：JS Eyes（浏览器技能）
 
-设置 `SEARCH_ENGINE=js-eyes`。本项目**不**安装 skill、不启 server、不管理登录；仅调用 `js-eyes` CLI。
+设置 `SEARCH_ENGINE=js-eyes`。本项目**不**安装 skill、不启 server、不管理登录；通过 `js-eyes search` 统一 facade 调用已启用的 skill。
+
+Deep research 实际调用形态：
+
+```bash
+js-eyes search "query" --skills js-x-ops-skill --max-results 8 --max-pages 1 --server ws://localhost:18080 --json
+```
+
+统一输出为 `{ ok, items: [{ title, url, snippet, platform, engine }] }`。平台差异（X 导航、参数映射、结果归一化）由 js-eyes 处理；deepresearch 只消费 `items[]`。
 
 前置检查清单：
 
@@ -292,10 +313,14 @@ Agent 选型建议：
 多站点示例：
 
 ```bash
+# .env 持久配置
 JS_EYES_SKILL=js-zhihu-ops-skill,js-xiaohongshu-ops-skill
+
+# 或单次 CLI 覆盖（推荐临时实验）
+npm exec jdr -- research "query" --search js-eyes --js-eyes-skill js-x-ops-skill,js-zhihu-ops-skill
 ```
 
-各 skill 串行查询；单 skill 失败时仍返回其他 skill 结果；全部失败才报错。
+各 skill 串行查询；单 skill 失败时仍返回其他 skill 结果；全部失败才报错。浏览器-backed skill 会自动将问题并发限制为 1。
 
 ---
 

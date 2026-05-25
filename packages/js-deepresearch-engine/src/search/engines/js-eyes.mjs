@@ -1,10 +1,10 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { DEFAULT_SEARCH_CAPABILITIES } from '../search-capabilities.mjs';
 
 const DEFAULT_CLI = 'js-eyes';
 const DEFAULT_SKILL = 'js-zhihu-ops-skill';
-const DEFAULT_COMMAND = 'search';
 const DEFAULT_MAX_PAGES = 1;
 const DEFAULT_TIMEOUT_MS = 120000;
 const MAX_OUTPUT_CHARS = 1024 * 1024;
@@ -41,44 +41,18 @@ export class JsEyesCliSearchEngine {
   constructor(config = {}, options = {}) {
     this.config = config;
     this.spawn = options.spawn || spawn;
+    this.capabilities = {
+      ...DEFAULT_SEARCH_CAPABILITIES,
+      maxQuestionConcurrency: 1,
+      ...(options.capabilities || {}),
+    };
   }
 
   async search(query, { signal } = {}) {
     const trimmedQuery = String(query || '').trim();
     if (!trimmedQuery) return [];
 
-    const skills = resolveJsEyesSkills(this.config);
-    const batches = [];
-    const failures = [];
-
-    for (const skill of skills) {
-      if (signal?.aborted) {
-        throw abortError();
-      }
-
-      try {
-        const sources = await this.runSkillSearch(trimmedQuery, skill, { signal });
-        batches.push(sources);
-      } catch (error) {
-        if (error?.name === 'AbortError') {
-          throw error;
-        }
-        failures.push({ skill, error });
-      }
-    }
-
-    if (batches.length === 0) {
-      throw aggregateSkillErrors(failures);
-    }
-
-    return mergeSkillResults(
-      batches,
-      normalizePositiveNumber(this.config.maxResults, 8),
-    );
-  }
-
-  async runSkillSearch(query, skill, { signal } = {}) {
-    const { command, args } = this.buildCommand(query, skill);
+    const { command, args } = this.buildCommand(trimmedQuery);
     const spawnTarget = resolveSpawnTarget(command, args);
     const result = await runCommand({
       command: spawnTarget.command,
@@ -90,21 +64,27 @@ export class JsEyesCliSearchEngine {
 
     const payload = parseJsonOutput(result.stdout, result.stderr);
     if (!payload || payload.ok === false) {
-      const detail = payload?.error?.message || payload?.error || result.stderr || 'Unknown JS Eyes failure';
-      throw new Error(`JS Eyes search failed for ${skill}: ${detail}. Run "js-eyes doctor --json" for diagnostics.`);
+      throw new Error(formatPayloadError(payload, result));
     }
 
-    return normalizeSources(payload, skill, this.config);
+    return normalizeUnifiedItems(payload, this.config);
   }
 
-  buildCommand(query, skill) {
+  buildCommand(query) {
     const command = resolveCliCommand(this.config.jsEyesCli || DEFAULT_CLI);
-    const skillId = String(skill || DEFAULT_SKILL);
-    const skillCommand = String(this.config.jsEyesCommand || DEFAULT_COMMAND);
+    const skills = resolveJsEyesSkills(this.config);
     const maxResults = normalizePositiveNumber(this.config.maxResults, 8);
     const maxPages = normalizePositiveNumber(this.config.jsEyesMaxPages, DEFAULT_MAX_PAGES);
 
-    const args = ['skill', 'run', skillId, skillCommand, query, '--limit', String(maxResults), '--quiet'];
+    const args = [
+      'search',
+      query,
+      '--skills',
+      skills.join(','),
+      '--max-results',
+      String(maxResults),
+      '--json',
+    ];
 
     if (maxPages) {
       args.push('--max-pages', String(maxPages));
@@ -112,7 +92,7 @@ export class JsEyesCliSearchEngine {
 
     const serverUrl = this.config.jsEyesServerUrl;
     if (serverUrl) {
-      args.push('--ws-endpoint', String(serverUrl));
+      args.push('--server', String(serverUrl));
     }
 
     const timeoutMs = normalizePositiveNumber(this.config.jsEyesTimeoutMs, DEFAULT_TIMEOUT_MS);
@@ -167,11 +147,38 @@ export function mergeSkillResults(batches, maxResults) {
   return merged;
 }
 
-function aggregateSkillErrors(failures) {
-  const details = failures
-    .map(({ skill, error }) => `${skill}: ${error.message}`)
-    .join('; ');
-  return new Error(`JS Eyes search failed for all skills: ${details}. Run "js-eyes doctor --json" for diagnostics.`);
+function normalizeUnifiedItems(payload, config = {}) {
+  return (Array.isArray(payload.items) ? payload.items : [])
+    .map((item) => ({
+      title: firstString(item.title, item.url, 'Untitled source'),
+      url: firstString(item.url, item.link, item.href),
+      snippet: firstString(item.snippet, item.excerpt, item.desc, item.description, item.content),
+      engine: firstString(item.engine, item.platform ? `js-eyes:${item.platform}` : 'js-eyes'),
+    }))
+    .filter((item) => item.url || item.snippet)
+    .slice(0, normalizePositiveNumber(config.maxResults, 8));
+}
+
+function formatPayloadError(payload, result) {
+  const detail = describePayloadError(payload)
+    || summarize(result.stderr)
+    || 'Unknown JS Eyes failure';
+  return `JS Eyes search failed: ${detail}. Run "js-eyes doctor --json" for diagnostics.`;
+}
+
+function describePayloadError(payload) {
+  const err = payload?.error;
+  if (typeof err === 'string') return err;
+  if (!err || typeof err !== 'object') return '';
+
+  const parts = [
+    err.message,
+    err.code,
+    err.detail?.reason,
+    err.detail?.hint,
+  ].filter(Boolean);
+
+  return parts.join(': ');
 }
 
 function runCommand({ command, args, signal, timeoutMs, spawnImpl }) {
@@ -263,57 +270,6 @@ function parseJsonOutput(stdout, stderr) {
   } catch (error) {
     throw new Error(`JS Eyes search returned invalid JSON: ${error.message}. stdout=${summarize(text)}`, { cause: error });
   }
-}
-
-function normalizeSources(payload, skill, config = {}) {
-  return extractItems(payload)
-    .map((item) => normalizeSource(item, skill))
-    .filter((item) => item.url || item.snippet)
-    .slice(0, normalizePositiveNumber(config.maxResults, 8));
-}
-
-function extractItems(payload) {
-  const candidates = [
-    payload?.result?.data?.items,
-    payload?.result?.notes,
-    payload?.result?.items,
-    payload?.data?.items,
-    payload?.data?.notes,
-    payload?.items,
-    payload?.notes,
-  ];
-
-  for (const candidate of candidates) {
-    if (Array.isArray(candidate)) return candidate;
-  }
-
-  return [];
-}
-
-function normalizeSource(item, skill) {
-  const title = firstString(item.title, item.name, item.url, 'Untitled source');
-  const url = firstString(item.url, item.link, item.href);
-  const body = firstString(item.excerpt, item.snippet, item.desc, item.description, item.content);
-  const extras = [
-    item.author ? `Author: ${item.author}` : '',
-    item.type ? `Type: ${item.type}` : '',
-    item.likeCount != null ? `Likes: ${item.likeCount}` : '',
-  ].filter(Boolean);
-  const snippet = [body, ...extras].filter(Boolean).join('\n');
-
-  return {
-    title,
-    url,
-    snippet,
-    engine: engineLabel(skill),
-  };
-}
-
-function engineLabel(skill) {
-  const value = String(skill || DEFAULT_SKILL);
-  if (value.includes('zhihu')) return 'js-eyes:zhihu';
-  if (value.includes('xiaohongshu') || value.includes('xhs')) return 'js-eyes:xhs';
-  return `js-eyes:${value}`;
 }
 
 export function resolveCliCommand(command, options = {}) {
