@@ -1,4 +1,6 @@
-import { normalizeSearchConfig, parseProviderSkills } from 'js-deepresearch-engine';
+import { normalizeSearchConfig } from 'js-deepresearch-engine';
+import { parseProviderSkills } from './search-providers/js-eyes/provider-skills.mjs';
+import { normalizeJsEyesSearchConfig } from './search-providers/js-eyes/normalize-js-eyes-search-config.mjs';
 
 export function parseArgs(argv) {
   const args = [];
@@ -110,7 +112,7 @@ export function applyResearchFlags(settings, flags) {
   applyProviderOverrides(settings, flags);
 
   if (settings.search) {
-    settings.search = normalizeSearchConfig(settings.search);
+    settings.search = normalizeJsEyesSearchConfig(normalizeSearchConfig(settings.search));
   }
 
   return settings;

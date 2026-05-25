@@ -128,9 +128,8 @@ Reserved metadata entries exist for future adapters (`anthropic`, `google`, `ope
 ## Built-in Search Engines
 
 - `searxng` — SearXNG JSON API
-- `js-eyes` — browser-backed search via the external `js-eyes` CLI
 
-Using `js-eyes` requires the `js-eyes` CLI, a running JS Eyes server, and enabled skills. The engine only invokes the CLI and normalizes results.
+Additional search engines can be registered at runtime via `registerSearchEngine()`. The js-deepresearch-agent app registers `js-eyes` locally from `src/search-providers/`; that adapter is **not** bundled in this npm package.
 
 ## Work Directory Artifacts
 
@@ -157,7 +156,7 @@ const artifacts = saveResearchToWorkDir({
 | `createSearchEngine`, `searchEngineMetadata`, `registerSearchEngine` | Search registry |
 | `defaultSettings`, `mergeSettings` | Settings schema |
 | `saveResearchToWorkDir`, `saveResearchArtifacts`, `createWorkSessionDir` | Artifact writers |
-| `parseJsEyesSkills` | Parse comma-separated JS Eyes skill IDs |
+| `normalizeSearchConfig`, `resolveSearchConcurrency` | Generic search config helpers |
 
 ## Requirements
 

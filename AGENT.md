@@ -297,7 +297,7 @@ Agent 选型建议：
 
 ### 搜索：JS Eyes（浏览器技能）
 
-设置 `SEARCH_ENGINE=js-eyes`。本项目**不**安装 skill、不启 server、不管理登录；通过本地 provider adapter 调用 `js-eyes` CLI。
+设置 `SEARCH_ENGINE=js-eyes`。本项目**不**安装 skill、不启 server、不管理登录；通过 **app 层本地 provider** 调用 `js-eyes` CLI。JS Eyes **不属于** `js-deepresearch-engine` npm 包，而是在 [`src/search-providers/register-local-search-engines.mjs`](../../src/search-providers/register-local-search-engines.mjs) 启动时注册。
 
 配置归一化：`JS_EYES_*` / `--js-eyes-*` / `--search-*` 都会映射到 `search.provider`。Driver 选择规则：
 
@@ -307,7 +307,7 @@ Agent 选型建议：
 | `skill-run` | 全部 skill 走 `js-eyes skill run <id> search ...` |
 | `auto`（默认） | 若任一 skill 在本地 registry 标记为 `skill-run`，则走 skill-run；否则 unified |
 
-本地 skill registry（`packages/js-deepresearch-engine/src/search/engines/js-eyes/skill-registry.mjs`）用于处理 unified facade 不兼容的 skill，**无需修改 js-eyes 仓库**。例如 Reddit：
+本地 skill registry（[`src/search-providers/js-eyes/skill-registry.mjs`](../../src/search-providers/js-eyes/skill-registry.mjs)）用于处理 unified facade 不兼容的 skill，**无需修改 js-eyes 仓库**。新增特殊 skill fallback 时只改 app 层 registry，不改 npm 包。例如 Reddit：
 
 ```bash
 js-eyes skill run js-reddit-ops-skill search "query" --limit 8 --ws-endpoint ws://localhost:18080 --read-mode api --json

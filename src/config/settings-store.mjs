@@ -1,4 +1,4 @@
-import { defaultSettings, mergeSettings } from 'js-deepresearch-engine';
+import { defaultAppSettings, mergeAppSettings } from './app-settings.mjs';
 import { settingsFromEnv } from './env-overrides.mjs';
 
 const SETTINGS_KEY = 'app';
@@ -20,11 +20,11 @@ export class SettingsStore {
       }
     }
 
-    return mergeSettings(this.withEnvOverrides(stored));
+    return mergeAppSettings(this.withEnvOverrides(stored));
   }
 
   save(settings) {
-    const merged = mergeSettings(settings);
+    const merged = mergeAppSettings(settings);
     const now = new Date().toISOString();
     this.db.prepare(`
       INSERT INTO settings (key, value, updated_at)
@@ -36,7 +36,7 @@ export class SettingsStore {
 
   snapshot(overrides = {}) {
     const current = this.get();
-    return mergeSettings({
+    return mergeAppSettings({
       ...current,
       ...overrides,
       llm: { ...current.llm, ...(overrides.llm || {}) },
@@ -46,7 +46,7 @@ export class SettingsStore {
   }
 
   reset() {
-    return this.save(defaultSettings);
+    return this.save(defaultAppSettings);
   }
 
   withEnvOverrides(stored = {}) {

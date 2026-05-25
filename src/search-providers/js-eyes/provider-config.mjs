@@ -1,4 +1,4 @@
-import { parseProviderSkills } from '../../provider-skills.mjs';
+import { parseProviderSkills } from './provider-skills.mjs';
 import {
   DEFAULT_CLI,
   DEFAULT_MAX_PAGES,

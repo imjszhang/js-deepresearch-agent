@@ -1,4 +1,3 @@
-import { JsEyesCliSearchEngine } from './engines/js-eyes.mjs';
 import { SearxngSearchEngine } from './engines/searxng.mjs';
 import { normalizeSearchConfig } from './normalize-search-config.mjs';
 
@@ -60,15 +59,5 @@ registerSearchEngine('searxng', {
     label: 'SearXNG',
     supportsBaseUrl: true,
   },
-  create: (config) => new SearxngSearchEngine(config),
-});
-
-registerSearchEngine('js-eyes', {
-  metadata: {
-    label: 'JS Eyes',
-    requiresBrowser: true,
-    supportsServerUrl: true,
-    maxQuestionConcurrency: 1,
-  },
-  create: (config) => new JsEyesCliSearchEngine(normalizeSearchConfig(config)),
+  create: (config) => new SearxngSearchEngine(normalizeSearchConfig(config)),
 });

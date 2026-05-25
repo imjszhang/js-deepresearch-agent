@@ -25,17 +25,5 @@ export {
   saveResearchArtifacts,
   saveResearchToWorkDir,
 } from './research/work-output.mjs';
-export {
-  mergeSkillResults,
-  parseJsEyesSkills,
-  parseProviderSkills,
-  resolveCliCommand,
-  resolveJsEyesSkills,
-  resolveProviderConfig,
-  resolveSpawnTarget,
-  getSkillProfile,
-  resolveDriverMode,
-  JS_EYES_SKILL_PROFILES,
-} from './search/engines/js-eyes.mjs';
 export { normalizeSearchConfig } from './search/normalize-search-config.mjs';
 export { resolveSearchConcurrency } from './search/search-capabilities.mjs';

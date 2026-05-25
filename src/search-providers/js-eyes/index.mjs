@@ -1,5 +1,4 @@
 import { spawn } from 'node:child_process';
-import { DEFAULT_SEARCH_CAPABILITIES } from '../../search-capabilities.mjs';
 import {
   formatPayloadError,
   parseJsonOutput,
@@ -20,7 +19,6 @@ export class JsEyesCliSearchEngine {
     this.config = config;
     this.spawn = options.spawn || spawn;
     this.capabilities = {
-      ...DEFAULT_SEARCH_CAPABILITIES,
       maxQuestionConcurrency: 1,
       ...(options.capabilities || {}),
     };

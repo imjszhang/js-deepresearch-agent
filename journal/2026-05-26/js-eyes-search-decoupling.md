@@ -15,7 +15,8 @@
 4. [实现要点（第一阶段）](#4-实现要点第一阶段)
 5. [验证与测试（第一阶段）](#5-验证与测试第一阶段)
 6. [本地解耦演化（第二阶段）](#6-本地解耦演化第二阶段)
-7. [后续演化](#7-后续演化)
+7. [从 npm 包移出 JS Eyes Adapter（第三阶段）](#7-从-npm-包移出-js-eyes-adapter第三阶段)
+8. [后续演化](#8-后续演化)
 
 ---
 
@@ -360,27 +361,83 @@ Reddit source-based 联调成功：14 条来源，产物在 `work_dir/source-bas
 
 ---
 
-## 7. 后续演化
+## 7. 从 npm 包移出 JS Eyes Adapter（第三阶段）
+
+### 7.1 动机
+
+本地 registry fallback 已证明 skill 差异可以在 deepresearch 侧消化，但实现仍位于 `packages/js-deepresearch-engine`。若发布 npm 包，JS Eyes CLI 适配、Reddit profile、Windows shim 解析都会被打进 embeddable runtime，与「通用 deep research 引擎 + 宿主 app 注入 provider」的边界冲突。
+
+### 7.2 新边界
+
+```mermaid
+flowchart LR
+  appCli["App CLI/API"] --> registerLocal["register-local-search-engines"]
+  registerLocal --> jsEyesLocal["src/search-providers/js-eyes"]
+  registerLocal --> engineRegistry["registerSearchEngine"]
+  runner["ResearchRunner"] --> factory["createSearchEngine"]
+  factory --> engineRegistry
+  engineRegistry --> jsEyesLocal
+  engineRegistry --> searxngPkg["package searxng adapter"]
+```
+
+| 层 | 职责 |
+| ---- | ---- |
+| `js-deepresearch-engine` npm 包 | `ResearchRunner`、registry、`searxng`、通用 `normalizeSearchConfig` |
+| app `src/search-providers/js-eyes/` | JS Eyes adapter、skill registry、legacy `JS_EYES_*` normalize |
+| app `src/config/app-settings.mjs` | `mergeAppSettings()` = package merge + JS Eyes normalize |
+
+### 7.3 关键文件
+
+| 文件 | 职责 |
+| ---- | ---- |
+| [`src/search-providers/js-eyes/`](../../src/search-providers/js-eyes/) | 完整 JS Eyes adapter（engine、drivers、registry、normalizer） |
+| [`src/search-providers/register-local-search-engines.mjs`](../../src/search-providers/register-local-search-engines.mjs) | 启动时 `registerSearchEngine('js-eyes', ...)` |
+| [`src/config/app-settings.mjs`](../../src/config/app-settings.mjs) | app 层 settings merge |
+| [`src/bootstrap.mjs`](../../src/bootstrap.mjs) | import 注册模块，CLI/API 共用 |
+
+从 npm 包移除：`engines/js-eyes/**`、`provider-skills.mjs`、内置 `registerSearchEngine('js-eyes')`、JS Eyes 相关 exports/defaults/types。
+
+### 7.4 验证
+
+```bash
+npm test
+```
+
+结果（2026-05-26）：
+
+| 项目 | 结果 |
+| ---- | ---- |
+| js-deepresearch-engine | 17/17 通过 |
+| js-deepresearch-agent app tests | 41/41 通过 |
+| **合计** | **58/58 通过** |
+
+新增 app 层测试：`tests/js-eyes-local-provider.test.mjs`、`tests/normalize-js-eyes-search-config.test.mjs`、`tests/local-search-registration.test.mjs`。
+
+---
+
+## 8. 后续演化
 
 | 方向 | 状态 | 说明 |
 | ---- | ---- | ---- |
 | 跨仓库 unified facade（X/知乎/小红书） | **已完成** | 第一阶段；X rapid 与 openclaw 联调通过 |
 | CLI 临时 skill 选择 | **已完成** | 见 [`js-eyes-cli-skill-flags.md`](./js-eyes-cli-skill-flags.md) |
 | 本地 registry + skill-run fallback | **已完成** | Reddit 不动 js-eyes 即可工作 |
-| `search.provider` 配置收敛 | **已完成** | legacy `jsEyes*` 仍可读 |
+| JS Eyes adapter 移出 npm 包 | **已完成** | app 层 `src/search-providers/js-eyes/` + 启动注册 |
+| `search.provider` 配置收敛 | **已完成** | legacy `jsEyes*` 仍可读（app 层 normalize） |
 | `--search-skills` 泛化 flag | **已完成** | 旧 `--js-eyes-*` / `JS_EYES_*` 兼容 |
 | 各 skill runTool 内嵌 `items[]` | 部分 | 当前由 unified-search 或 deepresearch normalizer attach |
 | contract 声明 `requiresSerialSearch` 等 | 待做 | 由 js-eyes 消费，减少 profile 硬编码 |
 | `source-based` 多轮 + Reddit 长跑 | 待做 | 验证子问题生成、串行超时估算 |
 | js-eyes 顶层 search 文档 | 待做 | 对外正式推荐 `js-eyes search` 而非 `skill run` |
 | deepresearch Web UI skill 选择 | 待做 | 目前仅 env / config / CLI |
-| 新增 skill fallback profile | 按需 | 在 `skill-registry.mjs` 追加条目，无需改 js-eyes |
+| 新增 skill fallback profile | 按需 | 在 app 层 `src/search-providers/js-eyes/skill-registry.mjs` 追加条目 |
 
 ---
 
-## 附：两阶段问题—思考—方案—执行对照
+## 附：三阶段问题—思考—方案—执行对照
 
 | 阶段 | 问题 | 思考 | 方案 | 执行 |
 | ---- | ---- | ---- | ---- | ---- |
 | **一** | deepresearch 按 X/知乎/小红书写分支，策略层反向依赖 js-eyes | Provider 应只消费稳定契约；平台差异属于 js-eyes 产品边界 | js-eyes 提供 `search` facade + 统一 `items[]`；deepresearch 改薄 adapter + 能力抽象 | 两侧代码、测试、文档；X openclaw rapid 跑通 |
 | **二** | Reddit unified facade 不兼容；改 js-eyes 成本高 | argv 差异可在 deepresearch 本地 registry 消化；仍只调 CLI | 模块拆分 + `search.provider` + skill-run fallback + 泛化 CLI flag | 53/53 测试通过；Reddit source-based 14 条来源 |
+| **三** | JS Eyes 实现仍在 npm 包内，embeddable runtime 边界不清 | provider 应由宿主 app 注入；包只保留 registry + 通用 adapter | 整包迁移 JS Eyes 到 `src/search-providers/`，启动时 register | 58/58 测试通过；npm 包不再 export JS Eyes API |

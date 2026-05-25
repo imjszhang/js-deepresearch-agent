@@ -83,11 +83,11 @@ Runtime settings are stored in the local SQLite database under `data/`. Values f
 - Research questions per iteration: `3`
 - Research concurrency: `2`
 
-SearXNG is the default search adapter. JS Eyes is also available as a browser-backed provider for sites that need an authenticated browser session. DuckDuckGo, Tavily, and Brave Search are represented in the adapter metadata for later implementation.
+SearXNG is the default search adapter in the embeddable `js-deepresearch-engine` package. **JS Eyes is an app-local provider** registered at startup from `src/search-providers/`—it is not bundled inside the npm package. DuckDuckGo, Tavily, and Brave Search are represented in the adapter metadata for later implementation.
 
-### JS Eyes Search Provider
+### JS Eyes Search Provider (App-Local)
 
-Set `SEARCH_ENGINE=js-eyes` to run searches through JS Eyes. Deep research normalizes legacy `JS_EYES_*` settings into `search.provider` and chooses a driver automatically:
+Set `SEARCH_ENGINE=js-eyes` to run searches through JS Eyes. The app registers this provider via [`src/search-providers/register-local-search-engines.mjs`](src/search-providers/register-local-search-engines.mjs). Legacy `JS_EYES_*` settings are normalized into `search.provider` by the app layer and the driver is chosen automatically:
 
 - **unified**: `js-eyes search "query" --skills ... --json` when the upstream facade supports the skill
 - **skill-run**: `js-eyes skill run <skillId> search "query" ...` for skills with local profiles (for example Reddit)
@@ -96,7 +96,7 @@ Set `SEARCH_ENGINE=js-eyes` to run searches through JS Eyes. Deep research norma
 js-eyes search "query" --skills js-x-ops-skill --max-results 8 --max-pages 1 --server ws://localhost:18080 --json
 ```
 
-The provider reads unified `items[]` (or raw skill payloads for skill-run fallback) and maps them into research sources. Skill-specific argv differences are handled by deepresearch's local skill registry—no js-eyes repo changes required for new fallback profiles.
+The provider reads unified `items[]` (or raw skill payloads for skill-run fallback) and maps them into research sources. Skill-specific argv differences are handled by the app-local skill registry at [`src/search-providers/js-eyes/skill-registry.mjs`](src/search-providers/js-eyes/skill-registry.mjs)—no js-eyes repo changes required for new fallback profiles.
 
 Before using this provider:
 
@@ -184,6 +184,7 @@ src/
   api/        Express app and HTTP routes
   config/     Env loading and SQLite-backed settings persistence
   jobs/       Research job orchestration
+  search-providers/  App-local search adapters (JS Eyes registry, skill profiles)
   storage/    SQLite repositories and migrations
   cli.mjs     CLI entry point
 web/          Vite frontend

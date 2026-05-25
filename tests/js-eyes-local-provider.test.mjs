@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { afterEach, describe, it } from 'node:test';
+import { resolveSearchConcurrency } from 'js-deepresearch-engine';
 import {
   JsEyesCliSearchEngine,
   mergeSkillResults,
@@ -13,8 +14,7 @@ import {
   resolveJsEyesSkills,
   resolveProviderConfig,
   resolveSpawnTarget,
-} from '../src/search/engines/js-eyes.mjs';
-import { resolveSearchConcurrency } from '../src/search/search-capabilities.mjs';
+} from '../src/search-providers/js-eyes/public.mjs';
 
 describe('JsEyesCliSearchEngine', () => {
   it('calls the unified js-eyes search facade and normalizes items', async () => {

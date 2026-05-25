@@ -16,27 +16,8 @@
  * @property {number} [maxResults]
  * @property {string} [language]
  * @property {boolean} [safeSearch]
- * @property {string} [jsEyesCli]
- * @property {string} [jsEyesSkill]
- * @property {string[]} [jsEyesSkills]
- * @property {string} [jsEyesCommand]
- * @property {string} [jsEyesServerUrl]
- * @property {number} [jsEyesMaxPages]
- * @property {number} [jsEyesTimeoutMs]
- * @property {Record<string, unknown>} [jsEyesArgs]
  * @property {Record<string, unknown>} [options]
- * @property {JsEyesProviderConfig} [provider]
- */
-
-/**
- * @typedef {Object} JsEyesProviderConfig
- * @property {string} [cli]
- * @property {'auto'|'unified'|'skill-run'} [driver]
- * @property {string} [serverUrl]
- * @property {number} [timeoutMs]
- * @property {number} [maxPages]
- * @property {string[]} [skills]
- * @property {Record<string, unknown>} [args]
+ * @property {Record<string, unknown>} [provider]
  */
 
 /**

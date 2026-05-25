@@ -1,3 +1,4 @@
+import './search-providers/register-local-search-engines.mjs';
 import { SettingsStore } from './config/settings-store.mjs';
 import { ResearchEventBus } from './jobs/event-bus.mjs';
 import { JobRunner } from './jobs/job-runner.mjs';
