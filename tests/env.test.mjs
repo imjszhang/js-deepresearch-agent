@@ -67,10 +67,32 @@ EXISTING=from-file
     assert.equal(overrides.search.engine, 'js-eyes');
     assert.equal(overrides.search.jsEyesCli, 'custom-js-eyes');
     assert.equal(overrides.search.jsEyesSkill, 'js-xiaohongshu-ops-skill');
+    assert.deepEqual(overrides.search.jsEyesSkills, ['js-xiaohongshu-ops-skill']);
     assert.equal(overrides.search.jsEyesCommand, 'search');
     assert.equal(overrides.search.jsEyesServerUrl, 'ws://127.0.0.1:18080');
     assert.equal(overrides.search.jsEyesMaxPages, 3);
     assert.equal(overrides.search.jsEyesTimeoutMs, 45000);
+  });
+
+  it('maps comma-separated JS Eyes skills to an array', () => {
+    const overrides = settingsFromEnv({
+      JS_EYES_SKILL: 'js-zhihu-ops-skill,js-xiaohongshu-ops-skill',
+    });
+
+    assert.equal(overrides.search.jsEyesSkill, 'js-zhihu-ops-skill');
+    assert.deepEqual(overrides.search.jsEyesSkills, [
+      'js-zhihu-ops-skill',
+      'js-xiaohongshu-ops-skill',
+    ]);
+  });
+
+  it('normalizes whitespace and duplicate JS Eyes skills', () => {
+    const overrides = settingsFromEnv({
+      JS_EYES_SKILL: ' a , a ; b ',
+    });
+
+    assert.deepEqual(overrides.search.jsEyesSkills, ['a', 'b']);
+    assert.equal(overrides.search.jsEyesSkill, 'a');
   });
 
   it('maps llm env vars to settings overrides', () => {

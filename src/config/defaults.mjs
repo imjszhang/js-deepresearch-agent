@@ -16,6 +16,7 @@ export const defaultSettings = Object.freeze({
     safeSearch: true,
     jsEyesCli: 'js-eyes',
     jsEyesSkill: 'js-zhihu-ops-skill',
+    jsEyesSkills: ['js-zhihu-ops-skill'],
     jsEyesCommand: 'search',
     jsEyesServerUrl: '',
     jsEyesMaxPages: 1,

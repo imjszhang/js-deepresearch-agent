@@ -4,6 +4,7 @@
 > 项目：js-deepresearch-agent
 > 类型：架构设计 / 功能实现 / 问题排查
 > 来源：Cursor Agent 对话
+> 更新：2026-05-25 — 补充多 Skill 串行查询与结果合并
 
 ---
 
@@ -13,8 +14,9 @@
 2. [分析过程](#2-分析过程)
 3. [方案设计](#3-方案设计)
 4. [实现要点](#4-实现要点)
-5. [验证与测试](#5-验证与测试)
-6. [后续演化](#6-后续演化)
+5. [多 Skill 支持（增量）](#5-多-skill-支持增量)
+6. [验证与测试](#6-验证与测试)
+7. [后续演化](#7-后续演化)
 
 ---
 
@@ -76,12 +78,15 @@ Skill CLI（如 `js-zhihu-ops-skill`、`js-xiaohongshu-ops-skill`）会把结果
 flowchart LR
   ResearchRunner["ResearchRunner"] --> SearchExecutor["searchQuestions"]
   SearchExecutor --> JsEyesProvider["JsEyesCliSearchEngine"]
-  JsEyesProvider -->|"spawn shell:false"| JsEyesCli["js-eyes CLI"]
-  JsEyesCli --> Skill["enabled skill search"]
-  Skill --> Server["JS Eyes server + extension"]
-  Server --> Site["Target website"]
-  Skill -->|"JSON stdout"| JsEyesProvider
-  JsEyesProvider --> Sources["normalized sources"]
+  JsEyesProvider -->|"串行 spawn shell:false"| JsEyesCli["js-eyes CLI"]
+  JsEyesCli --> SkillA["skill A search"]
+  JsEyesCli --> SkillB["skill B search"]
+  SkillA --> Server["JS Eyes server + extension"]
+  SkillB --> Server
+  Server --> Site["Target websites"]
+  SkillA -->|"JSON stdout"| Merge["mergeSkillResults"]
+  SkillB -->|"JSON stdout"| Merge
+  Merge --> Sources["normalized sources"]
 ```
 
 ### 关键决策
@@ -89,7 +94,9 @@ flowchart LR
 | 决策 | 选择 | 理由 |
 | ---- | ---- | ---- |
 | 集成方式 | 外部 CLI + JSON stdout | 边界清晰，不依赖 js-eyes 源码 |
-| 第一版 skill | 单 skill 单 command（默认知乎 `search`） | 最小可用，避免多站点聚合复杂度 |
+| Skill 配置 | 单 env 变量逗号分隔多 skill | 向后兼容 `JS_EYES_SKILL=js-zhihu-ops-skill`，无需新增 key |
+| 多 skill 编排 | 串行调用 + best-effort | 避免同一浏览器扩展并发争用；部分 skill 失败仍返回其余结果 |
+| 结果合并 | interleave + URL 去重 + 全局 cap | 多站点来源均衡，不做跨 skill 相关性排序 |
 | 健康检查 | 失败时提示跑 `doctor --json`，不每次预检 | 平衡可靠性与并发开销 |
 | Windows spawn | PATH 解析 `.cmd` + `cmd.exe /c` 包装 | Node 不能直接 spawn `.cmd` |
 | Unix spawn | PATH 查找可执行文件并检查 `X_OK` | 与 npm global bin 习惯一致 |
@@ -130,11 +137,11 @@ tests/
 
 | 文件 | 职责 |
 | ---- | ---- |
-| [`src/search/engines/js-eyes.mjs`](../../src/search/engines/js-eyes.mjs) | 拼 argv、spawn CLI、解析 JSON、归一化 source；导出 `resolveCliCommand` / `resolveSpawnTarget` |
+| [`src/search/engines/js-eyes.mjs`](../../src/search/engines/js-eyes.mjs) | 拼 argv、spawn CLI、解析 JSON、归一化 source；导出 `parseJsEyesSkills` / `resolveJsEyesSkills` / `mergeSkillResults` / `resolveCliCommand` / `resolveSpawnTarget` |
 | [`src/search/search-factory.mjs`](../../src/search/search-factory.mjs) | 增加 `js-eyes` metadata（`requiresBrowser: true`）和工厂分支 |
-| [`src/config/defaults.mjs`](../../src/config/defaults.mjs) | 默认 `jsEyesCli`、`jsEyesSkill`、`jsEyesCommand` 等 |
-| [`src/config/env-overrides.mjs`](../../src/config/env-overrides.mjs) | 映射 `JS_EYES_CLI`、`JS_EYES_SKILL`、`JS_EYES_SERVER_URL` 等 |
-| [`tests/js-eyes-search-engine.test.mjs`](../../tests/js-eyes-search-engine.test.mjs) | mock 子进程 + 跨平台 CLI 解析测试 |
+| [`src/config/defaults.mjs`](../../src/config/defaults.mjs) | 默认 `jsEyesCli`、`jsEyesSkill`、`jsEyesSkills`、`jsEyesCommand` 等 |
+| [`src/config/env-overrides.mjs`](../../src/config/env-overrides.mjs) | 映射 `JS_EYES_CLI`、`JS_EYES_SKILL`（支持逗号分隔）、`JS_EYES_SERVER_URL` 等 |
+| [`tests/js-eyes-search-engine.test.mjs`](../../tests/js-eyes-search-engine.test.mjs) | mock 子进程 + 跨平台 CLI 解析 + 多 skill 合并测试 |
 
 ### 跨平台 spawn 逻辑
 
@@ -149,6 +156,8 @@ tests/
 
 ### 配置示例
 
+单 skill：
+
 ```bash
 SEARCH_ENGINE=js-eyes
 JS_EYES_SKILL=js-zhihu-ops-skill
@@ -157,17 +166,75 @@ JS_EYES_MAX_PAGES=1
 JS_EYES_TIMEOUT_MS=120000
 ```
 
+多 skill（逗号分隔，串行查询后合并）：
+
+```bash
+JS_EYES_SKILL=js-zhihu-ops-skill,js-xiaohongshu-ops-skill
+```
+
 前置条件（不由 deep research 自动处理）：
 
 1. 安装 `js-eyes` CLI
 2. 启动 server：`js-eyes server start`
 3. 浏览器扩展已连接
-4. 启用 skill：`js-eyes skills enable js-zhihu-ops-skill`
-5. 目标站点已登录（如知乎）
+4. 启用各 skill，例如：
+   - `js-eyes skills enable js-zhihu-ops-skill`
+   - `js-eyes skills enable js-xiaohongshu-ops-skill`
+5. 各目标站点已登录（如知乎、小红书）
 
 ---
 
-## 5. 验证与测试
+## 5. 多 Skill 支持（增量）
+
+第一版接入后，用户希望一次 research 能同时搜多个站点（如知乎 + 小红书），而不必手动切换 `JS_EYES_SKILL`。
+
+### 设计约束
+
+- js-eyes CLI 仍是 `skill run <单个 skillId>`，deep research 在适配器内编排多次调用
+- 对外接口不变：`search(query) → Source[]`，research 策略层无需改动
+- 配置仍用 `JS_EYES_SKILL`，逗号分隔多值，单值向后兼容
+
+### 配置解析
+
+| 函数 | 位置 | 行为 |
+| ---- | ---- | ---- |
+| `parseJsEyesSkills(value)` | `js-eyes.mjs` | 按逗号/分号/空白 split，trim，去重；空值回退默认知乎 skill |
+| `resolveJsEyesSkills(config)` | `js-eyes.mjs` | 优先 `config.jsEyesSkills[]`，否则解析 `config.jsEyesSkill` 字符串 |
+
+`env-overrides.mjs` 读取 `JS_EYES_SKILL` 后写入 `search.jsEyesSkills`，并保留 `search.jsEyesSkill = skills[0]` 供旧配置/SQLite 兼容。
+
+### 引擎编排
+
+`JsEyesCliSearchEngine` 拆为三层：
+
+| 方法 | 职责 |
+| ---- | ---- |
+| `buildCommand(query, skill)` | 拼单次 CLI argv，skill 作为参数传入 |
+| `runSkillSearch(query, skill, { signal })` | spawn → 解析 JSON → 按当前 skill 归一化 source |
+| `search(query, { signal })` | 串行遍历 skill 列表，合并结果 |
+
+错误策略（best-effort）：
+
+- 某个 skill 失败 → 记录错误，继续下一个
+- 任意 skill 成功 → 返回合并结果
+- 全部失败 → 抛出聚合错误（含各 skill 失败原因）
+- `AbortError` → 立即向上抛出，不启动后续 skill
+
+### 结果合并（`mergeSkillResults`）
+
+1. **轮询 interleave**：按 skill 顺序交替取结果（zhihu 1 条 + xhs 1 条…）
+2. **URL 去重**：相同 URL 保留首次出现
+3. **全局 cap**：`slice(0, maxResults)`
+
+每个 skill 的 CLI 调用仍传完整 `--limit maxResults`；合并后再做全局 cap。`engine` 标签（如 `js-eyes:zhihu`、`js-eyes:xhs`）基于**当前 skill** 生成，而非整个 config 的单一字段。
+
+### 超时说明
+
+`JS_EYES_TIMEOUT_MS` 按**每个 skill 独立**计算。两个 skill 串行时，最坏情况总耗时约为 `2 × timeout`。
+
+---
+
+## 6. 验证与测试
 
 ### 单元测试
 
@@ -179,9 +246,13 @@ node --test tests/js-eyes-search-engine.test.mjs
 
 结果：
 
-- 全量测试 **28/28 通过**
+- 全量测试 **44/44 通过**
 - ESLint 通过
-- JS Eyes 专项测试覆盖：知乎/小红书映射、非 0 退出、非法 JSON、abort、timeout、Unix/Windows CLI 解析
+- JS Eyes 专项测试覆盖：
+  - 单 skill：知乎/小红书映射、非 0 退出、非法 JSON、abort、timeout
+  - 多 skill：串行调用、interleave 合并、URL 去重、部分失败、全部失败、abort 不启动下一 skill
+  - 配置：`parseJsEyesSkills` / env 逗号分隔解析
+  - 跨平台：Unix/Windows CLI 解析
 
 ### 配置加载验证
 
@@ -233,22 +304,27 @@ count: 8
 
 ---
 
-## 6. 后续演化
+## 7. 后续演化
 
-| 方向 | 说明 |
-| ---- | ---- |
-| 多 profile 预设 | 在 settings 中支持 `zhihu` / `xhs` 等预设，而不只配 skillId |
-| 预检开关 | 可选 `jsEyesPreflight=true`，job 首次搜索前跑 `doctor --json` |
-| 来源清洗 | 过滤知乎「相关搜索」等非内容 URL |
-| `source-based` 全量联调 | 多轮 + 多问题场景下的耗时与并发控制 |
-| API 诊断端点 | 可选 `/api/search-engines/js-eyes/doctor` 供 Web UI 展示 readiness |
-| 小红书 skill | 切换 `JS_EYES_SKILL=js-xiaohongshu-ops-skill` 并验证映射 |
+| 方向 | 状态 | 说明 |
+| ---- | ---- | ---- |
+| 多 Skill 串行查询与合并 | **已实现** | `JS_EYES_SKILL=a,b` 逗号分隔；interleave + dedupe + best-effort |
+| 小红书 skill 映射 | **已实现** | `engine: js-eyes:xhs`；可与知乎 skill 组合配置 |
+| 多 profile 预设 | 待做 | 在 settings 中支持 `zhihu` / `xhs` 等预设，而不只配 skillId |
+| 预检开关 | 待做 | 可选 `jsEyesPreflight=true`，job 首次搜索前跑 `doctor --json` |
+| 来源清洗 | 待做 | 过滤知乎「相关搜索」等非内容 URL |
+| `source-based` 全量联调 | 待做 | 多轮 + 多问题场景下的耗时与并发控制 |
+| API 诊断端点 | 待做 | 可选 `/api/search-engines/js-eyes/doctor` 供 Web UI 展示 readiness |
+| 多 skill 并行 | 待做 | 可选 `JS_EYES_SKILL_CONCURRENCY` 控制并行度 |
+| 每 skill 独立 command/args | 待做 | 不同站点可能需要不同 CLI 参数 |
 
-第一版刻意不做的事：不 import js-eyes 源码、不自动安装 skill、不自动启动 server、不做多站点聚合排序。
+刻意不做的事：不 import js-eyes 源码、不自动安装 skill、不自动启动 server、不做跨 skill 相关性排序。
 
 ---
 
 ## 附：本轮对话问题—思考—方案—执行对照
+
+### 第一版：CLI Provider 接入
 
 | 阶段 | 内容 |
 | ---- | ---- |
@@ -256,3 +332,12 @@ count: 8
 | 思考 | 项目搜索接口很薄，适合外部适配；js-eyes 的价值在 skill/CLI 而非 SDK 直连；产品化边界应留在 js-eyes 侧 |
 | 方案 | 新增 `JsEyesCliSearchEngine`，通过 `js-eyes skill run` 读 JSON stdout；配置走 `JS_EYES_*`；Windows/Unix 分别处理 CLI 解析与 spawn |
 | 执行 | 实现适配器、工厂注册、配置、测试、文档；`.env` 切到 js-eyes；联调修复 spawn 与 localhost；正式调研跑通并产出 24 条知乎来源 |
+
+### 增量：多 Skill 支持
+
+| 阶段 | 内容 |
+| ---- | ---- |
+| 问题 | `JS_EYES_SKILL` 只能指定一个 skill，希望一次搜索覆盖多个站点 |
+| 思考 | CLI 本身不支持一次 run 多 skill；应在适配器内串行编排，对外保持 `search()` 接口不变 |
+| 方案 | `JS_EYES_SKILL` 逗号分隔 → `jsEyesSkills[]`；`runSkillSearch` + `mergeSkillResults`（interleave、dedupe、cap）；best-effort 错误策略 |
+| 执行 | 更新 `js-eyes.mjs`、`env-overrides.mjs`、`defaults.mjs`、测试与 README；全量 44 项测试通过 |

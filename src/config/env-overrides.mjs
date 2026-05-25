@@ -1,3 +1,5 @@
+import { parseJsEyesSkills } from '../search/engines/js-eyes.mjs';
+
 export function settingsFromEnv(env = process.env) {
   function readEnv(name) {
     const value = env[name];
@@ -57,7 +59,9 @@ export function settingsFromEnv(env = process.env) {
 
   const jsEyesSkill = readEnv('JS_EYES_SKILL');
   if (jsEyesSkill) {
-    search.jsEyesSkill = jsEyesSkill;
+    const jsEyesSkills = parseJsEyesSkills(jsEyesSkill);
+    search.jsEyesSkills = jsEyesSkills;
+    search.jsEyesSkill = jsEyesSkills[0];
   }
 
   const jsEyesCommand = readEnv('JS_EYES_COMMAND');

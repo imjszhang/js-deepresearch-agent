@@ -6,7 +6,10 @@ import { EventEmitter } from 'node:events';
 import { afterEach, describe, it } from 'node:test';
 import {
   JsEyesCliSearchEngine,
+  mergeSkillResults,
+  parseJsEyesSkills,
   resolveCliCommand,
+  resolveJsEyesSkills,
   resolveSpawnTarget,
 } from '../src/search/engines/js-eyes.mjs';
 
@@ -121,7 +124,7 @@ describe('JsEyesCliSearchEngine', () => {
 
     await assert.rejects(
       () => engine.search('query'),
-      /exited with code 1: skill is not enabled/,
+      /failed for all skills.*exited with code 1: skill is not enabled/,
     );
   });
 
@@ -162,6 +165,207 @@ describe('JsEyesCliSearchEngine', () => {
 
     await assert.rejects(promise, /timed out/);
     assert.equal(child.killed, true);
+  });
+
+  it('runs multiple skills serially and interleaves merged results', async () => {
+    const calls = [];
+    const engine = new JsEyesCliSearchEngine({
+      maxResults: 3,
+      jsEyesSkills: ['js-zhihu-ops-skill', 'js-xiaohongshu-ops-skill'],
+    }, {
+      spawn: createSkillAwareMockSpawn({
+        calls,
+        responses: {
+          'js-zhihu-ops-skill': {
+            ok: true,
+            result: {
+              data: {
+                items: [
+                  { title: 'Zhihu A', url: 'https://example.com/zhihu-a', excerpt: 'A' },
+                  { title: 'Zhihu B', url: 'https://example.com/zhihu-b', excerpt: 'B' },
+                ],
+              },
+            },
+          },
+          'js-xiaohongshu-ops-skill': {
+            ok: true,
+            result: {
+              notes: [
+                { title: 'XHS A', url: 'https://example.com/xhs-a', desc: 'XHS A' },
+                { title: 'XHS B', url: 'https://example.com/xhs-b', desc: 'XHS B' },
+              ],
+            },
+          },
+        },
+      }),
+    });
+
+    const results = await engine.search('AI agent');
+
+    assert.equal(calls.length, 2);
+    const firstRunIndex = calls[0].args.indexOf('run');
+    const secondRunIndex = calls[1].args.indexOf('run');
+    assert.equal(calls[0].args[firstRunIndex + 1], 'js-zhihu-ops-skill');
+    assert.equal(calls[1].args[secondRunIndex + 1], 'js-xiaohongshu-ops-skill');
+    assert.deepEqual(results.map((item) => item.url), [
+      'https://example.com/zhihu-a',
+      'https://example.com/xhs-a',
+      'https://example.com/zhihu-b',
+    ]);
+    assert.deepEqual(results.map((item) => item.engine), [
+      'js-eyes:zhihu',
+      'js-eyes:xhs',
+      'js-eyes:zhihu',
+    ]);
+  });
+
+  it('deduplicates URLs across skills', async () => {
+    const engine = new JsEyesCliSearchEngine({
+      maxResults: 8,
+      jsEyesSkills: ['js-zhihu-ops-skill', 'js-xiaohongshu-ops-skill'],
+    }, {
+      spawn: createSkillAwareMockSpawn({
+        responses: {
+          'js-zhihu-ops-skill': {
+            ok: true,
+            result: {
+              data: {
+                items: [{ title: 'Shared', url: 'https://example.com/shared', excerpt: 'Zhihu' }],
+              },
+            },
+          },
+          'js-xiaohongshu-ops-skill': {
+            ok: true,
+            result: {
+              notes: [{ title: 'Shared', url: 'https://example.com/shared', desc: 'XHS' }],
+            },
+          },
+        },
+      }),
+    });
+
+    const results = await engine.search('query');
+
+    assert.equal(results.length, 1);
+    assert.equal(results[0].engine, 'js-eyes:zhihu');
+  });
+
+  it('returns partial results when one skill fails', async () => {
+    const engine = new JsEyesCliSearchEngine({
+      jsEyesSkills: ['js-zhihu-ops-skill', 'js-xiaohongshu-ops-skill'],
+    }, {
+      spawn: createSkillAwareMockSpawn({
+        responses: {
+          'js-zhihu-ops-skill': {
+            ok: true,
+            result: {
+              data: {
+                items: [{ title: 'Zhihu only', url: 'https://example.com/zhihu', excerpt: 'ok' }],
+              },
+            },
+          },
+          'js-xiaohongshu-ops-skill': {
+            code: 1,
+            stderr: 'skill is not enabled',
+          },
+        },
+      }),
+    });
+
+    const results = await engine.search('query');
+
+    assert.deepEqual(results, [{
+      title: 'Zhihu only',
+      url: 'https://example.com/zhihu',
+      snippet: 'ok',
+      engine: 'js-eyes:zhihu',
+    }]);
+  });
+
+  it('rejects when all skills fail', async () => {
+    const engine = new JsEyesCliSearchEngine({
+      jsEyesSkills: ['js-zhihu-ops-skill', 'js-xiaohongshu-ops-skill'],
+    }, {
+      spawn: createSkillAwareMockSpawn({
+        responses: {
+          'js-zhihu-ops-skill': { code: 1, stderr: 'zhihu failed' },
+          'js-xiaohongshu-ops-skill': { code: 1, stderr: 'xhs failed' },
+        },
+      }),
+    });
+
+    await assert.rejects(
+      () => engine.search('query'),
+      /failed for all skills.*js-zhihu-ops-skill.*js-xiaohongshu-ops-skill/,
+    );
+  });
+
+  it('does not start the next skill after abort', async () => {
+    const calls = [];
+    const controller = new AbortController();
+    const child = createMockChild();
+    const engine = new JsEyesCliSearchEngine({
+      jsEyesSkills: ['js-zhihu-ops-skill', 'js-xiaohongshu-ops-skill'],
+    }, {
+      spawn: (command, args, options) => {
+        calls.push({ command, args, options });
+        return child;
+      },
+    });
+
+    const promise = engine.search('query', { signal: controller.signal });
+    controller.abort();
+
+    await assert.rejects(promise, { name: 'AbortError' });
+    assert.equal(calls.length, 1);
+    assert.equal(child.killed, true);
+  });
+});
+
+describe('JS Eyes skill parsing', () => {
+  it('parses comma-separated skill lists', () => {
+    assert.deepEqual(
+      parseJsEyesSkills('js-zhihu-ops-skill,js-xiaohongshu-ops-skill'),
+      ['js-zhihu-ops-skill', 'js-xiaohongshu-ops-skill'],
+    );
+  });
+
+  it('trims, deduplicates, and ignores empty entries', () => {
+    assert.deepEqual(
+      parseJsEyesSkills(' a , a ; b '),
+      ['a', 'b'],
+    );
+  });
+
+  it('falls back to the default skill when empty', () => {
+    assert.deepEqual(parseJsEyesSkills(''), ['js-zhihu-ops-skill']);
+    assert.deepEqual(parseJsEyesSkills(undefined), ['js-zhihu-ops-skill']);
+  });
+
+  it('resolves skills from config arrays or strings', () => {
+    assert.deepEqual(
+      resolveJsEyesSkills({ jsEyesSkills: ['js-xiaohongshu-ops-skill'] }),
+      ['js-xiaohongshu-ops-skill'],
+    );
+    assert.deepEqual(
+      resolveJsEyesSkills({ jsEyesSkill: 'js-zhihu-ops-skill,js-xiaohongshu-ops-skill' }),
+      ['js-zhihu-ops-skill', 'js-xiaohongshu-ops-skill'],
+    );
+  });
+});
+
+describe('mergeSkillResults', () => {
+  it('interleaves batches and caps the total', () => {
+    const merged = mergeSkillResults([
+      [{ url: 'https://example.com/a' }, { url: 'https://example.com/b' }],
+      [{ url: 'https://example.com/c' }, { url: 'https://example.com/d' }],
+    ], 3);
+
+    assert.deepEqual(merged.map((item) => item.url), [
+      'https://example.com/a',
+      'https://example.com/c',
+      'https://example.com/b',
+    ]);
   });
 });
 
@@ -221,6 +425,28 @@ describe('JS Eyes CLI resolution', () => {
     assert.deepEqual(target.args, ['skill', 'run']);
   });
 });
+
+function createSkillAwareMockSpawn({ calls = [], responses = {} } = {}) {
+  return (command, args, options) => {
+    calls?.push({ command, args, options });
+    const runIndex = args.indexOf('run');
+    const skill = runIndex >= 0 ? args[runIndex + 1] : args[2];
+    const response = responses[skill] || {};
+    const child = createMockChild();
+
+    queueMicrotask(() => {
+      if (response.stderr) child.stderr.emit('data', response.stderr);
+      if (response.stdout) {
+        child.stdout.emit('data', response.stdout);
+      } else if (response.ok !== undefined || response.result !== undefined) {
+        child.stdout.emit('data', JSON.stringify(response));
+      }
+      child.emit('close', response.code ?? 0, null);
+    });
+
+    return child;
+  };
+}
 
 function createMockSpawn({ calls = [], stdout = '', stderr = '', code = 0 } = {}) {
   return (command, args, options) => {

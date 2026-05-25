@@ -9,6 +9,34 @@ const DEFAULT_MAX_PAGES = 1;
 const DEFAULT_TIMEOUT_MS = 120000;
 const MAX_OUTPUT_CHARS = 1024 * 1024;
 
+export function parseJsEyesSkills(value) {
+  const rawValues = Array.isArray(value)
+    ? value
+    : String(value || '').split(/[,;\s]+/);
+
+  const skills = [];
+  const seen = new Set();
+
+  for (const entry of rawValues) {
+    const skill = String(entry || '').trim();
+    if (!skill || seen.has(skill)) continue;
+    seen.add(skill);
+    skills.push(skill);
+  }
+
+  return skills.length ? skills : [DEFAULT_SKILL];
+}
+
+export function resolveJsEyesSkills(config = {}) {
+  if (Array.isArray(config.jsEyesSkills) && config.jsEyesSkills.length > 0) {
+    return parseJsEyesSkills(config.jsEyesSkills);
+  }
+  if (config.jsEyesSkill) {
+    return parseJsEyesSkills(config.jsEyesSkill);
+  }
+  return [DEFAULT_SKILL];
+}
+
 export class JsEyesCliSearchEngine {
   constructor(config = {}, options = {}) {
     this.config = config;
@@ -19,7 +47,38 @@ export class JsEyesCliSearchEngine {
     const trimmedQuery = String(query || '').trim();
     if (!trimmedQuery) return [];
 
-    const { command, args } = this.buildCommand(trimmedQuery);
+    const skills = resolveJsEyesSkills(this.config);
+    const batches = [];
+    const failures = [];
+
+    for (const skill of skills) {
+      if (signal?.aborted) {
+        throw abortError();
+      }
+
+      try {
+        const sources = await this.runSkillSearch(trimmedQuery, skill, { signal });
+        batches.push(sources);
+      } catch (error) {
+        if (error?.name === 'AbortError') {
+          throw error;
+        }
+        failures.push({ skill, error });
+      }
+    }
+
+    if (batches.length === 0) {
+      throw aggregateSkillErrors(failures);
+    }
+
+    return mergeSkillResults(
+      batches,
+      normalizePositiveNumber(this.config.maxResults, 8),
+    );
+  }
+
+  async runSkillSearch(query, skill, { signal } = {}) {
+    const { command, args } = this.buildCommand(query, skill);
     const spawnTarget = resolveSpawnTarget(command, args);
     const result = await runCommand({
       command: spawnTarget.command,
@@ -32,20 +91,20 @@ export class JsEyesCliSearchEngine {
     const payload = parseJsonOutput(result.stdout, result.stderr);
     if (!payload || payload.ok === false) {
       const detail = payload?.error?.message || payload?.error || result.stderr || 'Unknown JS Eyes failure';
-      throw new Error(`JS Eyes search failed: ${detail}. Run "js-eyes doctor --json" for diagnostics.`);
+      throw new Error(`JS Eyes search failed for ${skill}: ${detail}. Run "js-eyes doctor --json" for diagnostics.`);
     }
 
-    return normalizeSources(payload, this.config);
+    return normalizeSources(payload, skill, this.config);
   }
 
-  buildCommand(query) {
+  buildCommand(query, skill) {
     const command = resolveCliCommand(this.config.jsEyesCli || DEFAULT_CLI);
-    const skill = String(this.config.jsEyesSkill || DEFAULT_SKILL);
+    const skillId = String(skill || DEFAULT_SKILL);
     const skillCommand = String(this.config.jsEyesCommand || DEFAULT_COMMAND);
     const maxResults = normalizePositiveNumber(this.config.maxResults, 8);
     const maxPages = normalizePositiveNumber(this.config.jsEyesMaxPages, DEFAULT_MAX_PAGES);
 
-    const args = ['skill', 'run', skill, skillCommand, query, '--limit', String(maxResults), '--quiet'];
+    const args = ['skill', 'run', skillId, skillCommand, query, '--limit', String(maxResults), '--quiet'];
 
     if (maxPages) {
       args.push('--max-pages', String(maxPages));
@@ -67,6 +126,52 @@ export class JsEyesCliSearchEngine {
 
     return { command, args };
   }
+}
+
+export function mergeSkillResults(batches, maxResults) {
+  const merged = [];
+  const seenUrls = new Set();
+  const indices = batches.map(() => 0);
+  let hasMore = batches.some((batch) => batch.length > 0);
+
+  while (hasMore && merged.length < maxResults) {
+    hasMore = false;
+
+    for (let batchIndex = 0; batchIndex < batches.length; batchIndex += 1) {
+      const batch = batches[batchIndex];
+      while (indices[batchIndex] < batch.length) {
+        const source = batch[indices[batchIndex]];
+        indices[batchIndex] += 1;
+
+        const url = String(source.url || '').trim();
+        if (url && seenUrls.has(url)) {
+          continue;
+        }
+        if (url) {
+          seenUrls.add(url);
+        }
+
+        merged.push(source);
+        if (merged.length >= maxResults) {
+          return merged;
+        }
+        break;
+      }
+
+      if (indices[batchIndex] < batch.length) {
+        hasMore = true;
+      }
+    }
+  }
+
+  return merged;
+}
+
+function aggregateSkillErrors(failures) {
+  const details = failures
+    .map(({ skill, error }) => `${skill}: ${error.message}`)
+    .join('; ');
+  return new Error(`JS Eyes search failed for all skills: ${details}. Run "js-eyes doctor --json" for diagnostics.`);
 }
 
 function runCommand({ command, args, signal, timeoutMs, spawnImpl }) {
@@ -160,9 +265,9 @@ function parseJsonOutput(stdout, stderr) {
   }
 }
 
-function normalizeSources(payload, config = {}) {
+function normalizeSources(payload, skill, config = {}) {
   return extractItems(payload)
-    .map((item) => normalizeSource(item, config))
+    .map((item) => normalizeSource(item, skill))
     .filter((item) => item.url || item.snippet)
     .slice(0, normalizePositiveNumber(config.maxResults, 8));
 }
@@ -185,7 +290,7 @@ function extractItems(payload) {
   return [];
 }
 
-function normalizeSource(item, config = {}) {
+function normalizeSource(item, skill) {
   const title = firstString(item.title, item.name, item.url, 'Untitled source');
   const url = firstString(item.url, item.link, item.href);
   const body = firstString(item.excerpt, item.snippet, item.desc, item.description, item.content);
@@ -200,7 +305,7 @@ function normalizeSource(item, config = {}) {
     title,
     url,
     snippet,
-    engine: engineLabel(config.jsEyesSkill),
+    engine: engineLabel(skill),
   };
 }
 
