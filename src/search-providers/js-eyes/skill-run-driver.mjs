@@ -1,6 +1,25 @@
 import { getSkillProfile } from './skill-registry.mjs';
 import { appendFlag } from './cli-process.mjs';
 
+export function buildSkillRunPreCommand(query, skillId, provider) {
+  const profile = getSkillProfile(skillId);
+  if (!profile.preCommand) return null;
+
+  const args = [
+    'skill',
+    'run',
+    skillId,
+    profile.preCommand,
+    query,
+  ];
+
+  if (provider.serverUrl) {
+    appendFlag(args, profile.serverFlag || '--server', provider.serverUrl);
+  }
+
+  return args;
+}
+
 export function buildSkillRunCommand(query, skillId, provider) {
   const profile = getSkillProfile(skillId);
   const args = [

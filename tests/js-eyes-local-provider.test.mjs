@@ -22,7 +22,7 @@ describe('JsEyesCliSearchEngine', () => {
     const engine = new JsEyesCliSearchEngine({
       maxResults: 2,
       jsEyesCli: 'custom-js-eyes',
-      jsEyesSkill: 'js-x-ops-skill',
+      jsEyesSkill: 'js-zhihu-ops-skill',
       jsEyesServerUrl: 'ws://127.0.0.1:18080',
       jsEyesMaxPages: 1,
       jsEyesTimeoutMs: 5000,
@@ -35,17 +35,17 @@ describe('JsEyesCliSearchEngine', () => {
           items: [
             {
               title: 'OpenClaw @openclaw',
-              url: 'https://x.com/openclaw/status/1',
+              url: 'https://www.zhihu.com/question/1/answer/1',
               snippet: 'OpenClaw release',
-              platform: 'x',
-              engine: 'js-eyes:x',
+              platform: 'zhihu',
+              engine: 'js-eyes:zhihu',
             },
             {
               title: 'Example @example',
-              url: 'https://x.com/example/status/2',
+              url: 'https://www.zhihu.com/question/2/answer/2',
               snippet: 'Another tweet',
-              platform: 'x',
-              engine: 'js-eyes:x',
+              platform: 'zhihu',
+              engine: 'js-eyes:zhihu',
             },
           ],
         }),
@@ -59,7 +59,7 @@ describe('JsEyesCliSearchEngine', () => {
       'search',
       'openclaw',
       '--skills',
-      'js-x-ops-skill',
+      'js-zhihu-ops-skill',
       '--max-results',
       '2',
       '--json',
@@ -73,17 +73,79 @@ describe('JsEyesCliSearchEngine', () => {
     assert.deepEqual(results, [
       {
         title: 'OpenClaw @openclaw',
-        url: 'https://x.com/openclaw/status/1',
+        url: 'https://www.zhihu.com/question/1/answer/1',
         snippet: 'OpenClaw release',
-        engine: 'js-eyes:x',
+        engine: 'js-eyes:zhihu',
       },
       {
         title: 'Example @example',
-        url: 'https://x.com/example/status/2',
+        url: 'https://www.zhihu.com/question/2/answer/2',
         snippet: 'Another tweet',
-        engine: 'js-eyes:x',
+        engine: 'js-eyes:zhihu',
       },
     ]);
+  });
+
+  it('uses local skill-run driver for X without the missing unified command', async () => {
+    const calls = [];
+    const engine = new JsEyesCliSearchEngine({
+      maxResults: 5,
+      jsEyesCli: 'custom-js-eyes',
+      provider: {
+        skills: ['js-x-ops-skill'],
+        serverUrl: 'ws://127.0.0.1:18080',
+        maxPages: 1,
+      },
+    }, {
+      spawn: createMockSpawn({
+        calls,
+        stdout: [
+          JSON.stringify({ ok: true }),
+          JSON.stringify({
+            ok: true,
+            result: {
+              tweets: [
+                {
+                  title: 'AI agent discussion',
+                  url: 'https://x.com/example/status/1',
+                  text: 'Deep Research agents are trending',
+                },
+              ],
+            },
+          }),
+        ],
+      }),
+    });
+
+    const results = await engine.search('AI Agent Deep Research');
+
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].command, 'custom-js-eyes');
+    assert.deepEqual(calls[0].args, [
+      'skill',
+      'run',
+      'js-x-ops-skill',
+      'navigate-search',
+      'AI Agent Deep Research',
+      '--ws-endpoint',
+      'ws://127.0.0.1:18080',
+    ]);
+    assert.deepEqual(calls[1].args, [
+      'skill',
+      'run',
+      'js-x-ops-skill',
+      'search',
+      'AI Agent Deep Research',
+      '--max-tweets',
+      '5',
+      '--max-pages',
+      '1',
+      '--ws-endpoint',
+      'ws://127.0.0.1:18080',
+    ]);
+    assert.equal(results.length, 1);
+    assert.equal(results[0].engine, 'js-eyes:x');
+    assert.match(results[0].url, /x\.com/);
   });
 
   it('uses local skill-run driver for reddit without unified flags', async () => {
@@ -299,13 +361,18 @@ describe('JS Eyes CLI resolution', () => {
 });
 
 function createMockSpawn({ calls = [], stdout = '', stderr = '', code = 0 } = {}) {
+  let callIndex = 0;
   return (command, args, options) => {
     calls?.push({ command, args, options });
     const child = createMockChild();
+    const stdoutValue = Array.isArray(stdout) ? stdout[callIndex] : stdout;
+    const stderrValue = Array.isArray(stderr) ? stderr[callIndex] : stderr;
+    const codeValue = Array.isArray(code) ? code[callIndex] : code;
+    callIndex += 1;
     queueMicrotask(() => {
-      if (stdout) child.stdout.emit('data', stdout);
-      if (stderr) child.stderr.emit('data', stderr);
-      child.emit('close', code, null);
+      if (stdoutValue) child.stdout.emit('data', stdoutValue);
+      if (stderrValue) child.stderr.emit('data', stderrValue);
+      child.emit('close', codeValue, null);
     });
     return child;
   };

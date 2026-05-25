@@ -10,7 +10,7 @@ import { mergeSkillResults } from './merge-results.mjs';
 import { resolveProviderConfig } from './provider-config.mjs';
 import { resolveDriverMode } from './skill-registry.mjs';
 import { normalizeUnifiedItems } from './source-normalizer.mjs';
-import { buildSkillRunCommand } from './skill-run-driver.mjs';
+import { buildSkillRunCommand, buildSkillRunPreCommand } from './skill-run-driver.mjs';
 import { buildUnifiedCommand } from './unified-driver.mjs';
 import { DEFAULT_TIMEOUT_MS } from './constants.mjs';
 
@@ -75,6 +75,11 @@ export class JsEyesCliSearchEngine {
 
     for (const skillId of provider.skills) {
       try {
+        const preArgs = buildSkillRunPreCommand(query, skillId, provider);
+        if (preArgs) {
+          await this.runCli(command, preArgs, provider.timeoutMs, signal);
+        }
+
         const args = buildSkillRunCommand(query, skillId, provider);
         const payload = await this.runCli(command, args, provider.timeoutMs, signal);
 

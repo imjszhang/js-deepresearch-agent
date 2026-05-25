@@ -10,6 +10,18 @@ export const DEFAULT_SKILL_PROFILE = Object.freeze({
 });
 
 export const JS_EYES_SKILL_PROFILES = Object.freeze({
+  'js-x-ops-skill': Object.freeze({
+    driver: 'skill-run',
+    preCommand: 'navigate-search',
+    command: 'search',
+    limitFlag: '--max-tweets',
+    serverFlag: '--ws-endpoint',
+    supportsMaxPages: true,
+    supportsQuiet: false,
+    supportsTimeoutMs: false,
+    extraArgs: {},
+    platform: 'x',
+  }),
   'js-reddit-ops-skill': Object.freeze({
     driver: 'skill-run',
     command: 'search',
