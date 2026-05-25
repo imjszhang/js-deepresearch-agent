@@ -53,6 +53,26 @@ EXISTING=from-file
     assert.equal(overrides.search.apiKey, 'search-key');
   });
 
+  it('maps JS Eyes env vars to settings overrides', () => {
+    const overrides = settingsFromEnv({
+      SEARCH_ENGINE: 'js-eyes',
+      JS_EYES_CLI: 'custom-js-eyes',
+      JS_EYES_SKILL: 'js-xiaohongshu-ops-skill',
+      JS_EYES_COMMAND: 'search',
+      JS_EYES_SERVER_URL: 'ws://127.0.0.1:18080',
+      JS_EYES_MAX_PAGES: '3',
+      JS_EYES_TIMEOUT_MS: '45000',
+    });
+
+    assert.equal(overrides.search.engine, 'js-eyes');
+    assert.equal(overrides.search.jsEyesCli, 'custom-js-eyes');
+    assert.equal(overrides.search.jsEyesSkill, 'js-xiaohongshu-ops-skill');
+    assert.equal(overrides.search.jsEyesCommand, 'search');
+    assert.equal(overrides.search.jsEyesServerUrl, 'ws://127.0.0.1:18080');
+    assert.equal(overrides.search.jsEyesMaxPages, 3);
+    assert.equal(overrides.search.jsEyesTimeoutMs, 45000);
+  });
+
   it('maps llm env vars to settings overrides', () => {
     const overrides = settingsFromEnv({
       LLM_PROVIDER: 'ollama',

@@ -77,7 +77,32 @@ Runtime settings are stored in the local SQLite database under `data/`. Values f
 - Research questions per iteration: `3`
 - Research concurrency: `2`
 
-SearXNG is the only implemented search adapter in this MVP. DuckDuckGo, Tavily, and Brave Search are represented in the adapter metadata for later implementation.
+SearXNG is the default search adapter. JS Eyes is also available as a browser-backed provider for sites that need an authenticated browser session. DuckDuckGo, Tavily, and Brave Search are represented in the adapter metadata for later implementation.
+
+### JS Eyes Search Provider
+
+Set `SEARCH_ENGINE=js-eyes` to run searches through an external JS Eyes skill instead of SearXNG. This project treats JS Eyes as a productized local dependency: it calls the `js-eyes` CLI, reads JSON from stdout, and normalizes the returned items into research sources. It does not install skills, start the JS Eyes server, install browser extensions, or manage site login.
+
+Before using this provider:
+
+- Install the `js-eyes` CLI.
+- Start the JS Eyes server, for example `js-eyes server start`.
+- Connect the browser extension to the local server.
+- Install, approve, and enable the target skill, such as `js-zhihu-ops-skill` or `js-xiaohongshu-ops-skill`.
+- Log in to the target site in the connected browser if the skill needs authenticated access.
+- Run `js-eyes doctor --json` to verify the local JS Eyes setup.
+
+Example environment:
+
+```bash
+SEARCH_ENGINE=js-eyes
+JS_EYES_SKILL=js-zhihu-ops-skill
+JS_EYES_SERVER_URL=ws://localhost:18080
+JS_EYES_MAX_PAGES=1
+JS_EYES_TIMEOUT_MS=120000
+```
+
+For Xiaohongshu search, set `JS_EYES_SKILL=js-xiaohongshu-ops-skill`. On Linux and macOS, leave `JS_EYES_CLI=js-eyes` when the CLI is on `PATH`. On Windows, the provider resolves npm global shims such as `js-eyes.cmd` automatically; set `JS_EYES_CLI` to an absolute path only when the CLI is installed outside `PATH`. Prefer `ws://localhost:18080` over `127.0.0.1` if your local JS Eyes server binds to localhost. Common failures usually mean the CLI is not on `PATH`, the skill is not enabled, the server or extension is disconnected, the site login expired, policy/egress blocked navigation, or the target site triggered a risk check. Use `js-eyes doctor --json` and the JS Eyes skill records for diagnosis.
 
 Available research strategies are exposed through `/api/strategies` and shared by the web UI:
 
@@ -98,6 +123,12 @@ Supported `.env` keys:
 - `SEARCH_ENGINE`
 - `SEARCH_BASE_URL`
 - `SEARCH_API_KEY`
+- `JS_EYES_CLI`
+- `JS_EYES_SKILL`
+- `JS_EYES_COMMAND`
+- `JS_EYES_SERVER_URL`
+- `JS_EYES_MAX_PAGES`
+- `JS_EYES_TIMEOUT_MS`
 
 Do not commit API keys or local database files. `.env.example` documents common local values.
 

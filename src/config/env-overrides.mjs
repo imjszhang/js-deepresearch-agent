@@ -50,6 +50,36 @@ export function settingsFromEnv(env = process.env) {
     search.apiKey = searchApiKey;
   }
 
+  const jsEyesCli = readEnv('JS_EYES_CLI');
+  if (jsEyesCli) {
+    search.jsEyesCli = jsEyesCli;
+  }
+
+  const jsEyesSkill = readEnv('JS_EYES_SKILL');
+  if (jsEyesSkill) {
+    search.jsEyesSkill = jsEyesSkill;
+  }
+
+  const jsEyesCommand = readEnv('JS_EYES_COMMAND');
+  if (jsEyesCommand) {
+    search.jsEyesCommand = jsEyesCommand;
+  }
+
+  const jsEyesServerUrl = readEnv('JS_EYES_SERVER_URL');
+  if (jsEyesServerUrl) {
+    search.jsEyesServerUrl = jsEyesServerUrl;
+  }
+
+  const jsEyesMaxPages = readEnv('JS_EYES_MAX_PAGES');
+  if (jsEyesMaxPages) {
+    search.jsEyesMaxPages = Number(jsEyesMaxPages);
+  }
+
+  const jsEyesTimeoutMs = readEnv('JS_EYES_TIMEOUT_MS');
+  if (jsEyesTimeoutMs) {
+    search.jsEyesTimeoutMs = Number(jsEyesTimeoutMs);
+  }
+
   const research = {};
   const workDir = readEnv('WORK_DIR');
   if (workDir) {

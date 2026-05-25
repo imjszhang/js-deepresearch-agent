@@ -14,6 +14,13 @@ export const defaultSettings = Object.freeze({
     maxResults: 8,
     language: 'en',
     safeSearch: true,
+    jsEyesCli: 'js-eyes',
+    jsEyesSkill: 'js-zhihu-ops-skill',
+    jsEyesCommand: 'search',
+    jsEyesServerUrl: '',
+    jsEyesMaxPages: 1,
+    jsEyesTimeoutMs: 120000,
+    jsEyesArgs: {},
   },
   research: {
     strategy: 'source-based',
