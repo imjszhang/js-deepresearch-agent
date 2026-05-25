@@ -29,16 +29,33 @@ describe('CLI utilities', () => {
     assert.equal(formatHistory([]), 'No research history.');
   });
 
-  it('maps js-eyes skill flags into search settings', () => {
+  it('maps js-eyes skill flags into search provider settings', () => {
     const settings = applyResearchFlags({
-      search: { engine: 'js-eyes', jsEyesSkill: 'js-zhihu-ops-skill' },
+      search: {
+        engine: 'js-eyes',
+        jsEyesSkill: 'js-zhihu-ops-skill',
+        options: {
+          jsEyesSkill: 'js-x-ops-skill',
+          jsEyesSkills: ['js-x-ops-skill'],
+        },
+      },
     }, {
       'js-eyes-skill': 'js-x-ops-skill,js-zhihu-ops-skill',
     });
 
     assert.equal(settings.search.jsEyesSkill, 'js-x-ops-skill');
     assert.deepEqual(settings.search.jsEyesSkills, ['js-x-ops-skill', 'js-zhihu-ops-skill']);
-    assert.deepEqual(settings.search.options.jsEyesSkills, ['js-x-ops-skill', 'js-zhihu-ops-skill']);
+    assert.deepEqual(settings.search.provider.skills, ['js-x-ops-skill', 'js-zhihu-ops-skill']);
+  });
+
+  it('maps search-skills alias into provider settings', () => {
+    const settings = applyResearchFlags({ search: {} }, {
+      'search-skills': 'js-reddit-ops-skill',
+      'search-server-url': 'ws://127.0.0.1:18080',
+    });
+
+    assert.deepEqual(settings.search.provider.skills, ['js-reddit-ops-skill']);
+    assert.equal(settings.search.provider.serverUrl, 'ws://127.0.0.1:18080');
   });
 
   it('normalizes js-eyes-skills alias and deduplicates entries', () => {
@@ -47,22 +64,22 @@ describe('CLI utilities', () => {
     });
 
     assert.equal(settings.search.jsEyesSkill, 'a');
-    assert.deepEqual(settings.search.jsEyesSkills, ['a', 'b']);
+    assert.deepEqual(settings.search.provider.skills, ['a', 'b']);
   });
 
-  it('maps other js-eyes runtime flags for one-off research runs', () => {
+  it('maps other search runtime flags for one-off research runs', () => {
     const settings = applyResearchFlags({ search: {} }, {
       search: 'js-eyes',
-      'js-eyes-cli': 'custom-js-eyes',
-      'js-eyes-server-url': 'ws://127.0.0.1:18080',
-      'js-eyes-max-pages': '2',
-      'js-eyes-timeout-ms': '45000',
+      'search-cli': 'custom-js-eyes',
+      'search-server-url': 'ws://127.0.0.1:18080',
+      'search-max-pages': '2',
+      'search-timeout-ms': '45000',
     });
 
     assert.equal(settings.search.engine, 'js-eyes');
-    assert.equal(settings.search.jsEyesCli, 'custom-js-eyes');
-    assert.equal(settings.search.jsEyesServerUrl, 'ws://127.0.0.1:18080');
-    assert.equal(settings.search.jsEyesMaxPages, 2);
-    assert.equal(settings.search.jsEyesTimeoutMs, 45000);
+    assert.equal(settings.search.provider.cli, 'custom-js-eyes');
+    assert.equal(settings.search.provider.serverUrl, 'ws://127.0.0.1:18080');
+    assert.equal(settings.search.provider.maxPages, 2);
+    assert.equal(settings.search.provider.timeoutMs, 45000);
   });
 });

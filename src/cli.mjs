@@ -168,7 +168,7 @@ function printHelp() {
 js-deepresearch-agent
 
 Commands:
-  research "query" [--search js-eyes|searxng] [--js-eyes-skill skillA,skillB] [--js-eyes-server-url ws://localhost:18080] [--search-base-url http://127.0.0.1:8080] [--strategy source-based|rapid|parallel] [--iterations 2] [--questions 3] [--concurrency 2] [--work-dir work_dir] [--output report.md] [--json] [--no-save] [--no-work-dir]
+  research "query" [--search js-eyes|searxng] [--search-skills skillA,skillB] [--js-eyes-skill skillA,skillB] [--search-server-url ws://localhost:18080] [--search-base-url http://127.0.0.1:8080] [--strategy source-based|rapid|parallel] [--iterations 2] [--questions 3] [--concurrency 2] [--work-dir work_dir] [--output report.md] [--json] [--no-save] [--no-work-dir]
   config get [key]
   config set <key> <value>
   history [list]

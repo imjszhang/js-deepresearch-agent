@@ -72,12 +72,17 @@ npm exec jdr -- research "Explain the current state of local-first AI research"
 | `--search-base-url` | `search.baseUrl` | SearXNG 等服务地址 |
 | `--searxng-url` | `search.baseUrl` | `--search-base-url` 别名 |
 | `--search-api-key` | `search.apiKey` | 搜索 API Key |
-| `--js-eyes-skill` | `search.jsEyesSkills` | 单次运行指定 JS Eyes skill，逗号分隔多 skill |
-| `--js-eyes-skills` | `search.jsEyesSkills` | `--js-eyes-skill` 别名 |
-| `--js-eyes-cli` | `search.jsEyesCli` | JS Eyes CLI 路径或命令名 |
-| `--js-eyes-server-url` | `search.jsEyesServerUrl` | JS Eyes WebSocket 地址 |
-| `--js-eyes-max-pages` | `search.jsEyesMaxPages` | JS Eyes 搜索页数 |
-| `--js-eyes-timeout-ms` | `search.jsEyesTimeoutMs` | JS Eyes 单次搜索超时（毫秒） |
+| `--search-skills` | `search.provider.skills` | 推荐：单次运行指定 JS Eyes skill |
+| `--js-eyes-skill` | `search.provider.skills` | 兼容别名 |
+| `--js-eyes-skills` | `search.provider.skills` | 兼容别名 |
+| `--search-cli` | `search.provider.cli` | JS Eyes CLI 路径或命令名 |
+| `--js-eyes-cli` | `search.provider.cli` | 兼容别名 |
+| `--search-server-url` | `search.provider.serverUrl` | JS Eyes WebSocket 地址 |
+| `--js-eyes-server-url` | `search.provider.serverUrl` | 兼容别名 |
+| `--search-max-pages` | `search.provider.maxPages` | JS Eyes 搜索页数 |
+| `--js-eyes-max-pages` | `search.provider.maxPages` | 兼容别名 |
+| `--search-timeout-ms` | `search.provider.timeoutMs` | JS Eyes 单次搜索超时（毫秒） |
+| `--js-eyes-timeout-ms` | `search.provider.timeoutMs` | 兼容别名 |
 | `--strategy` | `research.strategy` | `source-based` \| `rapid` \| `parallel` |
 | `--iterations` | `research.iterations` | 迭代轮数 |
 | `--questions` | `research.questionsPerIteration` | 每轮生成问题数 |
@@ -105,8 +110,8 @@ npm exec jdr -- research "Compare SearXNG and Brave Search APIs" \
 # 单次运行临时指定 JS Eyes skill（不写入 .env / SQLite）
 npm exec jdr -- research "openclaw" \
   --search js-eyes \
-  --js-eyes-skill js-x-ops-skill,js-zhihu-ops-skill \
-  --js-eyes-server-url ws://localhost:18080 \
+  --search-skills js-reddit-ops-skill \
+  --search-server-url ws://localhost:18080 \
   --strategy rapid
 ```
 
@@ -292,15 +297,29 @@ Agent 选型建议：
 
 ### 搜索：JS Eyes（浏览器技能）
 
-设置 `SEARCH_ENGINE=js-eyes`。本项目**不**安装 skill、不启 server、不管理登录；通过 `js-eyes search` 统一 facade 调用已启用的 skill。
+设置 `SEARCH_ENGINE=js-eyes`。本项目**不**安装 skill、不启 server、不管理登录；通过本地 provider adapter 调用 `js-eyes` CLI。
 
-Deep research 实际调用形态：
+配置归一化：`JS_EYES_*` / `--js-eyes-*` / `--search-*` 都会映射到 `search.provider`。Driver 选择规则：
+
+| `provider.driver` | 行为 |
+|---|---|
+| `unified` | 强制 `js-eyes search ... --skills ... --json` |
+| `skill-run` | 全部 skill 走 `js-eyes skill run <id> search ...` |
+| `auto`（默认） | 若任一 skill 在本地 registry 标记为 `skill-run`，则走 skill-run；否则 unified |
+
+本地 skill registry（`packages/js-deepresearch-engine/src/search/engines/js-eyes/skill-registry.mjs`）用于处理 unified facade 不兼容的 skill，**无需修改 js-eyes 仓库**。例如 Reddit：
+
+```bash
+js-eyes skill run js-reddit-ops-skill search "query" --limit 8 --ws-endpoint ws://localhost:18080 --read-mode api --json
+```
+
+默认 skill（X、知乎、小红书等）仍走 unified：
 
 ```bash
 js-eyes search "query" --skills js-x-ops-skill --max-results 8 --max-pages 1 --server ws://localhost:18080 --json
 ```
 
-统一输出为 `{ ok, items: [{ title, url, snippet, platform, engine }] }`。平台差异（X 导航、参数映射、结果归一化）由 js-eyes 处理；deepresearch 只消费 `items[]`。
+统一输出为 `{ ok, items: [{ title, url, snippet, platform, engine }] }`（skill-run 时由 deepresearch 本地 normalizer 映射）。平台差异由 js-eyes skill 实现；argv 差异由 deepresearch registry 管理。
 
 前置检查清单：
 
@@ -316,8 +335,17 @@ js-eyes search "query" --skills js-x-ops-skill --max-results 8 --max-pages 1 --s
 # .env 持久配置
 JS_EYES_SKILL=js-zhihu-ops-skill,js-xiaohongshu-ops-skill
 
+# Reddit（自动走 skill-run fallback）
+JS_EYES_SKILL=js-reddit-ops-skill
+
 # 或单次 CLI 覆盖（推荐临时实验）
-npm exec jdr -- research "query" --search js-eyes --js-eyes-skill js-x-ops-skill,js-zhihu-ops-skill
+npm exec jdr -- research "query" --search js-eyes --search-skills js-reddit-ops-skill
+```
+
+**Reddit 排障**：若 unified `js-eyes search` 返回 0 条或参数报错，确认 deepresearch 侧已启用本地 registry（默认已包含 `js-reddit-ops-skill`）。可手动验证：
+
+```bash
+js-eyes skill run js-reddit-ops-skill search "openclaw" --limit 3 --read-mode api --json
 ```
 
 各 skill 串行查询；单 skill 失败时仍返回其他 skill 结果；全部失败才报错。浏览器-backed skill 会自动将问题并发限制为 1。

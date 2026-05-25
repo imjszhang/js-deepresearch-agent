@@ -25,6 +25,15 @@ export const defaultSettings = Object.freeze({
     jsEyesTimeoutMs: 120000,
     jsEyesArgs: {},
     options: {},
+    provider: {
+      cli: 'js-eyes',
+      driver: 'auto',
+      serverUrl: '',
+      timeoutMs: 120000,
+      maxPages: 1,
+      skills: ['js-zhihu-ops-skill'],
+      args: {},
+    },
   },
   research: {
     strategy: 'source-based',

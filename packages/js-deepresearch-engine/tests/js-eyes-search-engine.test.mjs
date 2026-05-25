@@ -8,8 +8,10 @@ import {
   JsEyesCliSearchEngine,
   mergeSkillResults,
   parseJsEyesSkills,
+  parseProviderSkills,
   resolveCliCommand,
   resolveJsEyesSkills,
+  resolveProviderConfig,
   resolveSpawnTarget,
 } from '../src/search/engines/js-eyes.mjs';
 import { resolveSearchConcurrency } from '../src/search/search-capabilities.mjs';
@@ -84,6 +86,56 @@ describe('JsEyesCliSearchEngine', () => {
     ]);
   });
 
+  it('uses local skill-run driver for reddit without unified flags', async () => {
+    const calls = [];
+    const engine = new JsEyesCliSearchEngine({
+      maxResults: 5,
+      jsEyesCli: 'custom-js-eyes',
+      provider: {
+        skills: ['js-reddit-ops-skill'],
+        serverUrl: 'ws://127.0.0.1:18080',
+      },
+    }, {
+      spawn: createMockSpawn({
+        calls,
+        stdout: JSON.stringify({
+          ok: true,
+          result: {
+            items: [
+              {
+                title: 'OpenClaw on Reddit',
+                url: 'https://www.reddit.com/r/openclaw/comments/1/test/',
+                author: 'tester',
+                selftext: 'Discussion thread',
+              },
+            ],
+          },
+        }),
+      }),
+    });
+
+    const results = await engine.search('openclaw');
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].command, 'custom-js-eyes');
+    assert.deepEqual(calls[0].args, [
+      'skill',
+      'run',
+      'js-reddit-ops-skill',
+      'search',
+      'openclaw',
+      '--limit',
+      '5',
+      '--ws-endpoint',
+      'ws://127.0.0.1:18080',
+      '--read-mode',
+      'api',
+    ]);
+    assert.equal(results.length, 1);
+    assert.equal(results[0].engine, 'js-eyes:reddit');
+    assert.match(results[0].url, /reddit\.com/);
+  });
+
   it('exposes serial browser search capabilities', () => {
     const engine = new JsEyesCliSearchEngine({});
     assert.equal(engine.capabilities.maxQuestionConcurrency, 1);
@@ -141,6 +193,10 @@ describe('JsEyesCliSearchEngine', () => {
 describe('JS Eyes skill parsing', () => {
   it('parses comma-separated skill lists', () => {
     assert.deepEqual(
+      parseProviderSkills('js-zhihu-ops-skill,js-xiaohongshu-ops-skill'),
+      ['js-zhihu-ops-skill', 'js-xiaohongshu-ops-skill'],
+    );
+    assert.deepEqual(
       parseJsEyesSkills('js-zhihu-ops-skill,js-xiaohongshu-ops-skill'),
       ['js-zhihu-ops-skill', 'js-xiaohongshu-ops-skill'],
     );
@@ -148,19 +204,19 @@ describe('JS Eyes skill parsing', () => {
 
   it('trims, deduplicates, and ignores empty entries', () => {
     assert.deepEqual(
-      parseJsEyesSkills(' a , a ; b '),
+      parseProviderSkills(' a , a ; b '),
       ['a', 'b'],
     );
   });
 
   it('falls back to the default skill when empty', () => {
-    assert.deepEqual(parseJsEyesSkills(''), ['js-zhihu-ops-skill']);
-    assert.deepEqual(parseJsEyesSkills(undefined), ['js-zhihu-ops-skill']);
+    assert.deepEqual(parseProviderSkills(''), ['js-zhihu-ops-skill']);
+    assert.deepEqual(parseProviderSkills(undefined), ['js-zhihu-ops-skill']);
   });
 
   it('resolves skills from config arrays or strings', () => {
     assert.deepEqual(
-      resolveJsEyesSkills({ jsEyesSkills: ['js-xiaohongshu-ops-skill'] }),
+      resolveProviderConfig({ jsEyesSkills: ['js-xiaohongshu-ops-skill'] }).skills,
       ['js-xiaohongshu-ops-skill'],
     );
     assert.deepEqual(

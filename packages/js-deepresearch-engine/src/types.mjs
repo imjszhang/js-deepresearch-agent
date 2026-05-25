@@ -25,6 +25,18 @@
  * @property {number} [jsEyesTimeoutMs]
  * @property {Record<string, unknown>} [jsEyesArgs]
  * @property {Record<string, unknown>} [options]
+ * @property {JsEyesProviderConfig} [provider]
+ */
+
+/**
+ * @typedef {Object} JsEyesProviderConfig
+ * @property {string} [cli]
+ * @property {'auto'|'unified'|'skill-run'} [driver]
+ * @property {string} [serverUrl]
+ * @property {number} [timeoutMs]
+ * @property {number} [maxPages]
+ * @property {string[]} [skills]
+ * @property {Record<string, unknown>} [args]
  */
 
 /**

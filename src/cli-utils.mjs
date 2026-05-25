@@ -1,4 +1,4 @@
-import { normalizeSearchConfig, parseJsEyesSkills } from 'js-deepresearch-engine';
+import { normalizeSearchConfig, parseProviderSkills } from 'js-deepresearch-engine';
 
 export function parseArgs(argv) {
   const args = [];
@@ -49,6 +49,41 @@ export function formatHistory(records) {
   ].join('  ')).join('\n');
 }
 
+function resolveSkillFlag(flags) {
+  return flags['search-skills']
+    ?? flags['js-eyes-skill']
+    ?? flags['js-eyes-skills'];
+}
+
+function applyProviderOverrides(settings, flags) {
+  const providerMappings = {
+    'search-cli': 'search.provider.cli',
+    'js-eyes-cli': 'search.provider.cli',
+    'search-server-url': 'search.provider.serverUrl',
+    'js-eyes-server-url': 'search.provider.serverUrl',
+    'search-max-pages': 'search.provider.maxPages',
+    'js-eyes-max-pages': 'search.provider.maxPages',
+    'search-timeout-ms': 'search.provider.timeoutMs',
+    'js-eyes-timeout-ms': 'search.provider.timeoutMs',
+  };
+
+  for (const [flag, key] of Object.entries(providerMappings)) {
+    if (flags[flag] !== undefined) {
+      setDeepValue(settings, key, flags[flag]);
+    }
+  }
+
+  const skillValue = resolveSkillFlag(flags);
+  if (skillValue !== undefined) {
+    const skills = parseProviderSkills(skillValue);
+    settings.search ||= {};
+    settings.search.provider ||= {};
+    settings.search.provider.skills = skills;
+    settings.search.jsEyesSkills = skills;
+    settings.search.jsEyesSkill = skills[0];
+  }
+}
+
 export function applyResearchFlags(settings, flags) {
   const mappings = {
     provider: 'llm.provider',
@@ -64,10 +99,6 @@ export function applyResearchFlags(settings, flags) {
     questions: 'research.questionsPerIteration',
     iterations: 'research.iterations',
     concurrency: 'research.concurrency',
-    'js-eyes-cli': 'search.jsEyesCli',
-    'js-eyes-server-url': 'search.jsEyesServerUrl',
-    'js-eyes-max-pages': 'search.jsEyesMaxPages',
-    'js-eyes-timeout-ms': 'search.jsEyesTimeoutMs',
   };
 
   for (const [flag, key] of Object.entries(mappings)) {
@@ -76,13 +107,7 @@ export function applyResearchFlags(settings, flags) {
     }
   }
 
-  const jsEyesSkillValue = flags['js-eyes-skill'] ?? flags['js-eyes-skills'];
-  if (jsEyesSkillValue !== undefined) {
-    const jsEyesSkills = parseJsEyesSkills(jsEyesSkillValue);
-    settings.search ||= {};
-    settings.search.jsEyesSkills = jsEyesSkills;
-    settings.search.jsEyesSkill = jsEyesSkills[0];
-  }
+  applyProviderOverrides(settings, flags);
 
   if (settings.search) {
     settings.search = normalizeSearchConfig(settings.search);

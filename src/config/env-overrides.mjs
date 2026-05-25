@@ -1,4 +1,4 @@
-import { parseJsEyesSkills, normalizeSearchConfig } from 'js-deepresearch-engine';
+import { parseProviderSkills, normalizeSearchConfig } from 'js-deepresearch-engine';
 
 export function settingsFromEnv(env = process.env) {
   function readEnv(name) {
@@ -59,7 +59,7 @@ export function settingsFromEnv(env = process.env) {
 
   const jsEyesSkill = readEnv('JS_EYES_SKILL');
   if (jsEyesSkill) {
-    const jsEyesSkills = parseJsEyesSkills(jsEyesSkill);
+    const jsEyesSkills = parseProviderSkills(jsEyesSkill);
     search.jsEyesSkills = jsEyesSkills;
     search.jsEyesSkill = jsEyesSkills[0];
   }

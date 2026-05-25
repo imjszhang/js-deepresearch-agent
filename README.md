@@ -65,7 +65,7 @@ npm exec jdr -- research "Compare SearXNG and Brave Search APIs" \
 # Override JS Eyes skills for one run without editing .env
 npm exec jdr -- research "openclaw" \
   --search js-eyes \
-  --js-eyes-skill js-x-ops-skill,js-zhihu-ops-skill \
+  --search-skills js-reddit-ops-skill \
   --strategy rapid
 ```
 
@@ -87,13 +87,16 @@ SearXNG is the default search adapter. JS Eyes is also available as a browser-ba
 
 ### JS Eyes Search Provider
 
-Set `SEARCH_ENGINE=js-eyes` to run searches through the JS Eyes unified search facade instead of SearXNG. Deep research calls:
+Set `SEARCH_ENGINE=js-eyes` to run searches through JS Eyes. Deep research normalizes legacy `JS_EYES_*` settings into `search.provider` and chooses a driver automatically:
+
+- **unified**: `js-eyes search "query" --skills ... --json` when the upstream facade supports the skill
+- **skill-run**: `js-eyes skill run <skillId> search "query" ...` for skills with local profiles (for example Reddit)
 
 ```bash
 js-eyes search "query" --skills js-x-ops-skill --max-results 8 --max-pages 1 --server ws://localhost:18080 --json
 ```
 
-The provider reads unified `items[]` from stdout and maps them into research sources. Platform-specific CLI flags, browser tab orchestration, and payload normalization live in js-eyes—not in deepresearch.
+The provider reads unified `items[]` (or raw skill payloads for skill-run fallback) and maps them into research sources. Skill-specific argv differences are handled by deepresearch's local skill registry—no js-eyes repo changes required for new fallback profiles.
 
 Before using this provider:
 
@@ -123,8 +126,10 @@ JS_EYES_SKILL=js-zhihu-ops-skill,js-xiaohongshu-ops-skill
 Or pass skills only for the current CLI run:
 
 ```bash
-npm exec jdr -- research "openclaw" --search js-eyes --js-eyes-skill js-x-ops-skill,js-zhihu-ops-skill
+npm exec jdr -- research "openclaw" --search js-eyes --search-skills js-reddit-ops-skill
 ```
+
+Legacy `--js-eyes-skill` and `JS_EYES_*` env vars remain supported.
 
 Each configured skill is queried serially through the unified JS Eyes search command. Results are interleaved across skills, deduplicated by URL, and capped by the global `maxResults` setting. If one skill fails, the provider returns results from the skills that succeeded; the search only fails when every configured skill fails. Browser-backed providers automatically cap question concurrency to 1.
 
