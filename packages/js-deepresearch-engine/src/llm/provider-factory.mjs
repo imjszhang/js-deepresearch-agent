@@ -3,6 +3,27 @@ import { OpenAICompatibleProvider } from './providers/openai-compatible.mjs';
 
 const llmProviders = new Map();
 
+const BUILTIN_LLM_PROVIDERS = [
+  {
+    id: 'openai-compatible',
+    metadata: {
+      label: 'OpenAI-Compatible',
+      requiresApiKey: true,
+      supportsBaseUrl: true,
+    },
+    create: (config) => new OpenAICompatibleProvider(config),
+  },
+  {
+    id: 'ollama',
+    metadata: {
+      label: 'Ollama',
+      requiresApiKey: false,
+      supportsBaseUrl: true,
+    },
+    create: (config) => new OllamaProvider(config),
+  },
+];
+
 const LLM_ALIASES = {
   openrouter: 'openai-compatible',
 };
@@ -55,6 +76,20 @@ export function registerLlmProvider(id, { create, metadata }) {
   providerMetadata = buildProviderMetadata();
 }
 
+function registerBuiltins() {
+  for (const provider of BUILTIN_LLM_PROVIDERS) {
+    registerLlmProvider(provider.id, {
+      create: provider.create,
+      metadata: provider.metadata,
+    });
+  }
+}
+
+export function resetLlmProviders() {
+  llmProviders.clear();
+  registerBuiltins();
+}
+
 export function createLlmProvider(settings) {
   const provider = settings.llm.provider;
   const resolvedId = LLM_ALIASES[provider] || provider;
@@ -65,20 +100,4 @@ export function createLlmProvider(settings) {
   return entry.create(settings.llm);
 }
 
-registerLlmProvider('openai-compatible', {
-  metadata: {
-    label: 'OpenAI-Compatible',
-    requiresApiKey: true,
-    supportsBaseUrl: true,
-  },
-  create: (config) => new OpenAICompatibleProvider(config),
-});
-
-registerLlmProvider('ollama', {
-  metadata: {
-    label: 'Ollama',
-    requiresApiKey: false,
-    supportsBaseUrl: true,
-  },
-  create: (config) => new OllamaProvider(config),
-});
+registerBuiltins();

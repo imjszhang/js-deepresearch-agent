@@ -7,7 +7,7 @@ export class SearxngSearchEngine {
   }
 
   async search(query, { signal } = {}) {
-    const baseUrl = (this.config.baseUrl || this.config.searxngUrl || 'http://127.0.0.1:8080').replace(/\/$/, '');
+    const baseUrl = (this.config.baseUrl || 'http://127.0.0.1:8080').replace(/\/$/, '');
     const url = new URL(`${baseUrl}/search`);
     url.searchParams.set('q', query);
     url.searchParams.set('format', 'json');

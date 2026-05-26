@@ -131,6 +131,8 @@ Reserved metadata entries exist for future adapters (`anthropic`, `google`, `ope
 
 Additional search engines can be registered at runtime via `registerSearchEngine()`. The js-deepresearch-agent app registers `js-eyes` locally from `src/search-providers/`; that adapter is **not** bundled in this npm package.
 
+`strategyRegistry` remains exported for backward compatibility, but prefer `getStrategyRegistry()` or `registerStrategy()` instead of mutating the registry object directly.
+
 ## Work Directory Artifacts
 
 Optional file output helpers are included for CLI-style integrations:
@@ -151,7 +153,8 @@ const artifacts = saveResearchToWorkDir({
 | Export | Description |
 | --- | --- |
 | `ResearchRunner` | Main research orchestrator |
-| `runStrategy`, `strategyMetadata`, `registerStrategy` | Strategy registry |
+| `runStrategy`, `strategyMetadata`, `registerStrategy`, `getStrategyRegistry` | Strategy registry |
+| `resetStrategyRegistry`, `resetLlmProviders`, `resetSearchEngines`, `resetEngineRegistries` | Test/helper reset for registry state |
 | `createLlmProvider`, `providerMetadata`, `registerLlmProvider` | LLM registry |
 | `createSearchEngine`, `searchEngineMetadata`, `registerSearchEngine` | Search registry |
 | `defaultSettings`, `mergeSettings` | Settings schema |

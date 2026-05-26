@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { createSearchEngine } from '../src/index.mjs';
 import { normalizeSearchConfig } from '../src/search/normalize-search-config.mjs';
 
 describe('normalizeSearchConfig', () => {
@@ -33,5 +34,17 @@ describe('normalizeSearchConfig', () => {
 
     assert.equal(normalized.options.language, 'zh');
     assert.equal(normalized.provider, undefined);
+  });
+
+  it('normalizes legacy searxngUrl before createSearchEngine uses the adapter', () => {
+    const engine = createSearchEngine({
+      search: {
+        engine: 'searxng',
+        searxngUrl: 'http://legacy.local:8080',
+      },
+    });
+
+    assert.equal(engine.config.baseUrl, 'http://legacy.local:8080');
+    assert.equal(engine.config.searxngUrl, undefined);
   });
 });

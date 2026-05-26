@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { afterEach, describe, it } from 'node:test';
 import {
   createLlmProvider,
   createSearchEngine,
@@ -7,12 +7,17 @@ import {
   registerLlmProvider,
   registerSearchEngine,
   registerStrategy,
+  resetEngineRegistries,
   runStrategy,
   searchEngineMetadata,
   strategyMetadata,
 } from '../src/index.mjs';
 
 describe('registry APIs', () => {
+  afterEach(() => {
+    resetEngineRegistries();
+  });
+
   it('registers a custom LLM provider and exposes it in metadata', () => {
     registerLlmProvider('mock-llm', {
       metadata: {
@@ -77,10 +82,34 @@ describe('registry APIs', () => {
     const findings = await runStrategy({
       strategy: 'echo',
       query: 'custom strategy query',
+      settings: { research: {} },
       emit: (message, progress) => events.push({ message, progress }),
     });
 
     assert.deepEqual(findings, [{ question: 'custom strategy query', sources: [] }]);
     assert.deepEqual(events, [{ message: 'Echo strategy running', progress: 50 }]);
+  });
+
+  it('restores built-in registries after resetEngineRegistries()', () => {
+    registerStrategy('temporary', {
+      run: async () => [],
+    });
+    registerLlmProvider('temporary-llm', {
+      create: () => ({ async complete() { return ''; } }),
+    });
+    registerSearchEngine('temporary-search', {
+      create: () => ({ async search() { return []; } }),
+    });
+
+    resetEngineRegistries();
+
+    assert.deepEqual(strategyMetadata.map((entry) => entry.id), [
+      'rapid',
+      'source-based',
+      'parallel',
+    ]);
+    assert.ok(providerMetadata.some((entry) => entry.id === 'openai-compatible'));
+    assert.ok(searchEngineMetadata.some((entry) => entry.id === 'searxng'));
+    assert.equal(strategyMetadata.some((entry) => entry.id === 'temporary'), false);
   });
 });

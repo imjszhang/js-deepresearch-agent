@@ -3,6 +3,17 @@ import { normalizeSearchConfig } from './normalize-search-config.mjs';
 
 const searchEngines = new Map();
 
+const BUILTIN_SEARCH_ENGINES = [
+  {
+    id: 'searxng',
+    metadata: {
+      label: 'SearXNG',
+      supportsBaseUrl: true,
+    },
+    create: (config) => new SearxngSearchEngine(normalizeSearchConfig(config)),
+  },
+];
+
 const RESERVED_SEARCH_METADATA = [
   {
     id: 'duckduckgo',
@@ -45,19 +56,27 @@ export function registerSearchEngine(id, { create, metadata }) {
   searchEngineMetadata = buildSearchEngineMetadata();
 }
 
+function registerBuiltins() {
+  for (const engine of BUILTIN_SEARCH_ENGINES) {
+    registerSearchEngine(engine.id, {
+      create: engine.create,
+      metadata: engine.metadata,
+    });
+  }
+}
+
+export function resetSearchEngines() {
+  searchEngines.clear();
+  registerBuiltins();
+}
+
 export function createSearchEngine(settings) {
   const engineId = settings.search.engine;
   const entry = searchEngines.get(engineId);
   if (!entry?.create) {
     throw new Error(`Unsupported search engine for MVP: ${engineId}`);
   }
-  return entry.create(settings.search);
+  return entry.create(normalizeSearchConfig(settings.search));
 }
 
-registerSearchEngine('searxng', {
-  metadata: {
-    label: 'SearXNG',
-    supportsBaseUrl: true,
-  },
-  create: (config) => new SearxngSearchEngine(normalizeSearchConfig(config)),
-});
+registerBuiltins();

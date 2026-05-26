@@ -59,4 +59,43 @@
  * @property {'info'|'error'} [level]
  */
 
+/**
+ * @typedef {Object} LlmClient
+ * @property {(args: { messages: Array<{ role: string, content: string }>, signal?: AbortSignal, temperature?: number, maxTokens?: number }) => Promise<string>} complete
+ */
+
+/**
+ * @typedef {Object} SearchCapabilities
+ * @property {number|null} [maxQuestionConcurrency]
+ */
+
+/**
+ * @typedef {Object} SearchEngine
+ * @property {(query: string, options?: { signal?: AbortSignal }) => Promise<Source[]>} search
+ * @property {SearchCapabilities} [capabilities]
+ */
+
+/**
+ * @typedef {Object} StrategyContext
+ * @property {string} query
+ * @property {number} iterations
+ * @property {number} questionCount
+ * @property {number|undefined} concurrency
+ * @property {LlmClient} llm
+ * @property {SearchEngine} search
+ * @property {AbortSignal|undefined} [signal]
+ * @property {(message: string, progress?: number, level?: 'info'|'error') => void} emit
+ * @property {Settings} [settings]
+ */
+
+/**
+ * @typedef {Object} StrategyRunInput
+ * @property {string} query
+ * @property {Settings} settings
+ * @property {LlmClient} llm
+ * @property {SearchEngine} search
+ * @property {AbortSignal|undefined} [signal]
+ * @property {(message: string, progress?: number, level?: 'info'|'error') => void} emit
+ */
+
 export {};
