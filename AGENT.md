@@ -13,7 +13,7 @@
 | 本地数据 | `data/js-deepresearch.sqlite`（设置、历史、来源） |
 | 调研产物 | `work_dir/<strategy>/<timestamp>/`（默认） |
 
-核心调研逻辑在 workspace 包 `packages/js-deepresearch-engine`（`js-deepresearch-engine`）中；CLI 调用 `ResearchRunner` 执行调研，并将结果写入 SQLite 与 `work_dir`。
+核心调研逻辑在 workspace 包 `packages/js-deepresearch-engine`（`js-deepresearch-engine`）中；CLI 通过 [`src/cli-research-run.mjs`](src/cli-research-run.mjs) 管理前台调研生命周期（含 Ctrl+C 取消），调用 `ResearchRunner` 执行调研，并将结果写入 SQLite 与 `work_dir`。
 
 ## 调用方式
 
@@ -129,7 +129,7 @@ npm exec jdr -- research "openclaw" \
 
 ### 取消调研（Ctrl+C）
 
-前台 `research` 命令支持优雅取消：
+前台 `research` 命令支持优雅取消。实现位于 [`src/cli-research-run.mjs`](src/cli-research-run.mjs)：`SIGINT` / `SIGTERM` → `AbortController` → `ResearchRunner.run({ signal })` → 搜索层 / js-eyes 子进程。
 
 ```bash
 npm exec jdr -- research "deep research" --search js-eyes --search-skills js-reddit-ops-skill
@@ -137,18 +137,29 @@ npm exec jdr -- research "deep research" --search js-eyes --search-skills js-red
 # 再按一次 Ctrl+C：强制退出（exit code 130）
 ```
 
+**Agent 注意**：在 Cursor 终端或自动化环境中「中断命令」不等于可靠取消——须依赖 CLI 自身的信号处理。若用户要求中止调研，应发送 Ctrl+C 到正在运行的 `jdr research` 进程，或等待其输出 `Research cancelled.`；不要假设 shell 会话断开已停掉底层 Node / js-eyes 子进程。
+
 行为说明：
 
 | 项 | 说明 |
 |---|---|
-| 信号 | 首次 `SIGINT` / `SIGTERM` 触发 `AbortController`，取消信号会传递到 `ResearchRunner`、搜索执行器和 js-eyes CLI 子进程 |
-| 历史 | 默认写入 SQLite：开始时 `running`，成功 `completed`，取消 `cancelled`，失败 `failed` |
+| 信号 | 首次 `SIGINT` / `SIGTERM` 触发 `AbortController`，取消信号传递到 `ResearchRunner`、[`search-executor`](packages/js-deepresearch-engine/src/research/search-executor.mjs) 与 js-eyes CLI 子进程 |
+| stderr 提示 | `[info] -% Cancellation requested. Stopping research...`，随后 `Research cancelled.` |
+| 历史 | 默认写入 SQLite：创建时 `queued` → 立即 `running` → 成功 `completed` / 取消 `cancelled` / 失败 `failed` |
+| 取消时产物 | 不写半成品 `report` / `work_dir` / `sources`；仅更新历史状态与 `error` 字段 |
 | `--no-save` | 不写历史，仅 stderr 输出取消提示 |
-| `--json` | 取消时不输出半截 JSON；错误/取消信息走 stderr，exit code 130 |
-| js-eyes | Windows 上会清理 CLI 进程树（`taskkill /T /F`），避免 `.cmd` shim 留下孤儿 Node 进程 |
-| 限制 | 不会自动停止常驻 `js-eyes server`，也不会关闭已打开的浏览器标签页 |
+| `--json` | 取消时不输出半截 JSON；错误/取消信息走 stderr，exit code **130** |
+| js-eyes | Windows 上 [`cli-process.mjs`](src/search-providers/js-eyes/cli-process.mjs) 会 `child.kill()` 并 `taskkill /T /F` 清理进程树，避免 `.cmd` shim 留下孤儿 Node 进程 |
+| 限制 | 不会自动停止常驻 `js-eyes server`；不会关闭已打开的浏览器标签页；进行中的 LLM HTTP 请求可能需等当前请求返回后才完全停止 |
 
-Web UI 仍通过 `POST /api/research/:id/cancel` 取消后台任务；CLI 前台取消与之语义一致，但无需 job id。
+CLI 与 Web UI 取消对比：
+
+| 通道 | 触发方式 | 实现 |
+|---|---|---|
+| CLI 前台 | Ctrl+C / SIGTERM | [`runCliResearch()`](src/cli-research-run.mjs) + `AbortController` |
+| Web UI | `POST /api/research/:id/cancel` | [`JobRunner.cancel()`](src/jobs/job-runner.mjs) + `AbortController` |
+
+两者语义一致（均向 `ResearchRunner` 传 `signal`），CLI 无需 job id。
 
 ### 会话产物结构
 
@@ -239,7 +250,19 @@ npm exec jdr -- history show <researchId>
 
 列表格式：`id  status     createdAt  query`（制表对齐）。无历史时输出 `No research history.`。
 
-仅 CLI `research` 且未加 `--no-save` 的记录会入库；Web UI 触发的任务由 job runner 单独管理，也可能出现在同一表中。
+### 状态说明
+
+| status | 含义 | 典型来源 |
+|---|---|---|
+| `queued` | 记录已创建，尚未进入 runner | CLI / Web UI 创建瞬间 |
+| `running` | 调研进行中 | CLI `runCliResearch()` 或 Web UI `JobRunner` |
+| `completed` | 成功完成，含 `report` | 正常结束 |
+| `cancelled` | 用户取消（Ctrl+C 或 API cancel） | `Research cancelled.` / AbortError |
+| `failed` | 非取消类错误 | 搜索/LLM 等异常 |
+
+CLI `research`（未加 `--no-save`）与 Web UI 任务共用 `research_history` 表。CLI 在**开始时**即写入记录（不再等完成后才入库），因此 `history list` 可看到进行中的 `running` 条目。
+
+取消后查看：`history show <id>` 输出 `error` 字段（如 `Research cancelled.`），无 `report`。
 
 ---
 
@@ -320,7 +343,7 @@ Agent 选型建议：
 
 ### 搜索：JS Eyes（浏览器技能）
 
-设置 `SEARCH_ENGINE=js-eyes`。本项目**不**安装 skill、不启 server、不管理登录；通过 **app 层本地 provider** 调用 `js-eyes` CLI。JS Eyes **不属于** `js-deepresearch-engine` npm 包，而是在 [`src/search-providers/register-local-search-engines.mjs`](../../src/search-providers/register-local-search-engines.mjs) 启动时注册。
+设置 `SEARCH_ENGINE=js-eyes`。本项目**不**安装 skill、不启 server、不管理登录；通过 **app 层本地 provider** 调用 `js-eyes` CLI。JS Eyes **不属于** `js-deepresearch-engine` npm 包，而是在 [`src/search-providers/register-local-search-engines.mjs`](src/search-providers/register-local-search-engines.mjs) 启动时注册。
 
 配置归一化：`JS_EYES_*` / `--js-eyes-*` / `--search-*` 都会映射到 `search.provider`。Driver 选择规则：
 
@@ -330,7 +353,7 @@ Agent 选型建议：
 | `skill-run` | 全部 skill 走 `js-eyes skill run <id> search ...` |
 | `auto`（默认） | 若任一 skill 在本地 registry 标记为 `skill-run`，则走 skill-run；否则 unified |
 
-本地 skill registry（[`src/search-providers/js-eyes/skill-registry.mjs`](../../src/search-providers/js-eyes/skill-registry.mjs)）用于处理 unified facade 不兼容的 skill，**无需修改 js-eyes 仓库**。新增特殊 skill fallback 时只改 app 层 registry，不改 npm 包。例如 Reddit：
+本地 skill registry（[`src/search-providers/js-eyes/skill-registry.mjs`](src/search-providers/js-eyes/skill-registry.mjs)）用于处理 unified facade 不兼容的 skill，**无需修改 js-eyes 仓库**。新增特殊 skill fallback 时只改 app 层 registry，不改 npm 包。例如 Reddit：
 
 ```bash
 js-eyes skill run js-reddit-ops-skill search "query" --limit 8 --ws-endpoint ws://localhost:18080 --read-mode api --json
@@ -371,7 +394,9 @@ npm exec jdr -- research "query" --search js-eyes --search-skills js-reddit-ops-
 js-eyes skill run js-reddit-ops-skill search "openclaw" --limit 3 --read-mode api --json
 ```
 
-各 skill 串行查询；单 skill 失败时仍返回其他 skill 结果；全部失败才报错。浏览器-backed skill 会自动将问题并发限制为 1。
+各 skill 串行查询；单 skill 失败时仍返回其他 skill 结果（**AbortError 除外**，取消会立即停止后续 skill）；全部失败才报错。浏览器-backed skill 会自动将问题并发限制为 1。
+
+**取消与 js-eyes**：每次搜索可能触发浏览器 `open_url`（如 Reddit）。`source-based` 默认约 2 轮 ×（原问题 + 3 子问题）≈ 7 次搜索；取消后不再调度新搜索，但已打开的标签页需手动关闭。
 
 ---
 
@@ -413,6 +438,19 @@ npm exec jdr -- history show <id>
 - 使用 `--json` 解析结果；进度在 stderr，勿混读
 - 长任务可能数分钟；JS Eyes 多 skill 时超时近似 `JS_EYES_TIMEOUT_MS × skill 数`
 - 产物与 DB 在 `.gitignore`（`data/`、`work_dir/`），勿提交
+- **退出码**：成功 `0`；普通错误 `1`；用户取消 `130`（`Research cancelled.`）
+- 自动化取消：向子进程发 `SIGINT`/`SIGTERM`，或在前台交互环境发送 Ctrl+C；勿仅 kill 父 shell 并假设调研已停
+
+### 6. 中止进行中的调研
+
+用户说「中止 / 停止调研」时：
+
+1. 若 CLI 前台仍在跑：发送 Ctrl+C（或 `kill -INT <pid>`），等待 stderr 出现 `Research cancelled.`
+2. 若通过 Web UI 启动：调用 `POST /api/research/:id/cancel`
+3. 确认：`npm exec jdr -- history list` 中对应条目应为 `cancelled`
+4. 若 js-eyes 仍偶发开页：检查是否有孤儿 `node ... js-eyes` 进程；Windows 可 `js-eyes server stop` 后重启 server（会切断所有浏览器自动化，慎用）
+
+详见 journal：[`journal/2026-05-26/cli-research-cancel.md`](journal/2026-05-26/cli-research-cancel.md)
 
 ---
 
@@ -426,8 +464,9 @@ npm exec jdr -- history show <id>
 | LLM 401/403 | API Key 或 base URL 错误 |
 | `Research not found` | `history show` 的 id 不存在 |
 | `Unknown command` | 命令拼写错误 |
-| 按 Ctrl+C 后 js-eyes 仍开页 | 旧版 CLI 未传 cancel signal；升级后首次 Ctrl+C 应停止后续搜索；已打开的标签页不会自动关闭 |
-| `Research cancelled.` | 用户主动取消；历史状态为 `cancelled`，exit code 130 |
+| 按 Ctrl+C 后 js-eyes 仍开页 | 取消只停**后续**搜索；队列中最后一两次可能仍在执行；已开标签不自动关。确认 CLI 已升级且 stderr 有 `Cancellation requested` |
+| `Research cancelled.` | 用户主动取消；历史 `cancelled`，exit code 130 |
+| 终端断开但调研仍完成 | 旧版或未走信号路径；升级后须用 Ctrl+C，不能仅靠关闭终端 |
 
 CLI 顶层错误输出 `error.message` 到 stderr；普通错误退出码 `1`，取消退出码 `130`。
 
@@ -438,14 +477,19 @@ CLI 顶层错误输出 `error.message` 到 stderr；普通错误退出码 `1`，
 | 文件 | 职责 |
 |---|---|
 | `src/cli.mjs` | CLI 入口、命令分发 |
-| `src/cli-research-run.mjs` | 前台 research 生命周期、SIGINT/SIGTERM 取消、历史状态更新 |
-| `src/cli-utils.mjs` | 参数解析、`config` 点分键读写 |
+| `src/cli-research-run.mjs` | 前台 research 生命周期、`createResearchAbortController()`、`runCliResearch()`、历史状态 `running`/`cancelled`/`failed` |
+| `src/cli-utils.mjs` | 参数解析、`applyResearchFlags()`、`config` 点分键读写 |
+| `src/jobs/job-runner.mjs` | Web UI 异步任务、`cancel()` + `AbortController` |
+| `src/search-providers/js-eyes/cli-process.mjs` | js-eyes 子进程 spawn、abort 时 `killProcessTree()`（Windows `taskkill /T /F`） |
+| `src/search-providers/js-eyes/index.mjs` | js-eyes 搜索 adapter；skill-run 时 AbortError 立即向上抛 |
 | `src/bootstrap.mjs` | SQLite 服务（settings / history / sources） |
 | `src/config/settings-store.mjs` | 设置持久化 + `.env` 覆盖 |
 | `src/config/env-overrides.mjs` | 环境变量映射 |
+| `src/storage/research-repository.mjs` | `research_history` CRUD 与 `updateStatus()` |
 | `packages/js-deepresearch-engine` | `ResearchRunner`、策略、搜索、产物写入 |
+| `packages/js-deepresearch-engine/src/research/search-executor.mjs` | 并发搜索；`AbortError` 不吞掉，取消后不再调度新问题 |
 
-修改 CLI 行为时以 `src/cli.mjs` 与 `tests/cli-utils.test.mjs` 为准；修改调研逻辑优先改 engine 包并跑 `npm test`。
+修改 CLI 行为时以 `src/cli.mjs`、`src/cli-research-run.mjs` 与 `tests/cli-research-cancel.test.mjs` 为准；修改调研逻辑优先改 engine 包并跑 `npm test`。
 
 ---
 
@@ -468,6 +512,8 @@ npm exec jdr -- research "问题"
 
 # 机器可读输出
 npm exec jdr -- research "问题" --json --no-save
+
+# 取消：前台 Ctrl+C 一次（graceful），两次（force exit 130）
 
 # 查/改配置
 npm exec jdr -- config get
