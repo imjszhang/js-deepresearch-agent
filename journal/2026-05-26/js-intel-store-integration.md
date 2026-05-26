@@ -227,7 +227,7 @@ npm test
 | 历史回填 | 已完成 | `npm run intel:import` |
 | Benchmark `--research-id` | 已完成 | CLI + `runBenchmark` |
 | Inspect / list | 已完成 | `npm run intel:inspect` |
-| LLM Wiki compiler | 待做 | 从 intel store 读入，输出 `wiki/` + lint，回链 raw |
+| LLM Wiki compiler | 已完成 | 见 [`js-wiki-engine.md`](./js-wiki-engine.md)；`npm run wiki:compile` |
 | `research_events` | 待做 | 可选：同步 `research_logs` |
 | SQLite 迁移 | 不做 | 短期仍分工明确 |
 | `--force` 重导 findings | 待完善 | 当前 force 主要更新 run 元数据；重导可能追加重复 findings |

@@ -15,11 +15,12 @@
     "server": "node src/server.mjs",
     "build": "vite build",
     "preview": "node src/server.mjs",
-    "test": "npm run test -w js-deepresearch-engine && node --test tests/*.test.mjs",
+    "test": "npm run test -w js-deepresearch-engine && npm run test -w js-wiki-engine && node --test tests/*.test.mjs",
     "test:watch": "node --test --watch tests/*.test.mjs",
     "benchmark": "node scripts/benchmark-research.mjs",
     "intel:import": "node scripts/intel/import-work-dir.mjs",
     "intel:inspect": "node scripts/intel/inspect.mjs",
+    "wiki:compile": "node scripts/wiki/compile.mjs",
     "lint": "eslint ."
   },
   "keywords": [
@@ -48,6 +49,7 @@
     "express": "^5.2.1",
     "js-deepresearch-engine": "workspace:*",
     "js-intel-store": "^0.1.0",
+    "js-wiki-engine": "workspace:*",
     "jsdom": "^29.1.1",
     "marked": "^18.0.4"
   },

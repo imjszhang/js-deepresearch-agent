@@ -7,6 +7,7 @@ dist/
 # Local runtime data
 data/
 work_dir/
+wiki/
 *.sqlite
 *.sqlite-*
 

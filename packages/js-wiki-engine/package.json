@@ -1,0 +1,32 @@
+{
+  "name": "js-wiki-engine",
+  "version": "0.1.0",
+  "description": "Obsidian-compatible LLM Wiki compiler: ingest sources into a Markdown vault with manifest-backed incremental builds",
+  "type": "module",
+  "main": "./src/index.mjs",
+  "exports": {
+    ".": "./src/index.mjs"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test tests/*.test.mjs"
+  },
+  "keywords": [
+    "obsidian",
+    "wiki",
+    "llm",
+    "knowledge-base",
+    "markdown"
+  ],
+  "license": "ISC",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "js-intel-store": "^0.1.0"
+  }
+}
