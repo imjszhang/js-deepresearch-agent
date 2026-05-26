@@ -7,6 +7,7 @@ import {
   strategyMetadata,
 } from 'js-deepresearch-engine';
 import { createServices } from '../bootstrap.mjs';
+import { registerWikiRoutes } from './wiki-routes.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -116,6 +117,8 @@ export function createApp(db) {
   app.delete('/api/history/:id', (req, res) => {
     res.json({ deleted: researchRepository.delete(req.params.id) });
   });
+
+  registerWikiRoutes(app, { settingsStore });
 
   const distPath = path.resolve(__dirname, '../../dist');
   app.use(express.static(distPath));

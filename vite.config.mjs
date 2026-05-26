@@ -13,6 +13,7 @@ export default defineConfig({
         progress: fileURLToPath(new URL('./web/progress.html', import.meta.url)),
         results: fileURLToPath(new URL('./web/results.html', import.meta.url)),
         history: fileURLToPath(new URL('./web/history.html', import.meta.url)),
+        wiki: fileURLToPath(new URL('./web/wiki.html', import.meta.url)),
       },
     },
   },

@@ -2,6 +2,7 @@ export function renderNav(active) {
   const links = [
     ['research', '/', 'Research'],
     ['history', '/history.html', 'History'],
+    ['wiki', '/wiki.html', 'Wiki'],
   ];
   return `
     <nav class="nav">

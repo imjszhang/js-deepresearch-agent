@@ -83,6 +83,11 @@ flowchart TD
   CLI --> Compiler
   CLI --> Lint
   CLI --> Ask
+  Web["Web Wiki 页"] --> API["/api/intel/runs /api/wiki/*"]
+  API --> IntelStore
+  API --> Compiler
+  API --> Lint
+  API --> Ask
 ```
 
 ### 3.2 Vault 结构（默认 `wiki/`）
@@ -115,6 +120,8 @@ wiki/
 | Lint 范围 | 跳过 `Lint/`、`Templates/` 的 wikilink 扫描 | 避免报告正文误报 |
 | 源正文里的 `[[...]]` | `escapeLiteralWikilinks()` 包进反引号 | 教程示例不应变成断链 |
 | benchmark 不进主 CLI | 继续用 `scripts/benchmark-research.mjs` | 评估工具语义独立，避免 CLI 臃肿 |
+| Web 定位 | 编译控制台 + ask 检索，不做完整 Obsidian 替代 | 图谱与深度阅读仍在 Obsidian；避免重复建设页内浏览器 |
+| Web 与 History | completed 行链到 `/wiki.html?researchId=` | SQLite `id` 与 intel `researchId` 在多数新 run 上一致 |
 
 ### 3.3 Public API（第一版）
 
@@ -160,6 +167,8 @@ packages/js-wiki-engine/
 | [`packages/js-wiki-engine/src/query.mjs`](../../packages/js-wiki-engine/src/query.mjs) | 无 LLM：按词频打分返回相关页；有 LLM：拼 prompt |
 | [`scripts/wiki/compile.mjs`](../../scripts/wiki/compile.mjs) | npm script 入口：`--research-id`、`--vault`、`--force`、`--lint` |
 | [`src/cli.mjs`](../../src/cli.mjs) | 主 CLI：`intelCommand` / `wikiCommand`，统一操作入口 |
+| [`src/api/wiki-routes.mjs`](../../src/api/wiki-routes.mjs) | Web API：`/api/intel/runs`、`/api/wiki/*`（含 pages/page 浏览） |
+| [`web/src/wiki.mjs`](../../web/src/wiki.mjs) | Wiki 页 UI：编译控制台 + ask 检索 |
 
 ### 4.3 宿主接入
 
@@ -224,7 +233,42 @@ npm run test -w js-wiki-engine
 npm test
 ```
 
-### 4.5 实现中踩过的坑
+### 4.6 Web UI Wiki 页（第三轮）
+
+在「是否加 Wiki 页」的设计讨论后，落地 **P0/P1**：Web 作操作台，Obsidian 作阅读台。
+
+| 组件 | 路径 | 职责 |
+| --- | --- | --- |
+| API 路由 | [`src/api/wiki-routes.mjs`](../../src/api/wiki-routes.mjs) | `registerWikiRoutes()`，复用 `js-wiki-engine` + `inspect-core` |
+| Wiki 页 | [`web/wiki.html`](../../web/wiki.html) + [`web/src/wiki.mjs`](../../web/src/wiki.mjs) | 选 run、编译、看状态、ask |
+| 导航 | [`web/src/nav.mjs`](../../web/src/nav.mjs) | `Research \| History \| Wiki` |
+| 入口衔接 | [`web/src/history.mjs`](../../web/src/history.mjs)、[`web/src/results.mjs`](../../web/src/results.mjs) | completed 调研直达 Wiki 页 |
+
+**HTTP API：**
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/intel/runs` | 下拉列表数据源 |
+| GET | `/api/wiki/status` | manifest 摘要、lint 行数、vault 路径 |
+| POST | `/api/wiki/compile` | `{ researchId, force?, lint? }` |
+| POST | `/api/wiki/ask` | `{ question, limit? }` 确定性检索 |
+| GET | `/api/wiki/pages` | 按目录分组的 vault 页面列表（排除 templates） |
+| GET | `/api/wiki/page?path=` | 单页 Markdown、frontmatter 元数据、解析后的 wikilink |
+
+Vault 目录由 `resolveWikiVaultDir(settings)` 解析，默认 `wiki/`，可通过 SQLite settings 的 `research.wikiVault` 覆盖（与 CLI `--vault` 语义对齐）。
+
+**页内能力：**
+
+- 显示 vault 绝对路径（点击复制），便于在 Obsidian 中「打开文件夹」。
+- 三个编译按钮：Compile / Compile + Lint / Force full recompile。
+- Ask 区块展示相关页面路径与 excerpt。
+- **P3 浏览（已完成）：** 左侧按目录分组页面列表 + 搜索过滤；右侧渲染 Markdown（剥离 frontmatter）；`[[wikilink]]` 站内跳转；URL `?page=Topics/Llm%20Wiki.md` 深链；Ask 结果点击打开对应页。
+
+**未做（留后续）：** 异步 compile job + SSE 进度；Sources 极多时的分页/折叠。
+
+开发访问：`npm run dev` → `http://127.0.0.1:5173/wiki.html`；生产需 `vite.config.mjs` 增加 `wiki` 构建入口。
+
+### 4.7 实现中踩过的坑
 
 | 现象 | 根因 | 修复 |
 | --- | --- | --- |
@@ -241,7 +285,7 @@ npm test
 
 ```bash
 npm run test -w js-wiki-engine   # 13/13
-npm test                         # 83/83
+npm test                         # 90/90
 ```
 
 | 测试文件 | 覆盖点 |
@@ -251,6 +295,8 @@ npm test                         # 83/83
 | [`packages/js-wiki-engine/tests/intel-store-adapter.test.mjs`](../../packages/js-wiki-engine/tests/intel-store-adapter.test.mjs) | adapter 读归档数据 |
 | [`tests/wiki-compile.test.mjs`](../../tests/wiki-compile.test.mjs) | 宿主：archive → compile → lint |
 | [`tests/cli-intel-wiki.test.mjs`](../../tests/cli-intel-wiki.test.mjs) | 主 CLI：`intel list`、`wiki init/compile/lint/ask` |
+| [`tests/api-wiki.test.mjs`](../../tests/api-wiki.test.mjs) | Web API：intel runs、compile、status、ask、pages/page、404 |
+| [`tests/wiki-path.test.mjs`](../../tests/wiki-path.test.mjs) | vault 路径安全、分组列表、wikilink 解析 |
 
 ### 真实 researchId 端到端（2026-05-26）
 
@@ -269,7 +315,12 @@ npm test                         # 83/83
 | `jdr intel list --limit 1 --json` | 返回最近归档 run JSON |
 | `jdr wiki lint --vault wiki --json` | `ok: true`，0 errors |
 
+### Web API 集成测试（2026-05-26）
+
+[`tests/api-wiki.test.mjs`](../../tests/api-wiki.test.mjs) 在内存 SQLite + 临时 intel/wiki 目录下验证 compile → status → ask 闭环。
+
 ---
+
 
 ## 6. 后续演化
 
@@ -280,18 +331,22 @@ npm test                         # 83/83
 | 基础 lint / ask | 已完成 | lint 结构化报告；ask 检索 MVP |
 | 主 CLI `intel` / `wiki` | 已完成 | [`src/cli.mjs`](../../src/cli.mjs)；见 [`tests/cli-intel-wiki.test.mjs`](../../tests/cli-intel-wiki.test.mjs) |
 | `wiki/` gitignore | 已完成 | 与 `data/`、`work_dir/` 一致 |
+| Web Wiki 页（编译 + ask） | 已完成 | [`web/wiki.html`](../../web/wiki.html)、[`src/api/wiki-routes.mjs`](../../src/api/wiki-routes.mjs)；[`AGENT.md`](../../AGENT.md) 已补充 |
+| Web 页内 Markdown 浏览 | 已完成 | P3：`GET /api/wiki/pages`、`GET /api/wiki/page`；[`web/src/wiki-markdown.mjs`](../../web/src/wiki-markdown.mjs) |
+| Web 异步 compile + 进度 | 待做 | source 多时同步 POST 可能阻塞；可仿 research SSE |
+| Web 暴露 `intel import` | 待做 | 目前仍提示走 CLI import |
 | LLM 合并 topic、矛盾标注 | 待做 | `compileWiki({ llm, mode })` 已预留抛错 |
 | Query 答案写入 `Questions/` | 待做 | 与 askWiki LLM 模式联动 |
 | research 完成自动 compile | 不做（短期） | 保持 research 路径轻量 |
-| `history` 与 intel store 打通 | 待做 | SQLite 历史 vs `data/intel` 仍双轨 |
+| `history` 与 intel store 打通 | 部分完成 | Web 用 `researchId` 链到 Wiki；列表仍分 SQLite / intel 两套 |
 
 ---
 
 ## 附：问题—思考—方案—执行对照
 
-| 阶段 | 第一轮（包 + 脚本） | 第二轮（CLI + 仓库习惯） |
-| --- | --- | --- |
-| 问题 | intel store 能索引 research，但缺少 Obsidian 可用的 Wiki 编译层 | 能力散落在 `scripts/`，主 CLI 用不上 |
-| 思考 | Raw 只读；Wiki 独立包；MVP 确定性可跑 | 操作入口统一到 `jdr`；生成物不入库 |
-| 方案 | `js-wiki-engine` + `wiki:compile` + manifest 增量 | `intel`/`wiki` 子命令；`.gitignore` 加 `wiki/` |
-| 执行 | 13 包测 + wiki-compile；53 source E2E lint 0 错 | `cli-intel-wiki` 测 + 全量 **83/83**；`jdr wiki lint` 冒烟通过 |
+| 阶段 | 第一轮（包 + 脚本） | 第二轮（CLI + 仓库习惯） | 第三轮（Web UI） |
+| --- | --- | --- | --- |
+| 问题 | intel store 能索引，缺 Wiki 编译层 | 能力散落 `scripts/`，CLI 用不上 | 只有 CLI，浏览器用户无入口 |
+| 思考 | Raw 只读；Wiki 独立包；确定性 MVP | 统一到 `jdr`；`wiki/` 不入库 | Web=操作台，Obsidian=阅读台 |
+| 方案 | `js-wiki-engine` + manifest 增量 | `intel`/`wiki` 子命令 | `/api/wiki/*` + `wiki.html` + History/Results 跳转 |
+| 执行 | 13 包测；53 source E2E lint 0 | **83/83**；CLI 冒烟 | **90/90**；P3 页内浏览 + `wiki-path` 测 |

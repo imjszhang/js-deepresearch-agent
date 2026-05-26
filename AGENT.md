@@ -424,6 +424,22 @@ npm exec jdr -- serve --port 3000
 
 与 `npm run server` 类似，均提供 Express API + 已构建前端。开发前端时用 `npm run dev`（Vite 代理 `/api`）。
 
+### Web UI：Wiki 页
+
+导航 **Research | History | Wiki**，页面 [`web/wiki.html`](web/wiki.html)（[`web/src/wiki.mjs`](web/src/wiki.mjs)）。
+
+| 能力 | 说明 |
+|---|---|
+| 选择 run | 下拉列表来自 `GET /api/intel/runs` |
+| 编译 | `POST /api/wiki/compile`（可选 lint / force） |
+| 状态 | `GET /api/wiki/status`（manifest、lint 摘要、vault 路径） |
+| 检索 | `POST /api/wiki/ask`（确定性页面检索） |
+| 浏览 | `GET /api/wiki/pages`（分组列表）、`GET /api/wiki/page?path=`（正文 + wikilink 元数据）；页内渲染 Markdown，`[[wikilink]]` 站内跳转 |
+
+History / Results 中 completed 调研可直达 `/wiki.html?researchId=<id>`；已编译页面可深链 `/wiki.html?page=Topics/Llm%20Wiki.md`。Vault 默认 `wiki/`，可通过设置 `research.wikiVault` 覆盖（API 读取 SQLite settings）。
+
+开发：`npm run dev` 后打开 `http://127.0.0.1:5173/wiki.html`；生产需 `npm run build` 将 `wiki.html` 打进 `dist/`。
+
 ---
 
 ## `benchmark` — 评估报告与来源匹配
@@ -712,6 +728,10 @@ CLI 顶层错误输出 `error.message` 到 stderr；普通错误退出码 `1`，
 | `scripts/wiki/compile.mjs` | npm `wiki:compile` 脚本入口（逻辑与 `jdr wiki compile` 等价） |
 | `packages/js-wiki-engine` | `initWiki`、`compileWiki`、`lintWiki`、`askWiki`、`loadSourcesFromIntelStore` |
 | `packages/js-intel-store` | npm 依赖；`StorageEngine` + data source registry |
+| `src/api/wiki-routes.mjs` | Web API：`/api/intel/runs`、`/api/wiki/compile`、`/api/wiki/status`、`/api/wiki/ask`、`/api/wiki/pages`、`/api/wiki/page` |
+| `src/api/wiki-path.mjs` | Vault 路径校验、页面读取、wikilink 解析 |
+| `web/src/wiki.mjs` | Wiki 页：编译控制台 + ask + 侧栏浏览 |
+| `web/src/wiki-markdown.mjs` | Markdown 渲染（marked + DOMPurify）与 wikilink 链接 |
 | `src/jobs/job-runner.mjs` | Web UI 异步任务、`cancel()` + `AbortController` |
 | `src/search-providers/js-eyes/cli-process.mjs` | js-eyes 子进程 spawn、abort 时 `killProcessTree()`（Windows `taskkill /T /F`） |
 | `src/search-providers/js-eyes/index.mjs` | js-eyes 搜索 adapter；skill-run 时 AbortError 立即向上抛 |

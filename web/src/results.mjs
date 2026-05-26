@@ -24,6 +24,7 @@ async function main() {
         <p class="muted">${escapeHtml(record.query)}</p>
         <p>Status: <strong>${record.status}</strong></p>
         <button id="download">Download Markdown</button>
+        ${record.status === 'completed' ? `<a class="wiki-cta" href="/wiki.html?researchId=${encodeURIComponent(record.id)}">Compile Obsidian Wiki</a>` : ''}
       </section>
       <section class="card report">${renderMarkdown(record.report || record.error || 'No report yet.')}</section>
       <section class="card">

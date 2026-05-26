@@ -42,6 +42,7 @@ function renderHistory(history) {
             <td>${new Date(item.createdAt).toLocaleString()}</td>
             <td>
               <a href="/results.html?id=${item.id}">Open</a>
+              ${item.status === 'completed' ? `<a href="/wiki.html?researchId=${encodeURIComponent(item.id)}">Wiki</a>` : ''}
               <button class="secondary" data-delete="${item.id}">Delete</button>
             </td>
           </tr>
