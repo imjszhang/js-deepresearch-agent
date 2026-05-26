@@ -70,6 +70,7 @@ export function registerStrategy(id, entry) {
     supportsConcurrency: entry.supportsConcurrency ?? true,
     speed: entry.speed || 'balanced',
     depth: entry.depth || 'balanced',
+    progressProfile: entry.progressProfile,
     run: entry.run,
   };
   strategyMetadata = buildStrategyMetadata();
@@ -89,6 +90,9 @@ export async function runStrategy({ strategy, ...input }) {
     throw new Error(`Unsupported research strategy: ${strategy}`);
   }
 
-  const context = buildStrategyContext(input);
+  const context = buildStrategyContext({
+    ...input,
+    progressProfile: entry.progressProfile,
+  });
   return entry.run(context);
 }

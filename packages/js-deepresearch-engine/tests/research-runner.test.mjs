@@ -50,6 +50,8 @@ describe('ResearchRunner', () => {
     assert.deepEqual(searchedQuestions, ['test topic', 'follow up one', 'follow up two']);
     assert.equal(result.sources.length, 3);
     assert.equal(events[0].message, 'Research started');
+    assert.ok(events.some((event) => event.message === 'Generating rapid follow-up questions'));
+    assert.ok(events.some((event) => event.message === 'Running 3 rapid searches'));
     assert.equal(events.at(-1).message, 'Research complete');
     assert.equal(events.at(-1).progress, 100);
   });

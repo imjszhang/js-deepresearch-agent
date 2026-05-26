@@ -6,9 +6,8 @@ import { resolveStrategyConcurrency, uniqueQuestionCount } from '../strategy-uti
  * Shared iterative research pipeline used by source-based and parallel strategies.
  *
  * @param {import('../../types.mjs').StrategyContext} context
- * @param {{ variant: 'source-based' | 'parallel' }} options
  */
-export async function runIterativeStrategy(context, { variant }) {
+export async function runIterativeStrategy(context) {
   const {
     query,
     iterations,
@@ -26,7 +25,6 @@ export async function runIterativeStrategy(context, { variant }) {
     const priorContext = iteration === 1 ? '' : formatSourcesForQuestionContext(findings);
     emit({
       stage: 'generating_questions',
-      strategy: variant,
       iteration,
       iterations,
     });
@@ -42,7 +40,6 @@ export async function runIterativeStrategy(context, { variant }) {
     const iterationQuestions = iteration === 1 ? [query, ...questions] : questions;
     emit({
       stage: 'searching',
-      strategy: variant,
       iteration,
       iterations,
       total: uniqueQuestionCount(iterationQuestions),
@@ -55,7 +52,6 @@ export async function runIterativeStrategy(context, { variant }) {
       onProgress: ({ completed, total }) => {
         emit({
           stage: 'search_progress',
-          strategy: variant,
           iteration,
           iterations,
           completed,

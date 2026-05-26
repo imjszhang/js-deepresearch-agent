@@ -9,9 +9,18 @@ export const sourceBasedStrategyDefinition = {
   supportsConcurrency: true,
   speed: 'balanced',
   depth: 'deep',
+  progressProfile: {
+    generateQuestionsMessage: ({ iteration, iterations }) => (
+      `Generating research questions for iteration ${iteration}/${iterations}`
+    ),
+    searchStartMessage: ({ iteration, iterations }) => `Searching iteration ${iteration}/${iterations}`,
+    searchProgressMessage: ({ completed, total, iteration }) => (
+      `Completed ${completed}/${total} searches for iteration ${iteration}`
+    ),
+  },
 };
 
 /** @param {import('../../types.mjs').StrategyContext} context */
 export async function runSourceBased(context) {
-  return runIterativeStrategy(context, { variant: 'source-based' });
+  return runIterativeStrategy(context);
 }

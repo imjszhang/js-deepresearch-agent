@@ -11,6 +11,12 @@ function progressBase(iteration, iterations) {
   return 10 + Math.round(((iteration - 1) / iterations) * 60);
 }
 
+function resolveMessage(template, event) {
+  if (typeof template === 'function') return template(event);
+  if (typeof template === 'string') return template;
+  return null;
+}
+
 /**
  * Maps a structured strategy progress event to the public onProgress shape.
  *
@@ -20,13 +26,12 @@ function progressBase(iteration, iterations) {
 export function mapStructuredProgressEvent(event) {
   const {
     stage,
-    strategy,
     iteration,
     iterations,
     completed,
     total,
-    question,
     level = 'info',
+    progressProfile = {},
   } = event;
 
   switch (stage) {
@@ -37,58 +42,29 @@ export function mapStructuredProgressEvent(event) {
     case 'research_complete':
       return { message: 'Research complete', progress: 100, level };
     case 'generating_questions':
-      if (strategy === 'rapid') {
-        return { message: 'Generating rapid follow-up questions', progress: 10, level };
-      }
-      if (strategy === 'source-based') {
-        return {
-          message: `Generating research questions for iteration ${iteration}/${iterations}`,
-          progress: progressBase(iteration, iterations),
-          level,
-        };
-      }
-      if (strategy === 'parallel') {
-        return {
-          message: `Generating parallel questions for iteration ${iteration}/${iterations}`,
-          progress: progressBase(iteration, iterations),
-          level,
-        };
-      }
-      break;
+      return {
+        message: resolveMessage(progressProfile.generateQuestionsMessage, event) || 'Generating research questions',
+        progress: iteration && iterations ? progressBase(iteration, iterations) : 10,
+        level,
+      };
     case 'searching':
-      if (strategy === 'rapid') {
-        return {
-          message: `Running ${total} rapid searches`,
-          progress: 25,
-          level,
-        };
-      }
-      if (strategy === 'source-based') {
-        return {
-          message: `Searching iteration ${iteration}/${iterations}`,
-          progress: progressBase(iteration, iterations) + 5,
-          level,
-        };
-      }
-      if (strategy === 'parallel') {
-        return {
-          message: `Running ${total} parallel searches`,
-          progress: progressBase(iteration, iterations) + 5,
-          level,
-        };
-      }
-      break;
+      return {
+        message: resolveMessage(progressProfile.searchStartMessage, event) || `Running ${total} searches`,
+        progress: iteration && iterations ? progressBase(iteration, iterations) + 5 : 25,
+        level,
+      };
     case 'search_item_complete':
       return {
-        message: `Rapid search complete: ${question}`,
-        progress: 25 + Math.round((completed / total) * 45),
+        message: resolveMessage(progressProfile.searchItemCompleteMessage, event) || `Search complete: ${event.question}`,
+        progress: typeof progressProfile.searchItemProgress === 'function'
+          ? progressProfile.searchItemProgress(event)
+          : 25 + Math.round((completed / total) * 45),
         level,
       };
     case 'search_progress':
       return {
-        message: strategy === 'parallel'
-          ? `Completed ${completed}/${total} parallel searches for iteration ${iteration}`
-          : `Completed ${completed}/${total} searches for iteration ${iteration}`,
+        message: resolveMessage(progressProfile.searchProgressMessage, event)
+          || `Completed ${completed}/${total} searches for iteration ${iteration}`,
         progress: progressBase(iteration, iterations) + 5 + Math.round((completed / total) * (50 / iterations)),
         level,
       };

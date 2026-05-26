@@ -11,6 +11,12 @@ export const rapidStrategyDefinition = {
   supportsConcurrency: true,
   speed: 'fast',
   depth: 'light',
+  progressProfile: {
+    generateQuestionsMessage: () => 'Generating rapid follow-up questions',
+    searchStartMessage: ({ total }) => `Running ${total} rapid searches`,
+    searchItemCompleteMessage: ({ question }) => `Rapid search complete: ${question}`,
+    searchItemProgress: ({ completed, total }) => 25 + Math.round((completed / total) * 45),
+  },
 };
 
 /** @param {import('../../types.mjs').StrategyContext} context */
@@ -27,7 +33,7 @@ export async function runRapid(context) {
   const followUpCount = Math.min(questionCount, 3);
   const resolvedConcurrency = resolveStrategyConcurrency(search, concurrency, followUpCount + 1);
 
-  emit({ stage: 'generating_questions', strategy: 'rapid' });
+  emit({ stage: 'generating_questions' });
   const followUps = await generateQuestions({
     llm,
     query,
@@ -38,7 +44,7 @@ export async function runRapid(context) {
   const questions = [query, ...followUps];
   const totalQuestions = uniqueQuestionCount(questions);
 
-  emit({ stage: 'searching', strategy: 'rapid', total: totalQuestions });
+  emit({ stage: 'searching', total: totalQuestions });
   return searchQuestions({
     questions,
     search,
@@ -47,7 +53,6 @@ export async function runRapid(context) {
     onProgress: ({ completed, total, question }) => {
       emit({
         stage: 'search_item_complete',
-        strategy: 'rapid',
         question,
         completed,
         total,

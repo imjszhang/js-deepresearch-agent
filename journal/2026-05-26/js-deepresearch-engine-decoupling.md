@@ -180,7 +180,7 @@ node --test tests/*.test.mjs
 
 | 方向 | 状态 | 说明 |
 | ---- | ---- | ---- |
-| 进度与策略解耦 | **已完成（2026-05-26 后续）** | 见下文第 7 节 |
+| 进度与策略解耦 | **已完成（2026-05-26 后续）** | 见下文第 7 节，已升级为 `progressProfile` 驱动 |
 | metadata 与 factory 分离 | 待做 | 预留 provider catalog 迁到独立模块，factory 只管 create |
 | 多实例 registry | 待做 | 需要嵌入式多租户时，再引入 `createEngineRegistry()` 或 `ResearchRunner({ registries })` |
 | 停止导出可变 `strategyRegistry` | 待做 | 主版本可 deprecate 后移除，强制走 `registerStrategy` / `getStrategyRegistry` |
@@ -197,13 +197,20 @@ node --test tests/*.test.mjs
   - 内置策略上报结构化事件（`stage`、`iteration`、`completed`、`total` 等）。
   - `ResearchRunner` 通过 `createProgressEmitter()` 映射为现有 `onProgress({ message, progress, level })`。
   - 自定义 strategy 仍可使用 `emit('message', progress)` 旧式调用。
-- `rapid.mjs`、`iterative.mjs` 不再硬编码最终展示文案和百分比；`source-based.mjs` / `parallel.mjs` 进一步瘦身为 variant 参数。
+- 初版 progress 解耦之后，继续把 mapper 从“按策略 id 分支”升级为 **`progressProfile` 驱动**：
+  - `rapid.mjs`、`source-based.mjs`、`parallel.mjs` 各自在 strategy definition 中声明 `progressProfile`。
+  - [`strategy-context.mjs`](../../packages/js-deepresearch-engine/src/research/strategy-context.mjs) 在构建 context 时，把当前策略的 `progressProfile` 自动附加到结构化 progress event。
+  - [`progress-events.mjs`](../../packages/js-deepresearch-engine/src/research/progress-events.mjs) 不再判断 `rapid` / `source-based` / `parallel`，只读取 profile 模板生成 message/progress。
+  - 新增内置策略时，只需要提供 profile，不需要再修改全局 progress mapper。
+
+这里真正的边界变化是：**策略知道自己的表达方式，mapper 只知道如何解释 profile**。  
+这比把所有策略文案集中进 `progress-events.mjs` 更适合后续扩展。
 
 ### 7.2 验证
 
 | 范围 | 结果 |
 | ---- | ---- |
-| engine 包 | **29/29** 通过（含新增 `progress-events.test.mjs`） |
+| engine 包 | **30/30** 通过（含 profile 驱动的 `progress-events.test.mjs`） |
 | 根项目 | **42/42** 通过 |
 
 ### 7.3 仍保留的长期路线
@@ -213,6 +220,7 @@ node --test tests/*.test.mjs
 - `createEngineRegistry()` / `new ResearchRunner({ registries })`
 - metadata/catalog 从 factory 分离
 - `work-output` 迁出 engine 包
+- 进一步把 `progressProfile` 文档化为自定义策略的可选扩展契约
 
 触发条件：出现同进程多租户、UI catalog 独立演进、或 npm 包 slim 化的明确需求时再开下一轮。
 
@@ -225,4 +233,4 @@ node --test tests/*.test.mjs
 | 问题 | `js-deepresearch-engine` 模块耦合性如何？策略层、settings 透传、search 归一化、registry 全局状态是否需要治理？ |
 | 思考 | 主链路分层清晰、无循环依赖；技术债集中在 `strategies.mjs` 过重、配置/schema 隐式耦合、测试隔离不足——属于「未来增长会变重」，而非已失控 |
 | 方案 | 分五阶段：拆策略模块 → 抽迭代管线 → 显式 StrategyContext → 统一 search 归一化 → registry reset + 只读访问；保持公开 API 兼容 |
-| 执行 | 新增 `strategies/*`、`strategy-context`、`registry-reset`；更新 types/search-factory/searxng；扩展测试；engine 26 + 根项目 42 测试全绿 |
+| 执行 | 新增 `strategies/*`、`strategy-context`、`registry-reset`、`progress-events`；更新 types/search-factory/searxng；将 progress 映射升级为 `progressProfile` 驱动；engine 30 + 根项目 42 测试全绿 |

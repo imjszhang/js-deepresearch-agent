@@ -62,13 +62,22 @@
 /**
  * @typedef {Object} StrategyProgressEvent
  * @property {'research_started'|'synthesizing_report'|'research_complete'|'generating_questions'|'searching'|'search_item_complete'|'search_progress'} stage
- * @property {'rapid'|'source-based'|'parallel'} [strategy]
  * @property {number} [iteration]
  * @property {number} [iterations]
  * @property {number} [completed]
  * @property {number} [total]
  * @property {string} [question]
+ * @property {StrategyProgressProfile} [progressProfile]
  * @property {'info'|'error'} [level]
+ */
+
+/**
+ * @typedef {Object} StrategyProgressProfile
+ * @property {(event: StrategyProgressEvent) => string} [generateQuestionsMessage]
+ * @property {(event: StrategyProgressEvent) => string} [searchStartMessage]
+ * @property {(event: StrategyProgressEvent) => string} [searchItemCompleteMessage]
+ * @property {(event: StrategyProgressEvent) => number} [searchItemProgress]
+ * @property {(event: StrategyProgressEvent) => string} [searchProgressMessage]
  */
 
 /**
@@ -97,6 +106,7 @@
  * @property {SearchEngine} search
  * @property {AbortSignal|undefined} [signal]
  * @property {(input: string|StrategyProgressEvent, progress?: number, level?: 'info'|'error') => void} emit
+ * @property {StrategyProgressProfile} [progressProfile]
  * @property {Settings} [settings]
  */
 
