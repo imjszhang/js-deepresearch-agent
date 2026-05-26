@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { pathToFileURL } from 'node:url';
 import '../src/config/bootstrap-env.mjs';
 import { createLlmProvider } from 'js-deepresearch-engine';
 import { parseArgs } from '../src/cli-utils.mjs';
@@ -6,11 +7,17 @@ import { createServices } from '../src/bootstrap.mjs';
 import { getDb } from '../src/storage/db.mjs';
 import { runBenchmark } from './benchmark/run-benchmark.mjs';
 import { formatJsonSummary, formatMarkdownSummary } from './benchmark/format-output.mjs';
+import { resolveBenchmarkTarget } from './benchmark/resolve-target.mjs';
 
-main(process.argv.slice(2)).catch((error) => {
-  console.error(error.message);
-  process.exitCode = 1;
-});
+const isCliEntry = process.argv[1]
+  && pathToFileURL(process.argv[1]).href === import.meta.url;
+
+if (isCliEntry) {
+  main(process.argv.slice(2)).catch((error) => {
+    console.error(error.message);
+    process.exitCode = 1;
+  });
+}
 
 async function main(argv) {
   const { args, flags } = parseArgs(argv);
@@ -20,10 +27,7 @@ async function main(argv) {
     return;
   }
 
-  const workDir = args[0];
-  if (!workDir) {
-    throw new Error('Usage: node scripts/benchmark-research.mjs <work-dir> [--json] [--no-llm] [--strict-platform js-eyes:zhihu]');
-  }
+  const { workDir, researchId } = resolveBenchmarkTarget({ args, flags });
 
   const llmEnabled = !flags['no-llm'];
   let llm = null;
@@ -37,6 +41,7 @@ async function main(argv) {
 
   const result = await runBenchmark({
     workDir,
+    researchId,
     strictPlatform: flags['strict-platform'] || null,
     llm,
     llmEnabled,
@@ -54,11 +59,18 @@ function printHelp() {
 Research source-matching benchmark
 
 Usage:
-  node scripts/benchmark-research.mjs <work-dir> [--json] [--no-llm] [--strict-platform js-eyes:zhihu]
+  node scripts/benchmark-research.mjs <work-dir> [options]
+  node scripts/benchmark-research.mjs --research-id <id> [options]
+
+Options:
+  --research-id <id>       Load artifacts from js-intel-store by researchId
+  --json                   JSON output
+  --no-llm                 Disable LLM judge
+  --strict-platform <id>   e.g. js-eyes:zhihu
 
 Examples:
   node scripts/benchmark-research.mjs work_dir/source-based/2026-05-26_043125
+  node scripts/benchmark-research.mjs --research-id imported__source-based__2026-05-26_065414 --no-llm
   node scripts/benchmark-research.mjs work_dir/source-based/2026-05-26_043125 --no-llm --json
-  node scripts/benchmark-research.mjs work_dir/source-based/2026-05-26_043125 --strict-platform js-eyes:zhihu
 `);
 }

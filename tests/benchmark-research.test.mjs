@@ -13,6 +13,7 @@ import {
 } from '../src/storage/intel-store.mjs';
 import { scoreClaimRule, summarizeFindingsHealth } from '../scripts/benchmark/rule-score.mjs';
 import { runBenchmark } from '../scripts/benchmark/run-benchmark.mjs';
+import { resolveBenchmarkTarget } from '../scripts/benchmark/resolve-target.mjs';
 import { formatJsonSummary } from '../scripts/benchmark/format-output.mjs';
 
 const tempDirs = [];
@@ -413,5 +414,26 @@ LLM Wiki 由 Karpathy 提出，强调编译式知识沉淀 [1.1]。
       engine,
     });
     assert.ok(result.metrics.claimCount >= 1);
+  });
+});
+
+describe('benchmark CLI target resolution', () => {
+  it('accepts work-dir or research-id exclusively', () => {
+    assert.deepEqual(
+      resolveBenchmarkTarget({ args: ['work_dir/run-1'], flags: {} }),
+      { workDir: 'work_dir/run-1', researchId: null },
+    );
+    assert.deepEqual(
+      resolveBenchmarkTarget({ args: [], flags: { 'research-id': 'run-abc' } }),
+      { workDir: null, researchId: 'run-abc' },
+    );
+    assert.throws(
+      () => resolveBenchmarkTarget({ args: ['work_dir/run-1'], flags: { 'research-id': 'run-abc' } }),
+      /not both/,
+    );
+    assert.throws(
+      () => resolveBenchmarkTarget({ args: [], flags: {} }),
+      /Provide/,
+    );
   });
 });

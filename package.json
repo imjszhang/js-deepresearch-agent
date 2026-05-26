@@ -18,6 +18,8 @@
     "test": "npm run test -w js-deepresearch-engine && node --test tests/*.test.mjs",
     "test:watch": "node --test --watch tests/*.test.mjs",
     "benchmark": "node scripts/benchmark-research.mjs",
+    "intel:import": "node scripts/intel/import-work-dir.mjs",
+    "intel:inspect": "node scripts/intel/inspect.mjs",
     "lint": "eslint ."
   },
   "keywords": [
