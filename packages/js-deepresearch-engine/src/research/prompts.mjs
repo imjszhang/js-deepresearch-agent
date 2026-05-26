@@ -1,3 +1,5 @@
+import { getSourceEvidence } from './source-based-settings.mjs';
+
 export function questionPrompt({ query, count, mode = 'initial', context = '' }) {
   const modeInstructions = {
     initial: `Break this research topic into ${count} focused web search questions:`,
@@ -31,7 +33,7 @@ export function questionPrompt({ query, count, mode = 'initial', context = '' })
 export function reportPrompt({ query, findings }) {
   const sourceBlock = findings.map((finding, index) => {
     const sources = finding.sources.map((source, sourceIndex) => (
-      `[${index + 1}.${sourceIndex + 1}] ${source.title}\n${source.url}\n${source.snippet}`
+      `[${index + 1}.${sourceIndex + 1}] ${source.title}\n${source.url}\nEvidence: ${getSourceEvidence(source)}`
     )).join('\n\n');
     return `Question: ${finding.question}\nSources:\n${sources}`;
   }).join('\n\n---\n\n');
@@ -43,6 +45,8 @@ export function reportPrompt({ query, findings }) {
         'You write concise deep research reports in Markdown.',
         'Use citations like [1.1] when referencing sources.',
         'Include: Summary, Key Findings, Evidence, Caveats, Sources.',
+        'Only use facts supported by the Evidence blocks.',
+        'If evidence is insufficient, say so in Caveats instead of inventing details.',
       ].join(' '),
     },
     {

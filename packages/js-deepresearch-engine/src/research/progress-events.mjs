@@ -68,6 +68,20 @@ export function mapStructuredProgressEvent(event) {
         progress: progressBase(iteration, iterations) + 5 + Math.round((completed / total) * (50 / iterations)),
         level,
       };
+    case 'enriching_sources':
+      return {
+        message: resolveMessage(progressProfile.enrichingSourcesMessage, event)
+          || `Enriching sources for iteration ${iteration}/${iterations}`,
+        progress: iteration && iterations ? progressBase(iteration, iterations) + 8 : 55,
+        level,
+      };
+    case 'filtering_sources':
+      return {
+        message: resolveMessage(progressProfile.filteringSourcesMessage, event)
+          || 'Filtering sources for relevance',
+        progress: 75,
+        level,
+      };
     default:
       break;
   }

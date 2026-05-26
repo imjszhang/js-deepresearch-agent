@@ -101,6 +101,10 @@ export function applyResearchFlags(settings, flags) {
     questions: 'research.questionsPerIteration',
     iterations: 'research.iterations',
     concurrency: 'research.concurrency',
+    'source-fetch-mode': 'research.sourceBased.fetchMode',
+    'source-max-urls': 'research.sourceBased.maxUrlsTotal',
+    'source-enable-filter': 'research.sourceBased.enableRelevanceFilter',
+    'source-max-sources': 'research.sourceBased.maxSourcesForReport',
   };
 
   for (const [flag, key] of Object.entries(mappings)) {

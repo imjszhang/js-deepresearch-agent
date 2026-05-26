@@ -132,6 +132,29 @@ describe('benchmark rule scoring', () => {
     );
     assert.ok(platformMismatch.flags.includes('platform_mismatch'));
   });
+
+  it('scores keyword overlap using summary and content evidence', () => {
+    const map = buildCitationMap([
+      {
+        question: 'q1',
+        sources: [{
+          title: 'Wiki',
+          url: 'https://a',
+          snippet: 'short title only',
+          summary: 'Karpathy LLM Wiki compiler-style RAG workflow',
+          engine: 'js-eyes:zhihu',
+        }],
+      },
+    ]);
+
+    const scored = scoreClaimRule(
+      { section: 'Summary', text: 'Karpathy LLM Wiki uses compiler-style RAG [1.1].' },
+      map,
+    );
+
+    assert.ok(scored.keywordOverlap > 0.2);
+    assert.equal(scored.flags.includes('low_keyword_overlap'), false);
+  });
 });
 
 describe('runBenchmark', () => {

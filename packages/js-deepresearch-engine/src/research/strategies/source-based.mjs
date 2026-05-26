@@ -1,4 +1,4 @@
-import { runIterativeStrategy } from './iterative.mjs';
+import { runSourceBasedPipeline } from './source-based-pipeline.mjs';
 
 export const sourceBasedStrategyDefinition = {
   id: 'source-based',
@@ -17,10 +17,14 @@ export const sourceBasedStrategyDefinition = {
     searchProgressMessage: ({ completed, total, iteration }) => (
       `Completed ${completed}/${total} searches for iteration ${iteration}`
     ),
+    enrichingSourcesMessage: ({ iteration, iterations }) => (
+      `Enriching sources for iteration ${iteration}/${iterations}`
+    ),
+    filteringSourcesMessage: () => 'Filtering sources for relevance',
   },
 };
 
 /** @param {import('../../types.mjs').StrategyContext} context */
 export async function runSourceBased(context) {
-  return runIterativeStrategy(context);
+  return runSourceBasedPipeline(context);
 }

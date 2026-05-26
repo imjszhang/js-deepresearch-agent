@@ -86,6 +86,16 @@ npm exec jdr -- research "openclaw" \
   --search js-eyes \
   --search-skills js-reddit-ops-skill \
   --strategy rapid
+
+# Source-based deep reading: fetch page content or LLM summaries before report synthesis
+npm exec jdr -- research "llm wiki" \
+  --search js-eyes \
+  --search-skills js-zhihu-ops-skill \
+  --strategy source-based \
+  --source-fetch-mode summary \
+  --source-max-urls 12 \
+  --source-enable-filter true \
+  --source-max-sources 30
 ```
 
 ## Configuration
@@ -157,7 +167,7 @@ For Xiaohongshu-only search, set `JS_EYES_SKILL=js-xiaohongshu-ops-skill`. On Li
 Available research strategies are exposed through `/api/strategies` and shared by the web UI:
 
 - `rapid`: fast research that searches the original query plus a few follow-up questions.
-- `source-based`: default iterative research that generates source-informed follow-up questions.
+- `source-based`: default iterative research that generates source-informed follow-up questions. Optional URL enrichment (`research.sourceBased.fetchMode`: `disabled` | `full` | `summary`) fetches page content before report synthesis; relevance filtering is off by default.
 - `parallel`: broad research that runs generated questions with controlled concurrency.
 
 Use the web UI, `.env`, or `jdr config set <key> <value>` to update them.

@@ -100,6 +100,37 @@ describe('progress events', () => {
     ]);
   });
 
+  it('maps source enrichment and filtering stages', () => {
+    const profile = {
+      enrichingSourcesMessage: ({ iteration, iterations }) => (
+        `Enriching sources for iteration ${iteration}/${iterations}`
+      ),
+      filteringSourcesMessage: () => 'Filtering sources for relevance',
+    };
+
+    assert.deepEqual(
+      mapStructuredProgressEvent({
+        stage: 'enriching_sources',
+        iteration: 1,
+        iterations: 2,
+        progressProfile: profile,
+      }),
+      {
+        message: 'Enriching sources for iteration 1/2',
+        progress: 18,
+        level: 'info',
+      },
+    );
+    assert.deepEqual(
+      mapStructuredProgressEvent({ stage: 'filtering_sources', progressProfile: profile }),
+      {
+        message: 'Filtering sources for relevance',
+        progress: 75,
+        level: 'info',
+      },
+    );
+  });
+
   it('uses generic fallback messages for strategies without progress profiles', () => {
     assert.deepEqual(
       mapStructuredProgressEvent({

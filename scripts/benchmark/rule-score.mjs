@@ -26,7 +26,8 @@ export function keywordOverlap(claimText = '', sources = []) {
   const sourceTokens = new Set();
   for (const entry of sources) {
     const source = entry.source || entry;
-    for (const token of tokenize(`${source.title || ''} ${source.snippet || ''}`)) {
+    const evidence = source.summary || source.content || source.snippet || '';
+    for (const token of tokenize(`${source.title || ''} ${evidence}`)) {
       sourceTokens.add(token);
     }
   }
@@ -42,9 +43,10 @@ export function keywordOverlap(claimText = '', sources = []) {
 }
 
 function sourceIsComplete(source = {}) {
+  const evidence = source.summary || source.content || source.snippet || '';
   return Boolean(String(source.title || '').trim())
     && Boolean(String(source.url || '').trim())
-    && Boolean(String(source.snippet || '').trim());
+    && Boolean(String(evidence).trim());
 }
 
 export function scoreClaimRule(claim, citationMap, options = {}) {

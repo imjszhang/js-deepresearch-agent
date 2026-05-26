@@ -88,6 +88,10 @@ npm exec jdr -- research "Explain the current state of local-first AI research"
 | `--questions` | `research.questionsPerIteration` | 每轮生成问题数 |
 | `--concurrency` | `research.concurrency` | 并发搜索数 |
 | `--work-dir` | `research.workDir` | 产物根目录（相对 cwd 或绝对路径） |
+| `--source-fetch-mode` | `research.sourceBased.fetchMode` | `disabled`（默认）\| `full` \| `summary`；抓取 URL 正文或 LLM 摘要 |
+| `--source-max-urls` | `research.sourceBased.maxUrlsTotal` | 单次调研最多 enrich 的 URL 数 |
+| `--source-enable-filter` | `research.sourceBased.enableRelevanceFilter` | 是否启用 LLM 来源相关性过滤 |
+| `--source-max-sources` | `research.sourceBased.maxSourcesForReport` | 过滤后保留的最大来源数 |
 | `--output <file>` | — | 额外将 report 写入指定文件 |
 | `--json` | — | stdout 输出 JSON（含 `artifacts` 路径） |
 | `--no-save` | — | 不写入 SQLite 历史 |
@@ -345,7 +349,7 @@ node scripts/benchmark-research.mjs work_dir/source-based/2026-05-26_043125 --st
 | ID | 速度 | 深度 | 适用场景 |
 |---|---|---|---|
 | `rapid` | 快 | 浅 | 快速概览；不支持多轮 `iterations` |
-| `source-based` | 均衡 | 深 | **默认**；基于来源迭代追问 |
+| `source-based` | 均衡 | 深 | **默认**；基于来源迭代追问；可选 URL 正文/摘要 enrichment |
 | `parallel` | 快 | 广 | 大量并行子问题，覆盖面广 |
 
 Agent 选型建议：
@@ -353,6 +357,30 @@ Agent 选型建议：
 - 用户要**快速答案** → `--strategy rapid`
 - 用户要**引用与深度** → `--strategy source-based`（默认）
 - 用户要**广泛扫描** → `--strategy parallel`，可适当提高 `--concurrency`
+
+### Source-Based 深度阅读（可选）
+
+默认 `fetchMode: disabled`，行为与旧版一致（仅使用搜索 snippet）。开启后会在每轮搜索后按 URL 抓取正文或 LLM 摘要，并在报告阶段优先使用 `summary || content || snippet` 作为 Evidence。
+
+| 配置键 / Flag | 默认 | 说明 |
+|---|---|---|
+| `research.sourceBased.fetchMode` / `--source-fetch-mode` | `disabled` | `full` 抓取正文；`summary` 抓取后 LLM 压缩 |
+| `research.sourceBased.maxUrlsTotal` / `--source-max-urls` | `24` | 全局 enrich URL 上限 |
+| `research.sourceBased.enableRelevanceFilter` / `--source-enable-filter` | `false` | LLM 相关性过滤 |
+| `research.sourceBased.maxSourcesForReport` / `--source-max-sources` | `30` | 过滤后保留来源数 |
+
+示例（知乎 + 摘要模式）：
+
+```bash
+npm exec jdr -- research "llm wiki" \
+  --search js-eyes \
+  --search-skills js-zhihu-ops-skill \
+  --strategy source-based \
+  --source-fetch-mode summary \
+  --source-max-urls 12
+```
+
+`parallel` / `rapid` 不受 `sourceBased` 配置影响。
 
 ---
 

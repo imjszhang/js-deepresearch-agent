@@ -67,6 +67,20 @@ describe('CLI utilities', () => {
     assert.deepEqual(settings.search.provider.skills, ['a', 'b']);
   });
 
+  it('maps source-based enrichment flags into research settings', () => {
+    const settings = applyResearchFlags({ research: {} }, {
+      'source-fetch-mode': 'summary',
+      'source-max-urls': '12',
+      'source-enable-filter': 'true',
+      'source-max-sources': '20',
+    });
+
+    assert.equal(settings.research.sourceBased.fetchMode, 'summary');
+    assert.equal(settings.research.sourceBased.maxUrlsTotal, 12);
+    assert.equal(settings.research.sourceBased.enableRelevanceFilter, true);
+    assert.equal(settings.research.sourceBased.maxSourcesForReport, 20);
+  });
+
   it('maps other search runtime flags for one-off research runs', () => {
     const settings = applyResearchFlags({ search: {} }, {
       search: 'js-eyes',

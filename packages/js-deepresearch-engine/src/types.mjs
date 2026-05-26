@@ -21,12 +21,26 @@
  */
 
 /**
+ * @typedef {Object} SourceBasedSettings
+ * @property {'disabled'|'full'|'summary'} [fetchMode]
+ * @property {number} [maxUrlsPerIteration]
+ * @property {number} [maxUrlsTotal]
+ * @property {number} [maxContentChars]
+ * @property {number} [enrichConcurrency]
+ * @property {boolean} [enableRelevanceFilter]
+ * @property {number} [maxSourcesForReport]
+ * @property {number} [questionContextLimit]
+ * @property {number} [contextCharsPerSource]
+ */
+
+/**
  * @typedef {Object} ResearchSettings
  * @property {string} strategy
  * @property {number} [iterations]
  * @property {number} [questionsPerIteration]
  * @property {number} [concurrency]
  * @property {string} [workDir]
+ * @property {SourceBasedSettings} [sourceBased]
  */
 
 /**
@@ -42,6 +56,13 @@
  * @property {string} url
  * @property {string} snippet
  * @property {string} [engine]
+ * @property {string} [content]
+ * @property {string} [summary]
+ * @property {'skipped'|'ok'|'failed'} [fetchStatus]
+ * @property {string} [fetchError]
+ * @property {number} [relevanceScore]
+ * @property {boolean} [relevanceKeep]
+ * @property {string} [relevanceReason]
  */
 
 /**
@@ -61,7 +82,7 @@
 
 /**
  * @typedef {Object} StrategyProgressEvent
- * @property {'research_started'|'synthesizing_report'|'research_complete'|'generating_questions'|'searching'|'search_item_complete'|'search_progress'} stage
+ * @property {'research_started'|'synthesizing_report'|'research_complete'|'generating_questions'|'searching'|'search_item_complete'|'search_progress'|'enriching_sources'|'filtering_sources'} stage
  * @property {number} [iteration]
  * @property {number} [iterations]
  * @property {number} [completed]
@@ -78,6 +99,8 @@
  * @property {(event: StrategyProgressEvent) => string} [searchItemCompleteMessage]
  * @property {(event: StrategyProgressEvent) => number} [searchItemProgress]
  * @property {(event: StrategyProgressEvent) => string} [searchProgressMessage]
+ * @property {(event: StrategyProgressEvent) => string} [enrichingSourcesMessage]
+ * @property {(event: StrategyProgressEvent) => string} [filteringSourcesMessage]
  */
 
 /**
