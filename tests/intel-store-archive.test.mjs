@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -6,6 +7,7 @@ import { afterEach, describe, it } from 'node:test';
 import {
   archiveResearchResult,
   archiveResearchResultSafe,
+  ARCHIVE_SCHEMA_VERSION,
   createIntelStoreEngine,
   loadArtifactsByResearchId,
   readArchivedResearch,
@@ -66,6 +68,7 @@ describe('intel store archive', () => {
     const run = engine.readSource('research_runs', { name: 'run-1' });
     assert.equal(run.query, 'What is LLM Wiki?');
     assert.equal(run.strategy, 'source-based');
+    assert.equal(run.archiveSchemaVersion, ARCHIVE_SCHEMA_VERSION);
     assert.equal(run.findingsCount, 1);
     assert.equal(run.sourcesCount, 3);
     assert.equal(run.reportPath, reportPath);
@@ -76,6 +79,12 @@ describe('intel store archive', () => {
 
     const sources = engine.readSource('research_sources', { entity_id: 'run-1' });
     assert.equal(sources.length, 2);
+    assert.equal(sources[0].sourceIndex, 1);
+    assert.equal(sources[1].sourceIndex, 3);
+    assert.equal(sources[0].hasContent, false);
+
+    const reportMeta = engine.readSource('research_reports', { name: 'run-1' });
+    assert.equal(reportMeta.report, '# Report\n\nDone.');
 
     const loaded = loadArtifactsByResearchId('run-1', { engine });
     assert.equal(loaded.meta.researchId, 'run-1');
@@ -84,9 +93,36 @@ describe('intel store archive', () => {
     assert.equal(loaded.report, '# Report\n\nDone.');
   });
 
-  it('sourceDedupId falls back to title:snippet then unknown index', () => {
+  it('loads inline report when work_dir report file is missing', () => {
+    const baseDir = makeTempRoot();
+    const engine = createIntelStoreEngine({ baseDir: path.join(baseDir, 'intel') });
+
+    archiveResearchResult({
+      researchId: 'portable-run',
+      query: 'portable intel',
+      strategy: 'rapid',
+      result: {
+        report: '# Portable\n\nInline report body.',
+        findings: [],
+        sources: [{ title: 'S', url: 'https://portable.test', snippet: 'x' }],
+      },
+      artifacts: {
+        sessionDir: path.join(baseDir, 'missing-session'),
+        reportPath: path.join(baseDir, 'missing-session', 'report.md'),
+      },
+      engine,
+    });
+
+    const loaded = readArchivedResearch('portable-run', engine);
+    assert.equal(loaded.report, '# Portable\n\nInline report body.');
+  });
+
+  it('sourceDedupId falls back to content hash then unknown index', () => {
     assert.equal(sourceDedupId({ url: 'https://x.test' }), 'https://x.test');
-    assert.equal(sourceDedupId({ title: 'T', snippet: 'S' }), 'T:S');
+    assert.equal(
+      sourceDedupId({ title: 'T', snippet: 'S' }),
+      crypto.createHash('sha256').update('T:S:').digest('hex'),
+    );
     assert.equal(sourceDedupId({}, 4), 'unknown-4');
   });
 

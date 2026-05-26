@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
@@ -7,6 +8,7 @@ import {
 } from 'js-intel-store';
 
 export const DEFAULT_INTEL_BASE_DIR = 'data/intel';
+export const ARCHIVE_SCHEMA_VERSION = 2;
 
 export function resolveIntelBaseDir(baseDir) {
   return baseDir ?? process.env.JDR_INTEL_STORE_DIR ?? DEFAULT_INTEL_BASE_DIR;
@@ -69,8 +71,36 @@ export function sourceDedupId(source, index = 0) {
   if (url) return url;
   const title = String(source?.title ?? '').trim();
   const snippet = String(source?.snippet ?? '').trim();
-  if (title || snippet) return `${title}:${snippet}`;
+  const content = String(source?.content ?? source?.summary ?? '').trim();
+  if (title || snippet || content) {
+    return crypto.createHash('sha256').update(`${title}:${snippet}:${content}`).digest('hex');
+  }
   return `unknown-${index}`;
+}
+
+function buildSourceArchiveFields(source, index, archivedAt) {
+  const content = String(source?.content ?? source?.summary ?? '').trim();
+  return {
+    sourceIndex: index + 1,
+    fetchStatus: source?.fetchStatus ?? null,
+    fetchError: source?.fetchError ?? null,
+    hasContent: content.length > 0,
+    contentLength: content.length,
+    archivedAt,
+  };
+}
+
+function resolveArchivedReport(run, reportMeta) {
+  if (typeof reportMeta?.report === 'string' && reportMeta.report.length > 0) {
+    return reportMeta.report;
+  }
+
+  const reportPath = reportMeta?.reportPath || run?.reportPath;
+  if (reportPath && fs.existsSync(reportPath)) {
+    return fs.readFileSync(reportPath, 'utf8');
+  }
+
+  return '';
 }
 
 function flattenFindings(findings, researchId) {
@@ -134,6 +164,7 @@ export function archiveResearchResult({
     query,
     strategy,
     status: 'completed',
+    archiveSchemaVersion: ARCHIVE_SCHEMA_VERSION,
     sessionDir: artifacts?.sessionDir ?? null,
     reportPath: artifacts?.reportPath ?? null,
     findingsPath: artifacts?.findingsPath ?? null,
@@ -162,12 +193,14 @@ export function archiveResearchResult({
         ...source,
         _entity_id: researchId,
         dedup_id: sourceDedupId(source, index),
+        ...buildSourceArchiveFields(source, index, archivedAt),
       })),
     );
   }
 
   engine.ingest('research_reports', {
     name: researchId,
+    report: result?.report ?? '',
     reportPath: artifacts?.reportPath ?? null,
     reportLength: result?.report?.length ?? 0,
     sessionDir: artifacts?.sessionDir ?? null,
@@ -200,11 +233,7 @@ export function readArchivedResearch(researchId, engine = getIntelStoreEngine())
   const sourcesRaw = engine.readSource('research_sources', { entity_id: researchId });
   const reportMeta = engine.readSource('research_reports', { name: researchId });
 
-  const reportPath = reportMeta?.reportPath || run.reportPath;
-  let report = '';
-  if (reportPath && fs.existsSync(reportPath)) {
-    report = fs.readFileSync(reportPath, 'utf8');
-  }
+  const report = resolveArchivedReport(run, reportMeta);
 
   const meta = {
     query: run.query,

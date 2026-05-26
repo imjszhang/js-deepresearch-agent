@@ -156,6 +156,7 @@ async function intelCommand(argv) {
       strategyFilter: flags.strategy || null,
       dryRun: Boolean(flags['dry-run']),
       skipExisting: !flags.force,
+      upgradeExisting: Boolean(flags['upgrade-existing']),
       engine,
     });
 
@@ -318,7 +319,7 @@ async function resolveWikiResearchId(engine, researchId) {
 function printIntelImportSummary(summary, baseDir) {
   const mode = summary.dryRun ? 'dry-run' : 'import';
   console.log(`Intel store ${mode} (${baseDir})`);
-  console.log(`Scanned: ${summary.scanned}  Imported: ${summary.imported}  Skipped: ${summary.skipped}  Failed: ${summary.failed}`);
+  console.log(`Scanned: ${summary.scanned}  Imported: ${summary.imported}  Upgraded: ${summary.upgraded ?? 0}  Skipped: ${summary.skipped}  Failed: ${summary.failed}`);
   for (const item of summary.items) {
     const id = item.researchId ? `  id=${item.researchId}` : '';
     const reason = item.reason ? `  (${item.reason})` : '';
@@ -382,7 +383,7 @@ Commands:
   intel show <researchId> [--json]
   intel sources <researchId> [--limit 20] [--json]
   intel findings <researchId> [--limit 20] [--json]
-  intel import [--root work_dir] [--strategy source-based] [--dry-run] [--force] [--json]
+  intel import [--root work_dir] [--strategy source-based] [--dry-run] [--force] [--upgrade-existing] [--json]
   wiki init [--vault wiki] [--init-obsidian-config]
   wiki compile [--research-id <id>] [--vault wiki] [--force] [--lint] [--json]
   wiki lint [--vault wiki] [--json]
@@ -409,6 +410,7 @@ Options:
   --strategy <name>              Import only one strategy
   --dry-run                      Preview import
   --force                        Re-import existing runs
+  --upgrade-existing             Re-archive existing runs from work_dir with inline report and metadata
   --json                         JSON output
 `);
 }

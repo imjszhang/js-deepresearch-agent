@@ -4,6 +4,7 @@ export function normalizeWikiSource(input, index = 0) {
   const researchId = input.researchId ?? input._researchId ?? 'unknown';
   const sourceIndex = input.sourceIndex ?? input.index ?? index + 1;
   const id = input.id ?? `${researchId}/source-${String(sourceIndex).padStart(3, '0')}`;
+  const content = input.content ?? input.summary ?? '';
 
   return {
     id,
@@ -11,7 +12,7 @@ export function normalizeWikiSource(input, index = 0) {
     title: input.title ?? '',
     url: input.url ?? '',
     snippet: input.snippet ?? '',
-    content: input.content ?? input.summary ?? '',
+    content,
     researchId,
     query: input.query ?? '',
     strategy: input.strategy ?? '',
@@ -20,6 +21,10 @@ export function normalizeWikiSource(input, index = 0) {
     tags: Array.isArray(input.tags) ? input.tags : ['source'],
     observedAt: input.observedAt ?? new Date().toISOString(),
     engine: input.engine ?? '',
+    fetchStatus: input.fetchStatus ?? null,
+    fetchError: input.fetchError ?? null,
+    hasContent: input.hasContent ?? (String(content).trim().length > 0),
+    contentLength: input.contentLength ?? String(content).length,
   };
 }
 

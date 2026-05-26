@@ -9,7 +9,11 @@ import {
   discoverWorkDirSessions,
   importWorkDirSessions,
 } from '../scripts/intel/import-work-dir-core.mjs';
-import { createIntelStoreEngine, resetIntelStoreEngine } from '../src/storage/intel-store.mjs';
+import {
+  ARCHIVE_SCHEMA_VERSION,
+  createIntelStoreEngine,
+  resetIntelStoreEngine,
+} from '../src/storage/intel-store.mjs';
 
 describe('intel store import', () => {
   const tempDirs = [];
@@ -104,7 +108,50 @@ describe('intel store import', () => {
     assert.equal(imported.sourcesCount, 1);
 
     const dryRun = importWorkDirSessions({ root: workRoot, engine, dryRun: true, skipExisting: false });
-    assert.equal(dryRun.imported, 2);
-    assert.equal(dryRun.items.filter((item) => item.status === 'dry-run').length, 2);
+    assert.equal(dryRun.imported, 0);
+    assert.equal(dryRun.upgraded, 2);
+    assert.equal(dryRun.items.filter((item) => item.status === 'dry-run-upgrade').length, 2);
+  });
+
+  it('upgrades existing archived runs from work_dir when upgradeExisting is true', () => {
+    const root = makeTempRoot();
+    const intelDir = path.join(root, 'intel');
+    const workRoot = path.join(root, 'work_dir');
+    const researchId = 'existing-id';
+
+    writeSession(workRoot, 'source-based', '2026-05-26_070000', { researchId });
+
+    const engine = createIntelStoreEngine({ baseDir: intelDir });
+    engine.ingest('research_runs', {
+      name: researchId,
+      query: 'old query',
+      strategy: 'source-based',
+      status: 'completed',
+      archiveSchemaVersion: 1,
+    });
+    engine.ingest('research_reports', {
+      name: researchId,
+      reportPath: path.join(workRoot, 'source-based', '2026-05-26_070000', 'report.md'),
+      reportLength: 0,
+    });
+
+    const skipped = importWorkDirSessions({ root: workRoot, engine, upgradeExisting: false });
+    assert.equal(skipped.skipped, 1);
+    assert.equal(skipped.upgraded, 0);
+
+    const upgraded = importWorkDirSessions({ root: workRoot, engine, upgradeExisting: true });
+    assert.equal(upgraded.upgraded, 1);
+    assert.equal(upgraded.imported, 0);
+
+    const run = engine.readSource('research_runs', { name: researchId });
+    assert.equal(run.query, 'test query');
+    assert.equal(run.archiveSchemaVersion, ARCHIVE_SCHEMA_VERSION);
+
+    const reportMeta = engine.readSource('research_reports', { name: researchId });
+    assert.match(reportMeta.report, /Claim \[1\.1\]/);
+
+    const sources = engine.readSource('research_sources', { entity_id: researchId });
+    assert.equal(sources.length, 1);
+    assert.equal(sources[0].sourceIndex, 1);
   });
 });

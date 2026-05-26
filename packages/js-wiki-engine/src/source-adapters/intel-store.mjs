@@ -3,15 +3,17 @@ import path from 'node:path';
 import { normalizeWikiSource } from '../schema.mjs';
 
 function stripJsonlEntityFields(record) {
-  const { _post_id, _entity_id, _seq, dedup_id, raw, ...rest } = record;
+  const { _post_id, _entity_id, _seq, dedup_id, raw, archivedAt, ...rest } = record;
   return rest;
 }
 
 function artifactPathsFromRun(run, reportMeta) {
   const sessionDir = run?.sessionDir;
+  const reportPath = reportMeta?.reportPath ?? run?.reportPath ?? null;
+
   if (!sessionDir || !fs.existsSync(sessionDir)) {
     return {
-      report: reportMeta?.reportPath ?? run?.reportPath ?? null,
+      report: reportPath,
       findings: null,
       sources: null,
     };
@@ -22,6 +24,19 @@ function artifactPathsFromRun(run, reportMeta) {
     findings: path.join(sessionDir, 'findings.json'),
     sources: path.join(sessionDir, 'sources.json'),
   };
+}
+
+function resolveReportFromIntel(run, reportMeta) {
+  if (typeof reportMeta?.report === 'string' && reportMeta.report.length > 0) {
+    return reportMeta.report;
+  }
+
+  const reportPath = reportMeta?.reportPath || run?.reportPath;
+  if (reportPath && fs.existsSync(reportPath)) {
+    return fs.readFileSync(reportPath, 'utf8');
+  }
+
+  return '';
 }
 
 /**
@@ -40,29 +55,27 @@ export function loadSourcesFromIntelStore({ engine, researchId }) {
   const sourcesRaw = engine.readSource('research_sources', { entity_id: researchId }) || [];
   const reportMeta = engine.readSource('research_reports', { name: researchId });
 
-  const reportPath = reportMeta?.reportPath || run.reportPath;
-  let report = '';
-  if (reportPath && fs.existsSync(reportPath)) {
-    report = fs.readFileSync(reportPath, 'utf8');
-  }
-
+  const report = resolveReportFromIntel(run, reportMeta);
   const artifactPaths = artifactPathsFromRun(run, reportMeta);
   const query = run.query ?? '';
   const strategy = run.strategy ?? '';
 
-  const sources = sourcesRaw.map((record, index) => {
-    const raw = stripJsonlEntityFields(record);
-    return normalizeWikiSource({
-      ...raw,
-      researchId,
-      query,
-      strategy,
-      sourceIndex: index + 1,
-      artifactPaths,
-      tags: ['source', strategy].filter(Boolean),
-      observedAt: run.archivedAt ?? run.last_seen ?? run.first_seen,
-    }, index);
-  });
+  const sources = [...sourcesRaw]
+    .sort((a, b) => (a.sourceIndex ?? Number.MAX_SAFE_INTEGER) - (b.sourceIndex ?? Number.MAX_SAFE_INTEGER))
+    .map((record, index) => {
+      const raw = stripJsonlEntityFields(record);
+      const sourceIndex = raw.sourceIndex ?? index + 1;
+      return normalizeWikiSource({
+        ...raw,
+        researchId,
+        query,
+        strategy,
+        sourceIndex,
+        artifactPaths,
+        tags: ['source', strategy].filter(Boolean),
+        observedAt: raw.archivedAt ?? run.archivedAt ?? run.last_seen ?? run.first_seen,
+      }, index);
+    });
 
   return {
     researchId,
@@ -74,6 +87,7 @@ export function loadSourcesFromIntelStore({ engine, researchId }) {
       researchId,
       sessionDir: run.sessionDir ?? null,
       status: run.status,
+      archiveSchemaVersion: run.archiveSchemaVersion ?? null,
     },
     report,
     sources,

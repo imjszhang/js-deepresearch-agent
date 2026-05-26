@@ -56,6 +56,7 @@ describe('intel-store adapter', () => {
 
     engine.ingest('research_reports', {
       name: researchId,
+      report: '# Inline Report\n\n## Claims\n\n- Example claim with sufficient length here.\n',
       reportPath,
       reportLength: 40,
       sessionDir,
@@ -77,6 +78,91 @@ describe('intel-store adapter', () => {
     assert.equal(loaded.sources[0].title, 'Example');
     assert.match(loaded.report, /Example claim/);
     assert.equal(loaded.meta.query, 'llm wiki');
+  });
+
+  it('prefers inline report over missing reportPath file', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'wiki-intel-inline-'));
+    tempDirs.push(root);
+
+    const engine = createTestEngine(path.join(root, 'intel'));
+    const researchId = 'inline-report-run';
+
+    engine.ingest('research_runs', {
+      name: researchId,
+      query: 'inline',
+      strategy: 'rapid',
+      status: 'completed',
+      sessionDir: path.join(root, 'missing-session'),
+      reportPath: path.join(root, 'missing-session', 'report.md'),
+      archivedAt: new Date().toISOString(),
+    });
+
+    engine.ingest('research_reports', {
+      name: researchId,
+      report: '# Inline Only\n\nPortable report body.',
+      reportPath: path.join(root, 'missing-session', 'report.md'),
+      reportLength: 30,
+      archivedAt: new Date().toISOString(),
+    });
+
+    const loaded = loadSourcesFromIntelStore({ engine, researchId });
+    assert.equal(loaded.report, '# Inline Only\n\nPortable report body.');
+  });
+
+  it('uses stable sourceIndex from archived records', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'wiki-intel-index-'));
+    tempDirs.push(root);
+
+    const engine = createTestEngine(path.join(root, 'intel'));
+    const researchId = 'indexed-run';
+
+    engine.ingest('research_runs', {
+      name: researchId,
+      query: 'indexed',
+      strategy: 'source-based',
+      status: 'completed',
+      archivedAt: new Date().toISOString(),
+    });
+
+    engine.ingest('research_reports', {
+      name: researchId,
+      report: '# Report',
+      reportLength: 8,
+      archivedAt: new Date().toISOString(),
+    });
+
+    engine.ingest('research_sources', {
+      _entity_id: researchId,
+      dedup_id: 'https://example.com/b',
+      sourceIndex: 2,
+      title: 'Second',
+      url: 'https://example.com/b',
+      snippet: 'b',
+      fetchStatus: 'ok',
+      hasContent: true,
+      contentLength: 12,
+    });
+
+    engine.ingest('research_sources', {
+      _entity_id: researchId,
+      dedup_id: 'https://example.com/a',
+      sourceIndex: 1,
+      title: 'First',
+      url: 'https://example.com/a',
+      snippet: 'a',
+      fetchStatus: 'failed',
+      fetchError: 'timeout',
+      hasContent: false,
+      contentLength: 0,
+    });
+
+    const loaded = loadSourcesFromIntelStore({ engine, researchId });
+    assert.equal(loaded.sources.length, 2);
+    assert.equal(loaded.sources[0].title, 'First');
+    assert.equal(loaded.sources[0].sourceIndex, 1);
+    assert.equal(loaded.sources[0].fetchStatus, 'failed');
+    assert.equal(loaded.sources[1].title, 'Second');
+    assert.equal(loaded.sources[1].sourceIndex, 2);
   });
 
   it('throws when research run is missing', () => {

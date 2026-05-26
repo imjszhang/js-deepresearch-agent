@@ -25,6 +25,7 @@ function main(argv) {
     strategyFilter: flags.strategy || null,
     dryRun: Boolean(flags['dry-run']),
     skipExisting: !flags.force,
+    upgradeExisting: Boolean(flags['upgrade-existing']),
     engine,
   });
 
@@ -39,7 +40,7 @@ function main(argv) {
 function printTextSummary(summary, baseDir) {
   const mode = summary.dryRun ? 'dry-run' : 'import';
   console.log(`Intel store ${mode} (${baseDir})`);
-  console.log(`Scanned: ${summary.scanned}  Imported: ${summary.imported}  Skipped: ${summary.skipped}  Failed: ${summary.failed}`);
+  console.log(`Scanned: ${summary.scanned}  Imported: ${summary.imported}  Upgraded: ${summary.upgraded ?? 0}  Skipped: ${summary.skipped}  Failed: ${summary.failed}`);
 
   for (const item of summary.items) {
     const id = item.researchId ? `  id=${item.researchId}` : '';
@@ -61,6 +62,7 @@ Options:
   --intel-dir <dir>    Intel store base dir (default: data/intel or JDR_INTEL_STORE_DIR)
   --dry-run            List sessions that would be imported
   --force              Re-import even if run already exists (updates run metadata; may append findings)
+  --upgrade-existing   Re-archive existing runs from work_dir to add inline report and metadata
   --json               Machine-readable summary
   --help               Show this help
 

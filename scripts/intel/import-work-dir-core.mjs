@@ -60,6 +60,7 @@ export function discoverWorkDirSessions({ root, strategyFilter = null }) {
  *   strategyFilter?: string|null,
  *   dryRun?: boolean,
  *   skipExisting?: boolean,
+ *   upgradeExisting?: boolean,
  *   engine: import('js-intel-store').StorageEngine,
  * }} options
  */
@@ -68,12 +69,14 @@ export function importWorkDirSessions({
   strategyFilter = null,
   dryRun = false,
   skipExisting = true,
+  upgradeExisting = false,
   engine,
 }) {
   const sessions = discoverWorkDirSessions({ root, strategyFilter });
   const summary = {
     scanned: sessions.length,
     imported: 0,
+    upgraded: 0,
     skipped: 0,
     failed: 0,
     dryRun,
@@ -104,7 +107,7 @@ export function importWorkDirSessions({
       item.researchId = researchId;
 
       const existing = engine.readSource('research_runs', { name: researchId });
-      if (skipExisting && existing) {
+      if (existing && skipExisting && !upgradeExisting) {
         item.status = 'skipped';
         item.reason = 'already archived';
         summary.skipped += 1;
@@ -113,8 +116,12 @@ export function importWorkDirSessions({
       }
 
       if (dryRun) {
-        item.status = 'dry-run';
-        summary.imported += 1;
+        item.status = existing ? 'dry-run-upgrade' : 'dry-run';
+        if (existing) {
+          summary.upgraded += 1;
+        } else {
+          summary.imported += 1;
+        }
         summary.items.push(item);
         continue;
       }
@@ -141,8 +148,12 @@ export function importWorkDirSessions({
         engine,
       });
 
-      item.status = 'imported';
-      summary.imported += 1;
+      item.status = existing ? 'upgraded' : 'imported';
+      if (existing) {
+        summary.upgraded += 1;
+      } else {
+        summary.imported += 1;
+      }
     } catch (error) {
       item.status = 'failed';
       item.reason = error?.message || String(error);
