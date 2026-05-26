@@ -23,6 +23,8 @@ export async function searchQuestions({
 
   async function worker() {
     while (nextIndex < uniqueQuestions.length) {
+      throwIfAborted(signal);
+
       const index = nextIndex;
       nextIndex += 1;
       const question = uniqueQuestions[index];
@@ -30,6 +32,7 @@ export async function searchQuestions({
       try {
         results[index] = await searchQuestion({ question, search, signal });
       } catch (error) {
+        if (isAbortError(error)) throw error;
         results[index] = { question, sources: [], error: serializeSearchError(error) };
       } finally {
         completed += 1;
@@ -40,6 +43,18 @@ export async function searchQuestions({
 
   await Promise.all(Array.from({ length: maxConcurrency }, () => worker()));
   return results;
+}
+
+function isAbortError(error) {
+  return error?.name === 'AbortError';
+}
+
+function throwIfAborted(signal) {
+  if (signal?.aborted) {
+    const error = new Error('Research aborted');
+    error.name = 'AbortError';
+    throw error;
+  }
 }
 
 function serializeSearchError(error) {

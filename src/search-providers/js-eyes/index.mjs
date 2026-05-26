@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import {
   formatPayloadError,
+  isAbortError,
   parseJsonOutput,
   resolveCliCommand,
   resolveSpawnTarget,
@@ -89,6 +90,7 @@ export class JsEyesCliSearchEngine {
 
         batches.push(normalizeUnifiedItems(payload, this.config, skillId));
       } catch (error) {
+        if (isAbortError(error)) throw error;
         failures.push({ skillId, error: error.message });
       }
     }

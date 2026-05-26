@@ -42,4 +42,42 @@ describe('searchQuestions', () => {
     assert.match(results[1].error.message, /boom/);
     assert.equal(results[1].error.name, 'Error');
   });
+
+  it('propagates AbortError instead of swallowing it', async () => {
+    const abortError = new Error('Research aborted');
+    abortError.name = 'AbortError';
+
+    await assert.rejects(
+      () => searchQuestions({
+        questions: ['one', 'two'],
+        search: {
+          async search() {
+            throw abortError;
+          },
+        },
+      }),
+      { name: 'AbortError' },
+    );
+  });
+
+  it('stops scheduling new searches after abort', async () => {
+    const controller = new AbortController();
+    const seen = [];
+
+    const promise = searchQuestions({
+      questions: ['a', 'b', 'c'],
+      concurrency: 1,
+      signal: controller.signal,
+      search: {
+        async search(question) {
+          seen.push(question);
+          if (question === 'a') controller.abort();
+          return [{ title: question, url: `https://example.com/${question}`, snippet: question }];
+        },
+      },
+    });
+
+    await assert.rejects(promise, { name: 'AbortError' });
+    assert.deepEqual(seen, ['a']);
+  });
 });

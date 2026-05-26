@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 import './config/bootstrap-env.mjs';
-import fs from 'node:fs';
 import { createServices } from './bootstrap.mjs';
 import { createApp } from './api/app.mjs';
 import { getDb } from './storage/db.mjs';
-import { ResearchRunner, saveResearchToWorkDir } from 'js-deepresearch-engine';
+import {
+  ResearchCancelledError,
+  runCliResearch,
+} from './cli-research-run.mjs';
 import {
   applyResearchFlags,
   formatHistory,
@@ -17,7 +19,7 @@ const services = createServices(getDb());
 
 main(process.argv.slice(2)).catch((error) => {
   console.error(error.message);
-  process.exitCode = 1;
+  process.exitCode = error instanceof ResearchCancelledError ? 130 : 1;
 });
 
 async function main(argv) {
@@ -58,46 +60,12 @@ async function researchCommand(argv) {
   if (!query) throw new Error('Usage: js-deepresearch-agent research "query"');
 
   const settings = settingsFromFlags(flags);
-  const runner = new ResearchRunner();
-  const result = await runner.run({
+  const { result, artifacts } = await runCliResearch({
     query,
     settings,
-    onProgress: ({ message, progress, level }) => {
-      if (!flags.json) {
-        console.error(`[${level}] ${progress ?? '-'}% ${message}`);
-      }
-    },
+    flags,
+    services,
   });
-
-  let artifacts = null;
-  if (!flags['no-work-dir']) {
-    artifacts = saveResearchToWorkDir({
-      settings,
-      strategy: settings.research.strategy,
-      query,
-      result,
-    });
-    if (!flags.json) {
-      console.error(`[info] Artifacts saved to ${artifacts.sessionDir}`);
-    }
-  }
-
-  if (!flags['no-save']) {
-    const record = services.researchRepository.create({
-      id: cryptoRandomId(),
-      query,
-      strategy: settings.research.strategy,
-    });
-    services.sourceRepository.addMany(record.id, result.sources);
-    services.researchRepository.updateStatus(record.id, 'completed', {
-      report: result.report,
-      completedAt: new Date().toISOString(),
-    });
-  }
-
-  if (flags.output) {
-    fs.writeFileSync(flags.output, result.report, 'utf8');
-  }
 
   if (flags.json) {
     console.log(JSON.stringify({ ...result, artifacts }, null, 2));
@@ -159,16 +127,13 @@ function settingsFromFlags(flags) {
   return applyResearchFlags(services.settingsStore.get(), flags);
 }
 
-function cryptoRandomId() {
-  return globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
 function printHelp() {
   console.log(`
 js-deepresearch-agent
 
 Commands:
   research "query" [--search js-eyes|searxng] [--search-skills skillA,skillB] [--js-eyes-skill skillA,skillB] [--search-server-url ws://localhost:18080] [--search-base-url http://127.0.0.1:8080] [--strategy source-based|rapid|parallel] [--iterations 2] [--questions 3] [--concurrency 2] [--work-dir work_dir] [--output report.md] [--json] [--no-save] [--no-work-dir]
+    Press Ctrl+C once to cancel gracefully; press again to force exit.
   config get [key]
   config set <key> <value>
   history [list]

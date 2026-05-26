@@ -127,6 +127,29 @@ npm exec jdr -- research "openclaw" \
 
 `--json` 模式下进度只走 stderr，stdout 仅为 JSON，便于 Agent 解析。
 
+### 取消调研（Ctrl+C）
+
+前台 `research` 命令支持优雅取消：
+
+```bash
+npm exec jdr -- research "deep research" --search js-eyes --search-skills js-reddit-ops-skill
+# 按一次 Ctrl+C：停止后续 LLM / 搜索 / js-eyes 子进程，历史标记为 cancelled
+# 再按一次 Ctrl+C：强制退出（exit code 130）
+```
+
+行为说明：
+
+| 项 | 说明 |
+|---|---|
+| 信号 | 首次 `SIGINT` / `SIGTERM` 触发 `AbortController`，取消信号会传递到 `ResearchRunner`、搜索执行器和 js-eyes CLI 子进程 |
+| 历史 | 默认写入 SQLite：开始时 `running`，成功 `completed`，取消 `cancelled`，失败 `failed` |
+| `--no-save` | 不写历史，仅 stderr 输出取消提示 |
+| `--json` | 取消时不输出半截 JSON；错误/取消信息走 stderr，exit code 130 |
+| js-eyes | Windows 上会清理 CLI 进程树（`taskkill /T /F`），避免 `.cmd` shim 留下孤儿 Node 进程 |
+| 限制 | 不会自动停止常驻 `js-eyes server`，也不会关闭已打开的浏览器标签页 |
+
+Web UI 仍通过 `POST /api/research/:id/cancel` 取消后台任务；CLI 前台取消与之语义一致，但无需 job id。
+
 ### 会话产物结构
 
 默认路径：`work_dir/<strategy>/<YYYY-MM-DD_HHMMSS>/`
@@ -403,8 +426,10 @@ npm exec jdr -- history show <id>
 | LLM 401/403 | API Key 或 base URL 错误 |
 | `Research not found` | `history show` 的 id 不存在 |
 | `Unknown command` | 命令拼写错误 |
+| 按 Ctrl+C 后 js-eyes 仍开页 | 旧版 CLI 未传 cancel signal；升级后首次 Ctrl+C 应停止后续搜索；已打开的标签页不会自动关闭 |
+| `Research cancelled.` | 用户主动取消；历史状态为 `cancelled`，exit code 130 |
 
-CLI 顶层错误输出 `error.message` 到 stderr，退出码 `1`。
+CLI 顶层错误输出 `error.message` 到 stderr；普通错误退出码 `1`，取消退出码 `130`。
 
 ---
 
@@ -413,6 +438,7 @@ CLI 顶层错误输出 `error.message` 到 stderr，退出码 `1`。
 | 文件 | 职责 |
 |---|---|
 | `src/cli.mjs` | CLI 入口、命令分发 |
+| `src/cli-research-run.mjs` | 前台 research 生命周期、SIGINT/SIGTERM 取消、历史状态更新 |
 | `src/cli-utils.mjs` | 参数解析、`config` 点分键读写 |
 | `src/bootstrap.mjs` | SQLite 服务（settings / history / sources） |
 | `src/config/settings-store.mjs` | 设置持久化 + `.env` 覆盖 |

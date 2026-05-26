@@ -4,6 +4,9 @@ export { parseProviderSkills, parseJsEyesSkills } from './provider-skills.mjs';
 export {
   resolveCliCommand,
   resolveSpawnTarget,
+  killProcessTree,
+  isAbortError,
+  runCommand,
 } from './cli-process.mjs';
 export { resolveProviderConfig, resolveJsEyesSkills } from './provider-config.mjs';
 export {

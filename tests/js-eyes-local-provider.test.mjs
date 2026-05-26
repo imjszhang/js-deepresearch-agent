@@ -14,6 +14,7 @@ import {
   resolveJsEyesSkills,
   resolveProviderConfig,
   resolveSpawnTarget,
+  runCommand,
 } from '../src/search-providers/js-eyes/public.mjs';
 
 describe('JsEyesCliSearchEngine', () => {
@@ -240,6 +241,55 @@ describe('JsEyesCliSearchEngine', () => {
     assert.equal(child.killed, true);
   });
 
+  it('kills the process tree on Windows abort', async () => {
+    const controller = new AbortController();
+    const killed = [];
+    const child = createMockChild({ pid: 4242 });
+    child.kill = () => {
+      child.killed = true;
+    };
+
+    const promise = runCommand({
+      command: 'js-eyes',
+      args: ['search', 'query'],
+      signal: controller.signal,
+      spawnImpl: () => child,
+      platform: 'win32',
+      killProcessTreeImpl: (pid) => {
+        killed.push(pid);
+      },
+    });
+
+    controller.abort();
+    await assert.rejects(promise, { name: 'AbortError' });
+    assert.deepEqual(killed, [4242]);
+  });
+
+  it('stops remaining skills when one skill aborts', async () => {
+    const calls = [];
+    const controller = new AbortController();
+
+    const engine = new JsEyesCliSearchEngine({
+      provider: {
+        skills: ['js-reddit-ops-skill', 'js-x-ops-skill'],
+        serverUrl: 'ws://127.0.0.1:18080',
+      },
+    }, {
+      spawn: (command, args) => {
+        calls.push({ command, args });
+        const child = createMockChild();
+        queueMicrotask(() => controller.abort());
+        return child;
+      },
+    });
+
+    await assert.rejects(
+      () => engine.search('query', { signal: controller.signal }),
+      { name: 'AbortError' },
+    );
+    assert.equal(calls.length, 1);
+  });
+
   it('kills the CLI on timeout', async () => {
     const engine = new JsEyesCliSearchEngine({ jsEyesTimeoutMs: 20 }, {
       spawn: () => createMockChild(),
@@ -378,13 +428,14 @@ function createMockSpawn({ calls = [], stdout = '', stderr = '', code = 0 } = {}
   };
 }
 
-function createMockChild() {
+function createMockChild({ pid } = {}) {
   const child = new EventEmitter();
   child.stdout = new EventEmitter();
   child.stderr = new EventEmitter();
   child.stdout.setEncoding = () => {};
   child.stderr.setEncoding = () => {};
   child.killed = false;
+  if (pid !== undefined) child.pid = pid;
   child.kill = () => {
     child.killed = true;
     queueMicrotask(() => {

@@ -1,8 +1,29 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { DEFAULT_CLI, MAX_OUTPUT_CHARS } from './constants.mjs';
 
-export function runCommand({ command, args, signal, timeoutMs, spawnImpl }) {
+export function isAbortError(error) {
+  return error?.name === 'AbortError';
+}
+
+export function killProcessTree(pid, options = {}) {
+  if (!pid) return;
+
+  const platform = options.platform ?? process.platform;
+  const killImpl = options.killProcessTreeImpl ?? defaultKillProcessTree;
+  killImpl(pid, platform);
+}
+
+export function runCommand({
+  command,
+  args,
+  signal,
+  timeoutMs,
+  spawnImpl,
+  platform = process.platform,
+  killProcessTreeImpl,
+}) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
       reject(abortError());
@@ -26,6 +47,7 @@ export function runCommand({ command, args, signal, timeoutMs, spawnImpl }) {
     function killChild() {
       if (child && !child.killed) {
         child.kill();
+        killProcessTree(child.pid, { platform, killProcessTreeImpl });
       }
     }
 
@@ -213,4 +235,17 @@ function abortError() {
   const error = new Error('JS Eyes search aborted');
   error.name = 'AbortError';
   return error;
+}
+
+function defaultKillProcessTree(pid, platform) {
+  if (platform !== 'win32') return;
+
+  try {
+    spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], {
+      windowsHide: true,
+      stdio: 'ignore',
+    });
+  } catch {
+    // Ignore taskkill failures during cancellation.
+  }
 }
