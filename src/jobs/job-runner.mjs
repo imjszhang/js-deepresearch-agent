@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { ResearchRunner, saveResearchToWorkDir } from 'js-deepresearch-engine';
+import { archiveResearchResultSafe } from '../storage/intel-store.mjs';
 
 export class JobRunner {
   constructor({ settingsStore, researchRepository, logRepository, sourceRepository, eventBus }) {
@@ -46,12 +47,24 @@ export class JobRunner {
       });
 
       this.sourceRepository.addMany(id, result.sources);
-      saveResearchToWorkDir({
+      const artifacts = saveResearchToWorkDir({
         settings,
         strategy: settings.research.strategy,
         query,
         result,
         researchId: id,
+      });
+      await archiveResearchResultSafe({
+        researchId: id,
+        query,
+        strategy: settings.research.strategy,
+        result,
+        artifacts,
+        settings,
+      }, {
+        onWarning: (message) => {
+          this.emitLog(id, { level: 'warn', message: `Intel store archive failed: ${message}`, progress: null });
+        },
       });
       const record = this.researchRepository.updateStatus(id, 'completed', {
         report: result.report,

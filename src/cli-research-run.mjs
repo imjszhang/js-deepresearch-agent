@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import { ResearchRunner, saveResearchToWorkDir } from 'js-deepresearch-engine';
+import { archiveResearchResultSafe } from './storage/intel-store.mjs';
 
 export class ResearchCancelledError extends Error {
   constructor(message = 'Research cancelled.') {
@@ -110,6 +111,20 @@ export async function runCliResearch({
 
     if (recordId) {
       services.sourceRepository.addMany(recordId, result.sources);
+      await archiveResearchResultSafe({
+        researchId: recordId,
+        query,
+        strategy: settings.research.strategy,
+        result,
+        artifacts,
+        settings,
+      }, {
+        onWarning: (message) => {
+          if (!flags.json) {
+            onProgressLog('warn', '-', `Intel store archive failed: ${message}`);
+          }
+        },
+      });
       services.researchRepository.updateStatus(recordId, 'completed', {
         report: result.report,
         completedAt: new Date().toISOString(),

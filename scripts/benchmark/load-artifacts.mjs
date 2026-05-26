@@ -1,7 +1,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { loadArtifactsByResearchId as loadFromIntelStore } from '../../src/storage/intel-store.mjs';
 
 const REQUIRED_FILES = ['report.md', 'findings.json', 'sources.json', 'meta.json'];
+
+/**
+ * Load benchmark artifacts by archived researchId (js-intel-store).
+ * @param {string} researchId
+ * @param {{ engine?: import('js-intel-store').StorageEngine }} [options]
+ */
+export function loadArtifactsByResearchId(researchId, options = {}) {
+  return loadFromIntelStore(researchId, options);
+}
 
 export function loadArtifacts(workDir) {
   const resolvedDir = path.resolve(workDir);

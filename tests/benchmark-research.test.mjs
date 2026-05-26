@@ -5,7 +5,12 @@ import path from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 import { buildCitationMap, parseCitations, resolveCitations } from '../scripts/benchmark/citations.mjs';
 import { extractClaims } from '../scripts/benchmark/claims.mjs';
-import { loadArtifacts } from '../scripts/benchmark/load-artifacts.mjs';
+import { loadArtifacts, loadArtifactsByResearchId } from '../scripts/benchmark/load-artifacts.mjs';
+import {
+  archiveResearchResult,
+  createIntelStoreEngine,
+  resetIntelStoreEngine,
+} from '../src/storage/intel-store.mjs';
 import { scoreClaimRule, summarizeFindingsHealth } from '../scripts/benchmark/rule-score.mjs';
 import { runBenchmark } from '../scripts/benchmark/run-benchmark.mjs';
 import { formatJsonSummary } from '../scripts/benchmark/format-output.mjs';
@@ -13,6 +18,7 @@ import { formatJsonSummary } from '../scripts/benchmark/format-output.mjs';
 const tempDirs = [];
 
 afterEach(() => {
+  resetIntelStoreEngine();
   while (tempDirs.length > 0) {
     fs.rmSync(tempDirs.pop(), { recursive: true, force: true });
   }
@@ -361,5 +367,51 @@ LLM Wiki 由 Karpathy 提出，强调编译式知识沉淀 [1.1]。
     const artifacts = loadArtifacts(dir);
     assert.equal(artifacts.meta.query, 'llm wiki');
     assert.match(artifacts.report, /Summary/);
+  });
+
+  it('loads artifacts by researchId from intel store', async () => {
+    const dir = createFixture({
+      report: '# Report\n\n## Summary\n\nClaim [1.1].',
+      findings: [{
+        question: 'q1',
+        sources: [{ title: 'A', url: 'https://a.test', snippet: 'alpha', engine: 'test' }],
+      }],
+      sources: [{ title: 'A', url: 'https://a.test', snippet: 'alpha', engine: 'test' }],
+      meta: { query: 'intel load', strategy: 'source-based', researchId: 'bench-intel-1' },
+    });
+
+    const intelRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'benchmark-intel-'));
+    tempDirs.push(intelRoot);
+    const engine = createIntelStoreEngine({ baseDir: path.join(intelRoot, 'store') });
+
+    archiveResearchResult({
+      researchId: 'bench-intel-1',
+      query: 'intel load',
+      strategy: 'source-based',
+      result: {
+        report: fs.readFileSync(path.join(dir, 'report.md'), 'utf8'),
+        findings: JSON.parse(fs.readFileSync(path.join(dir, 'findings.json'), 'utf8')),
+        sources: JSON.parse(fs.readFileSync(path.join(dir, 'sources.json'), 'utf8')),
+      },
+      artifacts: {
+        sessionDir: dir,
+        reportPath: path.join(dir, 'report.md'),
+        findingsPath: path.join(dir, 'findings.json'),
+        sourcesPath: path.join(dir, 'sources.json'),
+        metaPath: path.join(dir, 'meta.json'),
+      },
+      engine,
+    });
+
+    const loaded = loadArtifactsByResearchId('bench-intel-1', { engine });
+    assert.equal(loaded.meta.query, 'intel load');
+    assert.match(loaded.report, /Claim \[1\.1\]/);
+
+    const result = await runBenchmark({
+      researchId: 'bench-intel-1',
+      llmEnabled: false,
+      engine,
+    });
+    assert.ok(result.metrics.claimCount >= 1);
   });
 });

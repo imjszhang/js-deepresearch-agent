@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { afterEach, describe, it } from 'node:test';
 import {
@@ -6,15 +9,29 @@ import {
   createResearchAbortController,
   runCliResearch,
 } from '../src/cli-research-run.mjs';
+import { resetIntelStoreEngine } from '../src/storage/intel-store.mjs';
 import { migrateDb, closeDb } from '../src/storage/db.mjs';
 import Database from 'better-sqlite3';
 import { ResearchRepository } from '../src/storage/research-repository.mjs';
 import { SourceRepository } from '../src/storage/source-repository.mjs';
 
 describe('CLI research cancellation', () => {
+  const tempDirs = [];
+
   afterEach(() => {
+    delete process.env.JDR_INTEL_STORE_DIR;
+    resetIntelStoreEngine();
     closeDb();
+    for (const dir of tempDirs.splice(0)) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
+
+  function isolateIntelStore() {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jdr-cli-intel-'));
+    tempDirs.push(dir);
+    process.env.JDR_INTEL_STORE_DIR = path.join(dir, 'intel');
+  }
   it('marks history as cancelled when runner aborts', async () => {
     const db = createTestDb();
     const researchRepository = new ResearchRepository(db);
@@ -47,6 +64,7 @@ describe('CLI research cancellation', () => {
   });
 
   it('marks history as running before completion', async () => {
+    isolateIntelStore();
     const db = createTestDb();
     const researchRepository = new ResearchRepository(db);
     const sourceRepository = new SourceRepository(db);
