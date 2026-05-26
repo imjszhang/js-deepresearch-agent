@@ -79,6 +79,10 @@ flowchart TD
   Vault --> Lint["lintWiki"]
   Vault --> Ask["askWiki retrieval"]
   Vault --> Obsidian["Obsidian 浏览 / 图谱"]
+  CLI["jdr intel / jdr wiki"] --> IntelStore
+  CLI --> Compiler
+  CLI --> Lint
+  CLI --> Ask
 ```
 
 ### 3.2 Vault 结构（默认 `wiki/`）
@@ -106,8 +110,11 @@ wiki/
 | 内链 | `wikilinkPath()` 去掉 `.md` | Obsidian 笔记名约定 |
 | 文件名 | `safeObsidianFilename()` 过滤非法字符 | Windows + Obsidian 双兼容 |
 | 宿主脚本 | `scripts/wiki/compile.mjs` 不进包内核 | 读 `data/intel` 是 app 职责 |
+| 操作入口 | 主 CLI `intel` / `wiki` 子命令 | 与 `jdr` / `js-deepresearch-agent` 统一；npm script 保留兼容 |
+| 生成物版本控制 | `.gitignore` 加入 `wiki/` | 与 `data/`、`work_dir/` 同级，本地 vault 不入库 |
 | Lint 范围 | 跳过 `Lint/`、`Templates/` 的 wikilink 扫描 | 避免报告正文误报 |
 | 源正文里的 `[[...]]` | `escapeLiteralWikilinks()` 包进反引号 | 教程示例不应变成断链 |
+| benchmark 不进主 CLI | 继续用 `scripts/benchmark-research.mjs` | 评估工具语义独立，避免 CLI 臃肿 |
 
 ### 3.3 Public API（第一版）
 
@@ -151,7 +158,8 @@ packages/js-wiki-engine/
 | [`packages/js-wiki-engine/src/source-adapters/intel-store.mjs`](../../packages/js-wiki-engine/src/source-adapters/intel-store.mjs) | 从 `StorageEngine` 读 run、sources、report |
 | [`packages/js-wiki-engine/src/lint.mjs`](../../packages/js-wiki-engine/src/lint.mjs) | 断链、manifest 缺页、topic sources；多行 YAML frontmatter 解析 |
 | [`packages/js-wiki-engine/src/query.mjs`](../../packages/js-wiki-engine/src/query.mjs) | 无 LLM：按词频打分返回相关页；有 LLM：拼 prompt |
-| [`scripts/wiki/compile.mjs`](../../scripts/wiki/compile.mjs) | CLI：`--research-id`、`--vault`、`--force`、`--lint`、`--json` |
+| [`scripts/wiki/compile.mjs`](../../scripts/wiki/compile.mjs) | npm script 入口：`--research-id`、`--vault`、`--force`、`--lint` |
+| [`src/cli.mjs`](../../src/cli.mjs) | 主 CLI：`intelCommand` / `wikiCommand`，统一操作入口 |
 
 ### 4.3 宿主接入
 
@@ -162,20 +170,61 @@ packages/js-wiki-engine/
 "wiki:compile": "node scripts/wiki/compile.mjs"
 ```
 
-测试链路包含 wiki workspace：
+[`.gitignore`](../../.gitignore) 已将 `wiki/` 与 `data/`、`work_dir/` 一并视为本地运行时产物。
+
+### 4.4 主 CLI 子命令（第二轮）
+
+[`src/cli.mjs`](../../src/cli.mjs) 在原有 `research` / `config` / `history` / `serve` 之外，接入与 intel store、wiki engine 直接相关的操作面。实现上复用 `scripts/intel/*-core.mjs` 与 `js-wiki-engine` API，不把 benchmark 塞进主 CLI。
+
+**intel**（对应原 `intel:import` / `intel:inspect`）：
+
+| 子命令 | 作用 |
+| --- | --- |
+| `intel list` | 列出 `data/intel` 归档 runs |
+| `intel show <researchId>` | 单次 run 摘要 |
+| `intel sources <researchId>` | 来源列表 |
+| `intel findings <researchId>` | findings 列表 |
+| `intel import` | 从 `work_dir` 历史回填 intel store |
+
+**wiki**（对应原 `wiki:compile` 及包 API）：
+
+| 子命令 | 作用 |
+| --- | --- |
+| `wiki init` | 初始化 vault 目录与模板 |
+| `wiki compile` | 从 intel store 编译 vault（默认最近 run） |
+| `wiki lint` | 断链与 manifest 检查 |
+| `wiki ask "question"` | 确定性页面检索 |
+
+推荐用法（与 npm script 等价）：
+
+```bash
+# 查看归档
+jdr intel list --limit 10
+jdr intel show 00176e84-2548-4160-add1-7df5a49f7e27
+
+# 历史回填（若尚未 import）
+jdr intel import --strategy source-based --dry-run
+
+# Wiki 全流程
+jdr wiki compile --research-id 00176e84-2548-4160-add1-7df5a49f7e27 --vault wiki --lint
+jdr wiki ask "Karpathy LLM Wiki" --vault wiki
+```
+
+仍可用 npm script：
+
+```bash
+npm run wiki:compile -- --research-id 00176e84-2548-4160-add1-7df5a49f7e27 --vault wiki --lint
+npm run intel:inspect -- list
+```
+
+测试链路包含 wiki workspace 与 CLI 集成：
 
 ```bash
 npm run test -w js-wiki-engine
 npm test
 ```
 
-常用编译命令：
-
-```bash
-npm run wiki:compile -- --research-id 00176e84-2548-4160-add1-7df5a49f7e27 --vault wiki --lint
-```
-
-### 4.4 实现中踩过的坑
+### 4.5 实现中踩过的坑
 
 | 现象 | 根因 | 修复 |
 | --- | --- | --- |
@@ -192,7 +241,7 @@ npm run wiki:compile -- --research-id 00176e84-2548-4160-add1-7df5a49f7e27 --vau
 
 ```bash
 npm run test -w js-wiki-engine   # 13/13
-npm test                         # 81/81（含 tests/wiki-compile.test.mjs）
+npm test                         # 83/83
 ```
 
 | 测试文件 | 覆盖点 |
@@ -201,6 +250,7 @@ npm test                         # 81/81（含 tests/wiki-compile.test.mjs）
 | [`packages/js-wiki-engine/tests/lint.test.mjs`](../../packages/js-wiki-engine/tests/lint.test.mjs) | 断链、manifest 缺页 |
 | [`packages/js-wiki-engine/tests/intel-store-adapter.test.mjs`](../../packages/js-wiki-engine/tests/intel-store-adapter.test.mjs) | adapter 读归档数据 |
 | [`tests/wiki-compile.test.mjs`](../../tests/wiki-compile.test.mjs) | 宿主：archive → compile → lint |
+| [`tests/cli-intel-wiki.test.mjs`](../../tests/cli-intel-wiki.test.mjs) | 主 CLI：`intel list`、`wiki init/compile/lint/ask` |
 
 ### 真实 researchId 端到端（2026-05-26）
 
@@ -210,7 +260,14 @@ npm test                         # 81/81（含 tests/wiki-compile.test.mjs）
 | 增量编译 | 同上（无 `--force`） | **53 skipped**，0 written |
 | Lint | `--lint` | **0 errors**，0 warns |
 
-产物目录：[`wiki/`](../../wiki/)（可用 Obsidian 直接打开）。
+产物目录：`wiki/`（已 gitignore；本地用 Obsidian 直接打开）。
+
+### CLI 冒烟（2026-05-26）
+
+| 命令 | 结果 |
+| --- | --- |
+| `jdr intel list --limit 1 --json` | 返回最近归档 run JSON |
+| `jdr wiki lint --vault wiki --json` | `ok: true`，0 errors |
 
 ---
 
@@ -221,18 +278,20 @@ npm test                         # 81/81（含 tests/wiki-compile.test.mjs）
 | 确定性 compile MVP | 已完成 | source / topic stub / claims / MOC / manifest |
 | intel-store adapter + `wiki:compile` | 已完成 | 从 `data/intel` 一键出 vault |
 | 基础 lint / ask | 已完成 | lint 结构化报告；ask 检索 MVP |
+| 主 CLI `intel` / `wiki` | 已完成 | [`src/cli.mjs`](../../src/cli.mjs)；见 [`tests/cli-intel-wiki.test.mjs`](../../tests/cli-intel-wiki.test.mjs) |
+| `wiki/` gitignore | 已完成 | 与 `data/`、`work_dir/` 一致 |
 | LLM 合并 topic、矛盾标注 | 待做 | `compileWiki({ llm, mode })` 已预留抛错 |
 | Query 答案写入 `Questions/` | 待做 | 与 askWiki LLM 模式联动 |
 | research 完成自动 compile | 不做（短期） | 保持 research 路径轻量 |
-| `wiki/` 是否 gitignore | 待产品决定 | 生成物较大，可按团队习惯处理 |
+| `history` 与 intel store 打通 | 待做 | SQLite 历史 vs `data/intel` 仍双轨 |
 
 ---
 
 ## 附：问题—思考—方案—执行对照
 
-| 阶段 | 内容 |
-| --- | --- |
-| 问题 | intel store 能索引 research，但缺少 Obsidian 可用的 Wiki 编译层 |
-| 思考 | Raw 只读；Wiki 独立包；MVP 确定性可跑；manifest 增量降 diff 噪音 |
-| 方案 | `js-wiki-engine` workspace + vault 结构 + intel adapter + 宿主 `wiki:compile` |
-| 执行 | 包内 13 测 + 宿主 wiki-compile；真实 run 53 source 编译与 lint 0 错 |
+| 阶段 | 第一轮（包 + 脚本） | 第二轮（CLI + 仓库习惯） |
+| --- | --- | --- |
+| 问题 | intel store 能索引 research，但缺少 Obsidian 可用的 Wiki 编译层 | 能力散落在 `scripts/`，主 CLI 用不上 |
+| 思考 | Raw 只读；Wiki 独立包；MVP 确定性可跑 | 操作入口统一到 `jdr`；生成物不入库 |
+| 方案 | `js-wiki-engine` + `wiki:compile` + manifest 增量 | `intel`/`wiki` 子命令；`.gitignore` 加 `wiki/` |
+| 执行 | 13 包测 + wiki-compile；53 source E2E lint 0 错 | `cli-intel-wiki` 测 + 全量 **83/83**；`jdr wiki lint` 冒烟通过 |

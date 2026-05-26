@@ -1,6 +1,6 @@
 # AGENT.md — js-deepresearch-agent CLI 指南
 
-本文档面向 **AI Agent**，说明如何在本地通过 CLI 运行深度调研、读写配置、查看历史，以及理解输出产物。Web UI 与 CLI 共用同一套设置与 SQLite 存储。
+本文档面向 **AI Agent**，说明如何在本地通过 CLI 运行深度调研、读写配置、查看历史、管理 **intel store** 归档、编译 **Obsidian Wiki**，以及理解输出产物。Web UI 与 CLI 共用同一套设置与 SQLite 存储。
 
 ## 项目概览
 
@@ -11,9 +11,13 @@
 | 可执行别名 | `js-deepresearch-agent`、`jdr` |
 | Node 版本 | >= 20 |
 | 本地数据 | `data/js-deepresearch.sqlite`（设置、历史、来源） |
+| Intel 归档 | `data/intel/`（`js-intel-store`；可用 `JDR_INTEL_STORE_DIR` 覆盖） |
 | 调研产物 | `work_dir/<strategy>/<timestamp>/`（默认） |
+| Wiki vault | `wiki/`（`js-wiki-engine` 编译输出；已 gitignore） |
 
-核心调研逻辑在 workspace 包 `packages/js-deepresearch-engine`（`js-deepresearch-engine`）中；CLI 通过 [`src/cli-research-run.mjs`](src/cli-research-run.mjs) 管理前台调研生命周期（含 Ctrl+C 取消），调用 `ResearchRunner` 执行调研，并将结果写入 SQLite 与 `work_dir`。
+核心调研逻辑在 workspace 包 `packages/js-deepresearch-engine`（`js-deepresearch-engine`）中；研究完成后可选归档到 `js-intel-store`（[`src/storage/intel-store.mjs`](src/storage/intel-store.mjs)），再经 `js-wiki-engine` 编译为 Obsidian 兼容 Markdown vault。
+
+CLI 通过 [`src/cli.mjs`](src/cli.mjs) 分发命令；前台 `research` 由 [`src/cli-research-run.mjs`](src/cli-research-run.mjs) 管理生命周期（含 Ctrl+C 取消），调用 `ResearchRunner` 执行调研，并将结果写入 SQLite、`work_dir`，并尝试写入 intel store（失败仅 warning，不阻断调研）。
 
 ## 调用方式
 
@@ -43,8 +47,12 @@ Commands:
   config set <key> <value>
   history [list]
   history show <researchId>
+  intel list | show | sources | findings | import [flags]
+  wiki init | compile | lint | ask [flags]
   serve [--port 3000]
 ```
+
+子命令详情见下文 **`intel`**、**`wiki`**；也可用等价 npm script：`intel:import`、`intel:inspect`、`wiki:compile`。
 
 未知命令会抛出 `Unknown command: ...` 并以退出码 1 结束。
 
@@ -129,6 +137,7 @@ npm exec jdr -- research "openclaw" \
 | **`--output`** | 报告副本 |
 | **`work_dir/`** | 会话目录（除非 `--no-work-dir`） |
 | **SQLite** | 历史记录（除非 `--no-save`） |
+| **`data/intel/`** | 尝试归档到 intel store（失败仅 stderr warning，不阻断调研） |
 
 `--json` 模式下进度只走 stderr，stdout 仅为 JSON，便于 Agent 解析。
 
@@ -269,6 +278,139 @@ CLI `research`（未加 `--no-save`）与 Web UI 任务共用 `research_history`
 
 取消后查看：`history show <id>` 输出 `error` 字段（如 `Research cancelled.`），无 `report`。
 
+**与 intel store 的关系**：`history` 读 SQLite 应用状态；`intel` 读 `data/intel` 结构化归档（runs / findings / sources / report 路径）。新 run 完成后会尝试 `archiveResearchResultSafe`；历史 `work_dir` 需 `intel import` 回填。两者 `researchId` 可能一致（有 `meta.researchId`）或为 `imported__<strategy>__<timestamp>`。
+
+---
+
+## `intel` — 研究产物归档（js-intel-store）
+
+管理 [`data/intel`](data/intel) 中的归档 runs。默认目录：`data/intel`；环境变量 `JDR_INTEL_STORE_DIR` 可覆盖。
+
+### 子命令
+
+```bash
+# 列出归档（默认最近 20 条）
+npm exec jdr -- intel list
+npm exec jdr -- intel list --limit 50 --json
+
+# 查看单次 run 摘要
+npm exec jdr -- intel show <researchId>
+
+# 查看来源 / findings
+npm exec jdr -- intel sources <researchId> --limit 10
+npm exec jdr -- intel findings <researchId> --limit 10
+
+# 从 work_dir 历史回填 intel store
+npm exec jdr -- intel import --dry-run
+npm exec jdr -- intel import --strategy source-based
+npm exec jdr -- intel import --force --json
+```
+
+| 子命令 | 说明 |
+|---|---|
+| `list` | 归档 runs 列表（`researchId`、strategy、query、sources/findings 计数） |
+| `show <researchId>` | 单次 run 元数据（`reportPath`、`sessionDir` 等） |
+| `sources <researchId>` | 该 run 的来源列表 |
+| `findings <researchId>` | 该 run 的 findings 列表 |
+| `import` | 扫描 `work_dir` 下 `YYYY-MM-DD_HHMMSS` session，写入 intel store |
+
+### 常用 flags
+
+| Flag | 说明 |
+|---|---|
+| `--intel-dir <dir>` | Intel store 根目录（默认 `data/intel`） |
+| `--limit <n>` | `list` / `sources` / `findings` 行数上限（默认 20） |
+| `--root <dir>` | import 时 work_dir 根（默认 `work_dir`） |
+| `--strategy <name>` | import 仅处理某一策略目录 |
+| `--dry-run` | import 预览，不写盘 |
+| `--force` | import 时覆盖已存在 run 元数据 |
+| `--json` | JSON 输出 |
+
+### researchId 规则
+
+| 来源 | researchId |
+|---|---|
+| 新 research 且 `meta.json` 含 UUID | `meta.researchId` |
+| 历史 import、无 UUID | `imported__<strategy>__<YYYY-MM-DD_HHMMSS>` |
+
+**Agent 注意**：Windows 路径下 import ID **不能**含 `:`（已改为 `imported__` 前缀）。
+
+等价 npm script：
+
+```bash
+npm run intel:import -- --dry-run --strategy source-based
+npm run intel:inspect -- list
+```
+
+详见 journal：[`journal/2026-05-26/js-intel-store-integration.md`](journal/2026-05-26/js-intel-store-integration.md)
+
+---
+
+## `wiki` — LLM Wiki 编译（js-wiki-engine）
+
+将 intel store 中的 research **确定性编译**为 Obsidian 兼容 vault（Wikilink、YAML frontmatter、`manifest.json` 增量）。默认输出目录 `wiki/`（本地生成，不入 git）。
+
+### 子命令
+
+```bash
+# 初始化 vault 目录与模板
+npm exec jdr -- wiki init
+npm exec jdr -- wiki init --vault ./my-wiki --init-obsidian-config
+
+# 编译（默认取 intel store 最近一条 run）
+npm exec jdr -- wiki compile
+npm exec jdr -- wiki compile --research-id 00176e84-2548-4160-add1-7df5a49f7e27 --vault wiki --lint
+
+# 仅检查断链 / manifest
+npm exec jdr -- wiki lint --vault wiki --json
+
+# 确定性检索相关页面（无 LLM）
+npm exec jdr -- wiki ask "What is LLM Wiki?" --vault wiki --limit 5
+```
+
+| 子命令 | 说明 |
+|---|---|
+| `init` | 创建 `Home.md`、`Map of Content.md`、`Templates/` 等 |
+| `compile` | 从 intel store 读 sources + report，生成 `Sources/`、`Topics/`、`Claims/`、更新 MOC |
+| `lint` | 断链、manifest 缺页、topic 无 sources；写入 `Lint/latest.md` |
+| `ask` | 按关键词打分返回相关 wiki 页面（MVP 检索，非 RAG） |
+
+### 常用 flags
+
+| Flag | 说明 |
+|---|---|
+| `--research-id <id>` | 指定归档 run（默认：intel `list` 最近一条） |
+| `--vault <dir>` | Vault 目录（默认 `wiki`） |
+| `--force` / `--full` | 忽略 manifest hash，重编全部 source 页 |
+| `--lint` | `compile` 结束后自动 `lint` |
+| `--init-obsidian-config` | 写入最小 `.obsidian/app.json` |
+| `--limit <n>` | `ask` 返回页面数（默认 5） |
+| `--json` | JSON 输出 |
+
+### Vault 结构（编译后）
+
+```text
+wiki/
+├── Home.md
+├── Map of Content.md
+├── Sources/<researchId>/Source NNN - <title>.md
+├── Topics/<Topic>.md
+├── Claims/<Topic> Claims.md
+├── Lint/latest.md
+├── Templates/
+└── manifest.json          # 仅 engine 增量用，非人类入口
+```
+
+**Agent 工作流**：`research` →（可选）`intel import` 补历史 → `intel list` 确认 `researchId` → `wiki compile --lint` → 用 Obsidian 打开 `wiki/`，或 `wiki ask` 查相关页。
+
+等价 npm script：
+
+```bash
+npm run wiki:compile -- --research-id <id> --vault wiki --lint
+```
+
+包 API 在 `packages/js-wiki-engine`；详见 journal：[`journal/2026-05-26/js-wiki-engine.md`](journal/2026-05-26/js-wiki-engine.md)
+
 ---
 
 ## `serve` — 启动 HTTP 服务
@@ -286,21 +428,26 @@ npm exec jdr -- serve --port 3000
 
 ## `benchmark` — 评估报告与来源匹配
 
-离线评估已保存调研产物，**不会**重新执行 `research` 或搜索。
+离线评估已保存调研产物，**不会**重新执行 `research` 或搜索。入口为独立脚本（**未**并入主 CLI `jdr`）。
 
 ```bash
+# 从 work_dir 会话目录
 node scripts/benchmark-research.mjs work_dir/source-based/2026-05-26_043125
 node scripts/benchmark-research.mjs work_dir/source-based/2026-05-26_043125 --no-llm --json
-node scripts/benchmark-research.mjs work_dir/source-based/2026-05-26_043125 --strict-platform js-eyes:zhihu
+
+# 从 intel store（需先 archive 或 intel import）
+node scripts/benchmark-research.mjs --research-id 00176e84-2548-4160-add1-7df5a49f7e27 --no-llm
+node scripts/benchmark-research.mjs --research-id imported__source-based__2026-05-26_065414 --strict-platform js-eyes:zhihu
 ```
 
 | Flag | 说明 |
 |---|---|
+| `--research-id <id>` | 从 `data/intel` 加载四件套（与 `work_dir` 路径二选一） |
 | `--json` | 输出机器可读 JSON |
 | `--no-llm` | 仅规则层评分，不调用 LLM |
 | `--strict-platform` | 要求引用来源的 `engine` 匹配指定值，如 `js-eyes:zhihu` |
 
-输入目录需包含 `report.md`、`findings.json`、`sources.json`、`meta.json`。脚本会：
+输入需包含 `report.md`、`findings.json`、`sources.json`、`meta.json`（目录或 intel 归档均可）。脚本会：
 
 1. 从 `findings.json` 建立 `[1.1]` 引用映射
 2. 从 `Summary` / `Key Findings` / `Evidence` 提取 claim
@@ -342,6 +489,7 @@ node scripts/benchmark-research.mjs work_dir/source-based/2026-05-26_043125 --st
 | `JS_EYES_MAX_PAGES` | `search.jsEyesMaxPages` |
 | `JS_EYES_TIMEOUT_MS` | `search.jsEyesTimeoutMs` |
 | `WORK_DIR` | `research.workDir` |
+| `JDR_INTEL_STORE_DIR` | intel store 根目录（非 settings 对象；默认 `data/intel`） |
 
 ---
 
@@ -487,6 +635,24 @@ npm exec jdr -- history list
 npm exec jdr -- history show <id>
 ```
 
+### 3b. 归档与 Wiki（LLM Wiki 管线）
+
+```bash
+# 历史 work_dir 回填 intel（首次或补数据）
+npm exec jdr -- intel import --strategy source-based
+
+# 确认 researchId
+npm exec jdr -- intel list --limit 5
+
+# 编译 Obsidian vault 并 lint
+npm exec jdr -- wiki compile --research-id <id> --vault wiki --lint
+
+# 在 vault 内检索相关页
+npm exec jdr -- wiki ask "用户问题" --vault wiki
+```
+
+新完成的 `research` 会自动尝试写入 intel store；若只关心 SQLite 历史可跳过上述步骤。
+
 ### 4. 临时覆盖、不改持久配置
 
 对所有 `research` 参数使用 flags，**不要**为一次性实验调用 `config set`。
@@ -495,7 +661,7 @@ npm exec jdr -- history show <id>
 
 - 使用 `--json` 解析结果；进度在 stderr，勿混读
 - 长任务可能数分钟；JS Eyes 多 skill 时超时近似 `JS_EYES_TIMEOUT_MS × skill 数`
-- 产物与 DB 在 `.gitignore`（`data/`、`work_dir/`），勿提交
+- 产物与 DB 在 `.gitignore`（`data/`、`work_dir/`、`wiki/`），勿提交
 - **退出码**：成功 `0`；普通错误 `1`；用户取消 `130`（`Research cancelled.`）
 - 自动化取消：向子进程发 `SIGINT`/`SIGTERM`，或在前台交互环境发送 Ctrl+C；勿仅 kill 父 shell 并假设调研已停
 
@@ -522,6 +688,9 @@ npm exec jdr -- history show <id>
 | LLM 401/403 | API Key 或 base URL 错误 |
 | `Research not found` | `history show` 的 id 不存在 |
 | `Unknown command` | 命令拼写错误 |
+| `No archived research runs found` | `wiki compile` 前需先跑 research 或 `intel import` |
+| `Archived research run not found` | `intel show` / `wiki compile` 的 researchId 不存在 |
+| `wiki lint` 有 errors | 见 `wiki/Lint/latest.md`；常见为断链或 manifest 指向缺失文件 |
 | 按 Ctrl+C 后 js-eyes 仍开页 | 取消只停**后续**搜索；队列中最后一两次可能仍在执行；已开标签不自动关。确认 CLI 已升级且 stderr 有 `Cancellation requested` |
 | `Research cancelled.` | 用户主动取消；历史 `cancelled`，exit code 130 |
 | 终端断开但调研仍完成 | 旧版或未走信号路径；升级后须用 Ctrl+C，不能仅靠关闭终端 |
@@ -534,9 +703,15 @@ CLI 顶层错误输出 `error.message` 到 stderr；普通错误退出码 `1`，
 
 | 文件 | 职责 |
 |---|---|
-| `src/cli.mjs` | CLI 入口、命令分发 |
+| `src/cli.mjs` | CLI 入口；`research` / `config` / `history` / **`intel`** / **`wiki`** / `serve` |
 | `src/cli-research-run.mjs` | 前台 research 生命周期、`createResearchAbortController()`、`runCliResearch()`、历史状态 `running`/`cancelled`/`failed` |
 | `src/cli-utils.mjs` | 参数解析、`applyResearchFlags()`、`config` 点分键读写 |
+| `src/storage/intel-store.mjs` | `archiveResearchResult`、`readArchivedResearch`、`createIntelStoreEngine` |
+| `scripts/intel/import-work-dir-core.mjs` | `intel import` 扫描与回填逻辑 |
+| `scripts/intel/inspect-core.mjs` | `intel list/show/sources/findings` 查询 |
+| `scripts/wiki/compile.mjs` | npm `wiki:compile` 脚本入口（逻辑与 `jdr wiki compile` 等价） |
+| `packages/js-wiki-engine` | `initWiki`、`compileWiki`、`lintWiki`、`askWiki`、`loadSourcesFromIntelStore` |
+| `packages/js-intel-store` | npm 依赖；`StorageEngine` + data source registry |
 | `src/jobs/job-runner.mjs` | Web UI 异步任务、`cancel()` + `AbortController` |
 | `src/search-providers/js-eyes/cli-process.mjs` | js-eyes 子进程 spawn、abort 时 `killProcessTree()`（Windows `taskkill /T /F`） |
 | `src/search-providers/js-eyes/index.mjs` | js-eyes 搜索 adapter；skill-run 时 AbortError 立即向上抛 |
@@ -547,13 +722,13 @@ CLI 顶层错误输出 `error.message` 到 stderr；普通错误退出码 `1`，
 | `packages/js-deepresearch-engine` | `ResearchRunner`、策略、搜索、产物写入 |
 | `packages/js-deepresearch-engine/src/research/search-executor.mjs` | 并发搜索；`AbortError` 不吞掉，取消后不再调度新问题 |
 
-修改 CLI 行为时以 `src/cli.mjs`、`src/cli-research-run.mjs` 与 `tests/cli-research-cancel.test.mjs` 为准；修改调研逻辑优先改 engine 包并跑 `npm test`。
+修改 CLI 行为时以 `src/cli.mjs`、`src/cli-research-run.mjs` 与 `tests/cli-research-cancel.test.mjs`、`tests/cli-intel-wiki.test.mjs` 为准；修改调研逻辑优先改 engine 包；intel/wiki 分别见 `js-intel-store` / `js-wiki-engine` 与对应 journal。跑 `npm test`。
 
 ---
 
 ## 安全与仓库规范
 
-- 勿将 `.env`、`data/`、`work_dir/` 提交到 git
+- 勿将 `.env`、`data/`、`work_dir/`、`wiki/` 提交到 git
 - 勿在对话或日志中粘贴完整 API Key
 - 跑测试：`npm test`；lint：`npm run lint`
 
@@ -580,6 +755,15 @@ npm exec jdr -- config set llm.model "gpt-4o-mini"
 # 历史
 npm exec jdr -- history list
 npm exec jdr -- history show <id>
+
+# Intel 归档
+npm exec jdr -- intel list
+npm exec jdr -- intel import --dry-run
+npm exec jdr -- intel show <researchId>
+
+# Wiki
+npm exec jdr -- wiki compile --research-id <id> --lint
+npm exec jdr -- wiki ask "问题" --vault wiki
 
 # Web 服务
 npm exec jdr -- serve --port 3000
