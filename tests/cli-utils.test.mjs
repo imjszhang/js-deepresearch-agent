@@ -81,6 +81,14 @@ describe('CLI utilities', () => {
     assert.equal(settings.research.sourceBased.maxSourcesForReport, 20);
   });
 
+  it('maps source fetch backend flag into research settings', () => {
+    const settings = applyResearchFlags({ research: {} }, {
+      'source-fetch-backend': 'js-eyes',
+    });
+
+    assert.equal(settings.research.sourceBased.fetchBackend, 'js-eyes');
+  });
+
   it('maps other search runtime flags for one-off research runs', () => {
     const settings = applyResearchFlags({ search: {} }, {
       search: 'js-eyes',

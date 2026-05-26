@@ -94,6 +94,7 @@ export async function runSourceBasedPipeline(context) {
         enrichConcurrency: sourceBased.enrichConcurrency,
         llm,
         signal,
+        settings,
       });
       findings.push(...enriched);
     } else {

@@ -1,4 +1,4 @@
-import { fetchUrlContent } from './content-fetcher.mjs';
+import { resolveUrlContent } from './content-resolver.mjs';
 
 function isAbortError(error) {
   return error?.name === 'AbortError';
@@ -32,6 +32,7 @@ async function enrichOneSource(source, {
   signal,
   fetchMode,
   maxContentChars,
+  settings,
 }) {
   const url = String(source.url || '').trim();
   if (!url) {
@@ -42,7 +43,12 @@ async function enrichOneSource(source, {
     };
   }
 
-  const fetched = await fetchUrlContent(url, { signal, maxChars: maxContentChars });
+  const fetched = await resolveUrlContent(url, {
+    source,
+    settings,
+    signal,
+    maxChars: maxContentChars,
+  });
   if (fetched.status !== 'ok') {
     return {
       ...source,
@@ -92,6 +98,7 @@ export async function enrichFindingSources(finding, options = {}) {
     enrichConcurrency,
     llm,
     signal,
+    settings,
     seenUrls = new Set(),
     enrichedCount = { value: 0 },
   } = options;
@@ -137,6 +144,7 @@ export async function enrichFindingSources(finding, options = {}) {
           signal,
           fetchMode,
           maxContentChars,
+          settings,
         });
         enrichedByUrl.set(source.url, enriched);
         if (enriched.fetchStatus === 'ok') {

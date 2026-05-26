@@ -32,3 +32,9 @@ export {
 export { normalizeSearchConfig } from './search/normalize-search-config.mjs';
 export { resolveSearchConcurrency } from './search/search-capabilities.mjs';
 export { resetEngineRegistries } from './registry-reset.mjs';
+export {
+  registerContentFetchHandler,
+  resetContentFetchHandlers,
+  resolveUrlContent,
+  getContentFetchHandlers,
+} from './research/content-resolver.mjs';

@@ -26,6 +26,7 @@ export const defaultSettings = Object.freeze({
     workDir: 'work_dir',
     sourceBased: {
       fetchMode: 'disabled',
+      fetchBackend: 'auto',
       maxUrlsPerIteration: 8,
       maxUrlsTotal: 24,
       maxContentChars: 8000,

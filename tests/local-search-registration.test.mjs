@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { createSearchEngine, searchEngineMetadata } from 'js-deepresearch-engine';
+import {
+  createSearchEngine,
+  getContentFetchHandlers,
+  searchEngineMetadata,
+} from 'js-deepresearch-engine';
 import '../src/search-providers/register-local-search-engines.mjs';
 
 describe('local search engine registration', () => {
@@ -24,5 +28,9 @@ describe('local search engine registration', () => {
 
     assert.equal(typeof engine.search, 'function');
     assert.equal(engine.capabilities.maxQuestionConcurrency, 1);
+  });
+
+  it('registers zhihu content fetch handler at startup', () => {
+    assert.ok(getContentFetchHandlers().length >= 1);
   });
 });

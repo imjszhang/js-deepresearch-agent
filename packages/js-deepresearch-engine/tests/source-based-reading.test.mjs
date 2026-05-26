@@ -3,6 +3,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 import { fetchUrlContent } from '../src/research/content-fetcher.mjs';
+import {
+  registerContentFetchHandler,
+  resetContentFetchHandlers,
+  resolveUrlContent,
+} from '../src/research/content-resolver.mjs';
 import { reportPrompt } from '../src/research/prompts.mjs';
 import { formatSourcesForResearchContext } from '../src/research/source-context.mjs';
 import { enrichFindings, enrichFindingSources } from '../src/research/source-enricher.mjs';
@@ -15,6 +20,7 @@ const originalFetch = globalThis.fetch;
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+  resetContentFetchHandlers();
 });
 
 function mockHtmlFetch(html) {
@@ -29,6 +35,7 @@ describe('source-based settings', () => {
   it('defaults fetchMode to disabled', () => {
     const resolved = resolveSourceBasedSettings({});
     assert.equal(resolved.fetchMode, 'disabled');
+    assert.equal(resolved.fetchBackend, 'auto');
     assert.equal(resolved.maxUrlsTotal, 24);
   });
 
@@ -62,6 +69,70 @@ describe('content fetcher', () => {
   });
 });
 
+describe('content resolver', () => {
+  it('prefers registered handlers over HTTP in auto mode', async () => {
+    registerContentFetchHandler(async () => ({
+      status: 'ok',
+      title: 'Handler title',
+      content: 'Handler content body',
+      backend: 'test',
+    }));
+
+    const result = await resolveUrlContent('https://example.com/a', {
+      settings: { research: { sourceBased: { fetchBackend: 'auto' } } },
+    });
+
+    assert.equal(result.status, 'ok');
+    assert.equal(result.content, 'Handler content body');
+    assert.equal(result.backend, 'test');
+  });
+
+  it('falls back to HTTP when handlers return unsupported', async () => {
+    registerContentFetchHandler(async () => ({ status: 'unsupported' }));
+    globalThis.fetch = async () => ({
+      ok: true,
+      headers: { get: () => 'text/html' },
+      text: async () => '<html><title>HTTP</title><body><p>HTTP body</p></body></html>',
+    });
+
+    const result = await resolveUrlContent('https://example.com/a', {
+      settings: { research: { sourceBased: { fetchBackend: 'auto' } } },
+    });
+
+    assert.equal(result.status, 'ok');
+    assert.match(result.content, /HTTP body/);
+  });
+
+  it('skips handlers when fetchBackend is http', async () => {
+    registerContentFetchHandler(async () => ({
+      status: 'ok',
+      content: 'Should not be used',
+    }));
+    globalThis.fetch = async () => ({
+      ok: true,
+      headers: { get: () => 'text/html' },
+      text: async () => '<html><body><p>Direct HTTP</p></body></html>',
+    });
+
+    const result = await resolveUrlContent('https://example.com/a', {
+      settings: { research: { sourceBased: { fetchBackend: 'http' } } },
+    });
+
+    assert.match(result.content, /Direct HTTP/);
+  });
+
+  it('does not fallback to HTTP when fetchBackend is js-eyes', async () => {
+    registerContentFetchHandler(async () => ({ status: 'unsupported' }));
+
+    const result = await resolveUrlContent('https://example.com/a', {
+      settings: { research: { sourceBased: { fetchBackend: 'js-eyes' } } },
+    });
+
+    assert.equal(result.status, 'failed');
+    assert.match(result.error, /No js-eyes content handler matched URL/);
+  });
+});
+
 describe('source enricher', () => {
   it('returns findings unchanged when fetchMode is disabled', async () => {
     const findings = [{
@@ -83,7 +154,12 @@ describe('source enricher', () => {
   });
 
   it('writes full content on successful fetch', async () => {
-    mockHtmlFetch('<html><title>Article</title><body><p>Detailed LLM wiki article body.</p></body></html>');
+    registerContentFetchHandler(async () => ({
+      status: 'ok',
+      title: 'Article',
+      content: 'Detailed LLM wiki article body.',
+      backend: 'test',
+    }));
 
     const [finding] = await enrichFindings([{
       question: 'llm wiki',

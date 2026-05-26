@@ -15,6 +15,10 @@ import {
   resolveProviderConfig,
   resolveSpawnTarget,
   runCommand,
+  buildZhihuReadCommand,
+  classifyZhihuUrl,
+  createZhihuContentFetchHandler,
+  parseZhihuReadPayload,
 } from '../src/search-providers/js-eyes/public.mjs';
 
 describe('JsEyesCliSearchEngine', () => {
@@ -346,6 +350,141 @@ describe('mergeSkillResults', () => {
       'https://example.com/c',
       'https://example.com/b',
     ]);
+  });
+});
+
+describe('Zhihu content fetcher', () => {
+  it('classifies zhihu article and answer URLs', () => {
+    assert.equal(
+      classifyZhihuUrl('https://zhuanlan.zhihu.com/p/2026793291014842204'),
+      'article',
+    );
+    assert.equal(
+      classifyZhihuUrl('https://www.zhihu.com/question/1/answer/2'),
+      'answer',
+    );
+    assert.equal(classifyZhihuUrl('https://www.zhihu.com/question/1'), null);
+  });
+
+  it('builds skill-run article and answer commands', () => {
+    const provider = {
+      serverUrl: 'ws://127.0.0.1:18080',
+      timeoutMs: 45000,
+    };
+
+    assert.deepEqual(
+      buildZhihuReadCommand('https://zhuanlan.zhihu.com/p/1', 'article', provider),
+      [
+        'skill', 'run', 'js-zhihu-ops-skill', 'article', 'https://zhuanlan.zhihu.com/p/1',
+        '--ws-endpoint', 'ws://127.0.0.1:18080',
+        '--timeout-ms', '90000',
+        '--json', '--quiet',
+      ],
+    );
+    assert.deepEqual(
+      buildZhihuReadCommand('https://www.zhihu.com/question/1/answer/2', 'answer', provider),
+      [
+        'skill', 'run', 'js-zhihu-ops-skill', 'answer', 'https://www.zhihu.com/question/1/answer/2',
+        '--ws-endpoint', 'ws://127.0.0.1:18080',
+        '--timeout-ms', '90000',
+        '--json', '--quiet',
+      ],
+    );
+  });
+
+  it('maps successful zhihu read payloads to content', () => {
+    const parsed = parseZhihuReadPayload({
+      ok: true,
+      sourceUrl: 'https://zhuanlan.zhihu.com/p/1',
+      result: {
+        title: 'LLM Wiki article',
+        content: 'Karpathy LLM Wiki uses compiler-style RAG.',
+      },
+    });
+
+    assert.equal(parsed.status, 'ok');
+    assert.equal(parsed.title, 'LLM Wiki article');
+    assert.match(parsed.content, /compiler-style RAG/);
+    assert.equal(parsed.backend, 'js-eyes:zhihu');
+  });
+
+  it('reads zhihu article content through js-eyes skill-run', async () => {
+    const calls = [];
+    const handler = createZhihuContentFetchHandler({
+      spawn: createMockSpawn({
+        calls,
+        stdout: JSON.stringify({
+          ok: true,
+          sourceUrl: 'https://zhuanlan.zhihu.com/p/1',
+          result: {
+            title: 'LLM Wiki article',
+            content: 'Detailed zhihu article body.',
+          },
+        }),
+      }),
+    });
+
+    const result = await handler('https://zhuanlan.zhihu.com/p/1', {
+      source: { engine: 'js-eyes:zhihu' },
+      settings: {
+        search: {
+          engine: 'js-eyes',
+          provider: {
+            cli: 'custom-js-eyes',
+            serverUrl: 'ws://127.0.0.1:18080',
+            timeoutMs: 45000,
+          },
+        },
+      },
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].command, 'custom-js-eyes');
+    assert.deepEqual(calls[0].args, [
+      'skill', 'run', 'js-zhihu-ops-skill', 'article', 'https://zhuanlan.zhihu.com/p/1',
+      '--ws-endpoint', 'ws://127.0.0.1:18080',
+      '--timeout-ms', '90000',
+      '--json', '--quiet',
+    ]);
+    assert.equal(result.status, 'ok');
+    assert.match(result.content, /Detailed zhihu article body/);
+  });
+
+  it('returns unsupported for non-zhihu URLs', async () => {
+    const handler = createZhihuContentFetchHandler({
+      spawn: createMockSpawn({ stdout: '{}' }),
+    });
+
+    const result = await handler('https://example.com/page', {
+      source: { engine: 'searxng' },
+      settings: { search: { engine: 'js-eyes', provider: { serverUrl: 'ws://127.0.0.1:18080' } } },
+    });
+
+    assert.equal(result.status, 'unsupported');
+  });
+
+  it('returns failed payload errors without throwing', async () => {
+    const handler = createZhihuContentFetchHandler({
+      spawn: createMockSpawn({
+        stdout: JSON.stringify({
+          ok: false,
+          antiCrawlState: { reason: 'login_required' },
+        }),
+      }),
+    });
+
+    const result = await handler('https://www.zhihu.com/question/1/answer/2', {
+      source: { engine: 'js-eyes:zhihu' },
+      settings: {
+        search: {
+          engine: 'js-eyes',
+          provider: { serverUrl: 'ws://127.0.0.1:18080' },
+        },
+      },
+    });
+
+    assert.equal(result.status, 'failed');
+    assert.equal(result.error, 'login_required');
   });
 });
 

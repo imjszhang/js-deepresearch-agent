@@ -102,6 +102,7 @@ export function applyResearchFlags(settings, flags) {
     iterations: 'research.iterations',
     concurrency: 'research.concurrency',
     'source-fetch-mode': 'research.sourceBased.fetchMode',
+    'source-fetch-backend': 'research.sourceBased.fetchBackend',
     'source-max-urls': 'research.sourceBased.maxUrlsTotal',
     'source-enable-filter': 'research.sourceBased.enableRelevanceFilter',
     'source-max-sources': 'research.sourceBased.maxSourcesForReport',

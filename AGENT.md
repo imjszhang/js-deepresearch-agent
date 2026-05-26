@@ -89,6 +89,7 @@ npm exec jdr -- research "Explain the current state of local-first AI research"
 | `--concurrency` | `research.concurrency` | 并发搜索数 |
 | `--work-dir` | `research.workDir` | 产物根目录（相对 cwd 或绝对路径） |
 | `--source-fetch-mode` | `research.sourceBased.fetchMode` | `disabled`（默认）\| `full` \| `summary`；抓取 URL 正文或 LLM 摘要 |
+| `--source-fetch-backend` | `research.sourceBased.fetchBackend` | `auto`（默认）\| `http` \| `js-eyes`；知乎来源优先走 js-eyes 浏览器读取 |
 | `--source-max-urls` | `research.sourceBased.maxUrlsTotal` | 单次调研最多 enrich 的 URL 数 |
 | `--source-enable-filter` | `research.sourceBased.enableRelevanceFilter` | 是否启用 LLM 来源相关性过滤 |
 | `--source-max-sources` | `research.sourceBased.maxSourcesForReport` | 过滤后保留的最大来源数 |
@@ -365,6 +366,7 @@ Agent 选型建议：
 | 配置键 / Flag | 默认 | 说明 |
 |---|---|---|
 | `research.sourceBased.fetchMode` / `--source-fetch-mode` | `disabled` | `full` 抓取正文；`summary` 抓取后 LLM 压缩 |
+| `research.sourceBased.fetchBackend` / `--source-fetch-backend` | `auto` | `js-eyes` 强制浏览器读取；`http` 仅 HTTP fetch |
 | `research.sourceBased.maxUrlsTotal` / `--source-max-urls` | `24` | 全局 enrich URL 上限 |
 | `research.sourceBased.enableRelevanceFilter` / `--source-enable-filter` | `false` | LLM 相关性过滤 |
 | `research.sourceBased.maxSourcesForReport` / `--source-max-sources` | `30` | 过滤后保留来源数 |
@@ -377,6 +379,7 @@ npm exec jdr -- research "llm wiki" \
   --search-skills js-zhihu-ops-skill \
   --strategy source-based \
   --source-fetch-mode summary \
+  --source-fetch-backend js-eyes \
   --source-max-urls 12
 ```
 

@@ -16,3 +16,11 @@ export {
 } from './skill-registry.mjs';
 export { normalizeJsEyesSearchConfig } from './normalize-js-eyes-search-config.mjs';
 export { JS_EYES_SEARCH_DEFAULTS } from './defaults.mjs';
+export {
+  buildZhihuReadCommand,
+  classifyZhihuUrl,
+  createZhihuContentFetchHandler,
+  fetchZhihuContent,
+  isZhihuSource,
+  parseZhihuReadPayload,
+} from './zhihu-content-fetcher.mjs';

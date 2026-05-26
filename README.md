@@ -93,6 +93,7 @@ npm exec jdr -- research "llm wiki" \
   --search-skills js-zhihu-ops-skill \
   --strategy source-based \
   --source-fetch-mode summary \
+  --source-fetch-backend js-eyes \
   --source-max-urls 12 \
   --source-enable-filter true \
   --source-max-sources 30

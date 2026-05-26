@@ -216,7 +216,8 @@ npm test
 | --- | --- |
 | 生成期拦截 | `sources` 为空或全部 `findings.error` 时，report 合成前告警或降级 |
 | 批量 benchmark | 扫描 `work_dir/*/*`，对比多次调研指标趋势 |
-| ~~全文抓取~~ | **已落地**：见 [`source-based-deep-reading.md`](./source-based-deep-reading.md)；`source-based` 可选 `--source-fetch-mode full/summary`，benchmark 规则层已读 `summary/content/snippet` |
+| ~~全文抓取~~ | **已落地**：通用 enrichment 见 [`source-based-deep-reading.md`](./source-based-deep-reading.md)；知乎浏览器读取见 [`zhihu-source-enrichment.md`](./zhihu-source-enrichment.md)（产物 `2026-05-26_052953`，6/8 带正文） |
+| Benchmark 中文报告 | enriched 报告常用中文标题，需扩展 `claims.mjs` 否则 `claimCount: 0` |
 | 其他 skill | 小红书等若也不支持 unified `search`，按知乎模式补 skill-run profile |
 | Summary 引用策略 | 当前 Summary 常无 citation，可在 report prompt 中要求或 benchmark 单独加权 |
 

@@ -23,6 +23,7 @@
 /**
  * @typedef {Object} SourceBasedSettings
  * @property {'disabled'|'full'|'summary'} [fetchMode]
+ * @property {'auto'|'http'|'js-eyes'} [fetchBackend]
  * @property {number} [maxUrlsPerIteration]
  * @property {number} [maxUrlsTotal]
  * @property {number} [maxContentChars]

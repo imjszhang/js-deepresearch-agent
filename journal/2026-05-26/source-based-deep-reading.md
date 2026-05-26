@@ -209,13 +209,19 @@ npm run benchmark -- work_dir/source-based/2026-05-26_043125 --no-llm --strict-p
 
 说明：`2026-05-26_043125` 是 **改造前** 产物，sources 仅有 snippet，benchmark 可跑通但 `low_keyword_overlap` 仍会偏高。**开启 enrichment 后需重跑调研** 才能验证指标改善。
 
-### 5.3 尚未现场验证的风险
+### 5.3 现场验证（知乎 js-eyes）
+
+知乎浏览器 enrichment 已单独落地，见 [`zhihu-source-enrichment.md`](./zhihu-source-enrichment.md)。
+
+本机端到端产物 [`work_dir/source-based/2026-05-26_052953`](../../work_dir/source-based/2026-05-26_052953)：**6/8** 来源 `fetchStatus: ok` 且含 `content`，报告聚焦 Karpathy LLM Wiki。
+
+### 5.4 其他尚未完全覆盖的风险
 
 | 风险 | 说明 |
 | --- | --- |
-| 知乎正文抓取 | 可能因登录、反爬、JS 渲染失败；设计上回退 snippet |
-| `summary` 成本 | 每 URL +1 LLM 调用，24 URL 上限仍可能显著增时延 |
+| `summary` 模式成本 | 每 URL +1 LLM 调用，24 URL 上限仍可能显著增时延 |
 | 过滤 LLM 稳定性 | 已实现非 JSON 降级，但极端情况下可能保留噪声来源 |
+| Benchmark 中文报告 | 当前 claim 提取只认英文标题，中文报告需扩展 parser |
 
 ---
 
@@ -223,11 +229,12 @@ npm run benchmark -- work_dir/source-based/2026-05-26_043125 --no-llm --strict-p
 
 | 方向 | 说明 |
 | --- | --- |
-| 重跑知乎 benchmark | 用 `--source-fetch-mode summary` 生成新 session，对比 `low_keyword_overlap` |
+| ~~重跑知乎 benchmark~~ | **已部分验证**：见 [`zhihu-source-enrichment.md`](./zhihu-source-enrichment.md)；产物 `2026-05-26_052953` 含 6 条正文 |
 | 生成期拦截 | sources 为空或全部 failed 时在 report 合成前告警（见 benchmark journal 建议） |
-| 浏览器抓取 | 知乎等 SPA 可考虑 js-eyes 已登录浏览器上下文，而非裸 HTTP fetch |
-| per-domain fetch 策略 | 知乎 / Reddit / 普通 HTML 分 profile |
-| 批量 benchmark | 扫描 `work_dir`，对比 disabled vs summary 指标趋势 |
+| ~~浏览器抓取（知乎）~~ | **已落地**：`--source-fetch-backend js-eyes` + `js-zhihu-ops-skill article/answer` |
+| Benchmark 中文段落 | 支持 `## 摘要` 等，否则 enriched 报告 offline 判分为 0 claim |
+| per-domain fetch 策略 | Reddit / 普通 HTML 等按 handler 扩展 |
+| 批量 benchmark | 扫描 `work_dir`，对比 disabled vs js-eyes enrichment 指标趋势 |
 
 ---
 
@@ -239,3 +246,5 @@ npm run benchmark -- work_dir/source-based/2026-05-26_043125 --no-llm --strict-p
 | 思考 | 应在搜索与报告之间插入 enrich + 可选 filter；默认 disabled 保兼容；失败回退 snippet；证据语义统一为 summary/content/snippet |
 | 方案 | 独立 `source-based-pipeline`；`content-fetcher` + `source-enricher` + `source-relevance-filter`；扩展配置/types/CLI；report 与 context 用 enriched evidence |
 | 执行 | 落地 6 个新模块 + pipeline 改造；57 测试通过；benchmark 规则层支持 enriched evidence；README/AGENT 补文档；旧 work_dir benchmark 可离线复跑 |
+
+**后续（同日）**：知乎 js-eyes handler 与现场跑通见 [`zhihu-source-enrichment.md`](./zhihu-source-enrichment.md)。
