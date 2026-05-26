@@ -6,16 +6,9 @@ import { resolveStrategyConcurrency, uniqueQuestionCount } from '../strategy-uti
  * Shared iterative research pipeline used by source-based and parallel strategies.
  *
  * @param {import('../../types.mjs').StrategyContext} context
- * @param {Object} options
- * @param {(iteration: number, iterations: number) => string} options.generatingMessage
- * @param {(iteration: number, iterations: number, questionCount: number) => string} options.searchingMessage
- * @param {(completed: number, total: number, iteration: number) => string} options.searchProgressMessage
+ * @param {{ variant: 'source-based' | 'parallel' }} options
  */
-export async function runIterativeStrategy(context, {
-  generatingMessage,
-  searchingMessage,
-  searchProgressMessage,
-}) {
+export async function runIterativeStrategy(context, { variant }) {
   const {
     query,
     iterations,
@@ -30,9 +23,13 @@ export async function runIterativeStrategy(context, {
   const findings = [];
 
   for (let iteration = 1; iteration <= iterations; iteration += 1) {
-    const progressBase = 10 + Math.round(((iteration - 1) / iterations) * 60);
     const priorContext = iteration === 1 ? '' : formatSourcesForQuestionContext(findings);
-    emit(generatingMessage(iteration, iterations), progressBase);
+    emit({
+      stage: 'generating_questions',
+      strategy: variant,
+      iteration,
+      iterations,
+    });
     const questions = await generateQuestions({
       llm,
       query,
@@ -43,18 +40,27 @@ export async function runIterativeStrategy(context, {
     });
 
     const iterationQuestions = iteration === 1 ? [query, ...questions] : questions;
-    emit(
-      searchingMessage(iteration, iterations, uniqueQuestionCount(iterationQuestions)),
-      progressBase + 5,
-    );
+    emit({
+      stage: 'searching',
+      strategy: variant,
+      iteration,
+      iterations,
+      total: uniqueQuestionCount(iterationQuestions),
+    });
     const results = await searchQuestions({
       questions: iterationQuestions,
       search,
       signal,
       concurrency: resolvedConcurrency,
       onProgress: ({ completed, total }) => {
-        const searchProgress = progressBase + 5 + Math.round((completed / total) * (50 / iterations));
-        emit(searchProgressMessage(completed, total, iteration), searchProgress);
+        emit({
+          stage: 'search_progress',
+          strategy: variant,
+          iteration,
+          iterations,
+          completed,
+          total,
+        });
       },
     });
     findings.push(...results.map((finding) => ({ ...finding, iteration })));

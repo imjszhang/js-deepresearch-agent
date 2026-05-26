@@ -178,13 +178,43 @@ node --test tests/*.test.mjs
 
 ## 6. 后续演化
 
-| 方向 | 说明 |
+| 方向 | 状态 | 说明 |
+| ---- | ---- | ---- |
+| 进度与策略解耦 | **已完成（2026-05-26 后续）** | 见下文第 7 节 |
+| metadata 与 factory 分离 | 待做 | 预留 provider catalog 迁到独立模块，factory 只管 create |
+| 多实例 registry | 待做 | 需要嵌入式多租户时，再引入 `createEngineRegistry()` 或 `ResearchRunner({ registries })` |
+| 停止导出可变 `strategyRegistry` | 待做 | 主版本可 deprecate 后移除，强制走 `registerStrategy` / `getStrategyRegistry` |
+| `work-output` 边界 | 待做 | 长期可考虑迁到 monorepo 上层，engine 包只保留纯 research runtime |
+
+---
+
+## 7. 收口与 progress event 解耦（同日后续）
+
+### 7.1 做了什么
+
+- 补充 [`README.md`](../../packages/js-deepresearch-engine/README.md) 中 registry / reset helper 的推荐用法与边界说明。
+- 新增 [`progress-events.mjs`](../../packages/js-deepresearch-engine/src/research/progress-events.mjs)：
+  - 内置策略上报结构化事件（`stage`、`iteration`、`completed`、`total` 等）。
+  - `ResearchRunner` 通过 `createProgressEmitter()` 映射为现有 `onProgress({ message, progress, level })`。
+  - 自定义 strategy 仍可使用 `emit('message', progress)` 旧式调用。
+- `rapid.mjs`、`iterative.mjs` 不再硬编码最终展示文案和百分比；`source-based.mjs` / `parallel.mjs` 进一步瘦身为 variant 参数。
+
+### 7.2 验证
+
+| 范围 | 结果 |
 | ---- | ---- |
-| 进度与策略解耦 | 引入轻量 `ProgressReporter`（stage/completed/total），百分比映射上提到 runner 或 CLI |
-| metadata 与 factory 分离 | 预留 provider catalog 迁到独立模块，factory 只管 create |
-| 多实例 registry | 需要嵌入式多租户时，再引入 `createEngineRegistry()` 或 `ResearchRunner({ registries })` |
-| 停止导出可变 `strategyRegistry` | 主版本可 deprecate 后移除，强制走 `registerStrategy` / `getStrategyRegistry` |
-| `work-output` 边界 | 长期可考虑迁到 monorepo 上层，engine 包只保留纯 research runtime |
+| engine 包 | **29/29** 通过（含新增 `progress-events.test.mjs`） |
+| 根项目 | **42/42** 通过 |
+
+### 7.3 仍保留的长期路线
+
+以下项**刻意不在本轮实现**，避免与结构解耦和 progress 解耦混在一起：
+
+- `createEngineRegistry()` / `new ResearchRunner({ registries })`
+- metadata/catalog 从 factory 分离
+- `work-output` 迁出 engine 包
+
+触发条件：出现同进程多租户、UI catalog 独立演进、或 npm 包 slim 化的明确需求时再开下一轮。
 
 ---
 

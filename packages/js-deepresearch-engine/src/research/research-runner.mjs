@@ -1,5 +1,6 @@
 import { createLlmProvider } from '../llm/provider-factory.mjs';
 import { createSearchEngine } from '../search/search-factory.mjs';
+import { createProgressEmitter } from './progress-events.mjs';
 import { buildReport } from './report-builder.mjs';
 import { runStrategy } from './strategies.mjs';
 
@@ -8,12 +9,9 @@ export class ResearchRunner {
     const llm = providedLlm || createLlmProvider(settings);
     const search = providedSearch || createSearchEngine(settings);
     const strategy = settings.research.strategy || 'source-based';
+    const emit = createProgressEmitter(onProgress);
 
-    const emit = (message, progress, level = 'info') => {
-      onProgress({ message, progress, level });
-    };
-
-    emit('Research started', 5);
+    emit({ stage: 'research_started' });
     const findings = await runStrategy({
       strategy,
       query,
@@ -24,9 +22,9 @@ export class ResearchRunner {
       emit,
     });
 
-    emit('Synthesizing report', 80);
+    emit({ stage: 'synthesizing_report' });
     const report = await buildReport({ llm, query, findings, signal });
-    emit('Research complete', 100);
+    emit({ stage: 'research_complete' });
 
     return {
       report,

@@ -13,13 +13,5 @@ export const parallelStrategyDefinition = {
 
 /** @param {import('../../types.mjs').StrategyContext} context */
 export async function runParallel(context) {
-  return runIterativeStrategy(context, {
-    generatingMessage: (iteration, total) => `Generating parallel questions for iteration ${iteration}/${total}`,
-    searchingMessage: (iteration, total, questionCount) => (
-      `Running ${questionCount} parallel searches`
-    ),
-    searchProgressMessage: (completed, total, iteration) => (
-      `Completed ${completed}/${total} parallel searches for iteration ${iteration}`
-    ),
-  });
+  return runIterativeStrategy(context, { variant: 'parallel' });
 }

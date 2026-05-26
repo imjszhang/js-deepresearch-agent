@@ -60,6 +60,18 @@
  */
 
 /**
+ * @typedef {Object} StrategyProgressEvent
+ * @property {'research_started'|'synthesizing_report'|'research_complete'|'generating_questions'|'searching'|'search_item_complete'|'search_progress'} stage
+ * @property {'rapid'|'source-based'|'parallel'} [strategy]
+ * @property {number} [iteration]
+ * @property {number} [iterations]
+ * @property {number} [completed]
+ * @property {number} [total]
+ * @property {string} [question]
+ * @property {'info'|'error'} [level]
+ */
+
+/**
  * @typedef {Object} LlmClient
  * @property {(args: { messages: Array<{ role: string, content: string }>, signal?: AbortSignal, temperature?: number, maxTokens?: number }) => Promise<string>} complete
  */
@@ -84,7 +96,7 @@
  * @property {LlmClient} llm
  * @property {SearchEngine} search
  * @property {AbortSignal|undefined} [signal]
- * @property {(message: string, progress?: number, level?: 'info'|'error') => void} emit
+ * @property {(input: string|StrategyProgressEvent, progress?: number, level?: 'info'|'error') => void} emit
  * @property {Settings} [settings]
  */
 
@@ -95,7 +107,7 @@
  * @property {LlmClient} llm
  * @property {SearchEngine} search
  * @property {AbortSignal|undefined} [signal]
- * @property {(message: string, progress?: number, level?: 'info'|'error') => void} emit
+ * @property {(input: string|StrategyProgressEvent, progress?: number, level?: 'info'|'error') => void} emit
  */
 
 export {};

@@ -13,11 +13,5 @@ export const sourceBasedStrategyDefinition = {
 
 /** @param {import('../../types.mjs').StrategyContext} context */
 export async function runSourceBased(context) {
-  return runIterativeStrategy(context, {
-    generatingMessage: (iteration, total) => `Generating research questions for iteration ${iteration}/${total}`,
-    searchingMessage: (iteration, total) => `Searching iteration ${iteration}/${total}`,
-    searchProgressMessage: (completed, total, iteration) => (
-      `Completed ${completed}/${total} searches for iteration ${iteration}`
-    ),
-  });
+  return runIterativeStrategy(context, { variant: 'source-based' });
 }

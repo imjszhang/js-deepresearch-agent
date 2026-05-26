@@ -50,6 +50,8 @@ describe('ResearchRunner', () => {
     assert.deepEqual(searchedQuestions, ['test topic', 'follow up one', 'follow up two']);
     assert.equal(result.sources.length, 3);
     assert.equal(events[0].message, 'Research started');
+    assert.equal(events.at(-1).message, 'Research complete');
+    assert.equal(events.at(-1).progress, 100);
   });
 
   it('exposes available research strategies as metadata', () => {

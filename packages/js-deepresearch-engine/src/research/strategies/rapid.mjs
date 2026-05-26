@@ -27,7 +27,7 @@ export async function runRapid(context) {
   const followUpCount = Math.min(questionCount, 3);
   const resolvedConcurrency = resolveStrategyConcurrency(search, concurrency, followUpCount + 1);
 
-  emit('Generating rapid follow-up questions', 10);
+  emit({ stage: 'generating_questions', strategy: 'rapid' });
   const followUps = await generateQuestions({
     llm,
     query,
@@ -36,15 +36,22 @@ export async function runRapid(context) {
     mode: 'rapid',
   });
   const questions = [query, ...followUps];
+  const totalQuestions = uniqueQuestionCount(questions);
 
-  emit(`Running ${uniqueQuestionCount(questions)} rapid searches`, 25);
+  emit({ stage: 'searching', strategy: 'rapid', total: totalQuestions });
   return searchQuestions({
     questions,
     search,
     signal,
     concurrency: resolvedConcurrency,
     onProgress: ({ completed, total, question }) => {
-      emit(`Rapid search complete: ${question}`, 25 + Math.round((completed / total) * 45));
+      emit({
+        stage: 'search_item_complete',
+        strategy: 'rapid',
+        question,
+        completed,
+        total,
+      });
     },
   });
 }

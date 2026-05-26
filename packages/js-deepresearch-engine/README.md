@@ -92,9 +92,23 @@ registerSearchEngine('my-search', {
 registerStrategy('echo', {
   label: 'Echo',
   description: 'Returns the query as a single finding.',
-  run: async ({ query }) => [{ question: query, sources: [] }],
+  run: async ({ query, emit }) => {
+    emit('Echo strategy running', 50);
+    return [{ question: query, sources: [] }];
+  },
 });
 ```
+
+### Registry usage guidelines
+
+| Use case | Recommended API | Notes |
+| --- | --- | --- |
+| Register custom adapters or strategies | `registerLlmProvider()` / `registerSearchEngine()` / `registerStrategy()` | Preferred extension path at startup |
+| Read registered strategies | `getStrategyRegistry()` | Returns a shallow copy; do not mutate |
+| Legacy registry access | `strategyRegistry` | Still exported for compatibility; direct mutation is discouraged |
+| Test or embed isolation | `resetEngineRegistries()` or individual `reset*()` helpers | Intended for tests and controlled re-initialization, not per-request runtime use |
+
+Reset helpers restore built-in providers, search engines, and strategies. They are useful when tests register temporary mocks, but they should not be called on every normal research request.
 
 ## Settings Schema
 
@@ -131,7 +145,21 @@ Reserved metadata entries exist for future adapters (`anthropic`, `google`, `ope
 
 Additional search engines can be registered at runtime via `registerSearchEngine()`. The js-deepresearch-agent app registers `js-eyes` locally from `src/search-providers/`; that adapter is **not** bundled in this npm package.
 
-`strategyRegistry` remains exported for backward compatibility, but prefer `getStrategyRegistry()` or `registerStrategy()` instead of mutating the registry object directly.
+## Progress Events
+
+Built-in strategies emit structured progress events internally. `ResearchRunner` maps them to the public callback shape:
+
+```javascript
+onProgress({ message, progress, level })
+```
+
+Custom strategies may continue using the legacy form:
+
+```javascript
+emit('Custom stage message', 42);
+```
+
+Or emit structured events if you want the runner-style mapper in your own integration.
 
 ## Work Directory Artifacts
 
