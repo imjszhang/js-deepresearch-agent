@@ -18,11 +18,27 @@ export function formatMarkdownSummary(result) {
     `- citationResolutionRate: ${formatPercent(metrics.citationResolutionRate)}`,
     `- sourcePresenceRate: ${formatPercent(metrics.sourcePresenceRate)}`,
     `- platformMatchRate: ${formatPercent(metrics.platformMatchRate)}`,
+    `- enrichOkRate: ${formatPercent(metrics.enrichOkRate)}`,
+    `- contentPresenceRate: ${formatPercent(metrics.contentPresenceRate)}`,
     `- supportedRate: ${formatPercent(metrics.supportedRate)}`,
     `- partialRate: ${formatPercent(metrics.partialRate)}`,
     `- unsupportedRate: ${formatPercent(metrics.unsupportedRate)}`,
     `- unverifiableRate: ${formatPercent(metrics.unverifiableRate)}`,
   ];
+
+  if (artifactsHealth.enrichment) {
+    const { enrichment } = artifactsHealth;
+    lines.push(
+      '',
+      '## Source Enrichment',
+      '',
+      `- sources: ${artifactsHealth.sourceCount}`,
+      `- withEvidence: ${enrichment.withEvidence}`,
+      `- withContent: ${enrichment.withContent}`,
+      `- enrichOk: ${enrichment.enrichOk}`,
+      `- enrichFailed: ${enrichment.enrichFailed}`,
+    );
+  }
 
   if (artifactsHealth.flags.length > 0) {
     lines.push('', '## Artifact Health Flags', '');

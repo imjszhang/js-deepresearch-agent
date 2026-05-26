@@ -8,11 +8,12 @@ const VALID_VERDICTS = new Set([
 function buildJudgePrompt(claim, resolvedSources) {
   const sourceBlock = resolvedSources.map((entry) => {
     const source = entry.source || {};
+    const evidence = source.summary || source.content || source.snippet || '';
     return [
       entry.key,
       `Title: ${source.title || ''}`,
       `URL: ${source.url || ''}`,
-      `Snippet: ${source.snippet || ''}`,
+      `Evidence: ${evidence}`,
       `Engine: ${source.engine || ''}`,
     ].join('\n');
   }).join('\n\n');

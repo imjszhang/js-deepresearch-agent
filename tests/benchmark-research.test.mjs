@@ -66,10 +66,21 @@ describe('benchmark citations', () => {
         question: 'q1',
         sources: [{ title: 'A', url: 'https://a', snippet: 'alpha', engine: 'js-eyes:zhihu' }],
       },
+      {
+        question: 'q2',
+        sources: [
+          { title: 'B1', url: 'https://b1', snippet: 'beta', engine: 'js-eyes:zhihu' },
+          { title: 'B2', url: 'https://b2', snippet: 'gamma', engine: 'js-eyes:zhihu' },
+          { title: 'B3', url: 'https://b3', snippet: 'delta', engine: 'js-eyes:zhihu' },
+        ],
+      },
     ]);
 
     const keys = parseCitations('Claim text [1.1][9.9] and again [1.1].');
     assert.deepEqual(keys, ['1.1', '9.9']);
+
+    const rangeKeys = parseCitations('Range claim [6.1-6.3] and [2.1-2.2].');
+    assert.deepEqual(rangeKeys, ['6.1', '6.2', '6.3', '2.1', '2.2']);
 
     const resolved = resolveCitations(keys, map);
     assert.deepEqual(resolved.unresolved, ['9.9']);
@@ -99,6 +110,31 @@ This is a summary claim without citation.
     assert.match(claims[1].text, /Finding one/);
     assert.match(claims[2].text, /Evidence item/);
   });
+
+  it('extracts claims from Chinese numbered reports with citations', () => {
+    const claims = extractClaims(`# 报告
+
+## 摘要
+
+LLM Wiki 是一种个人知识库构建模式，核心是让 LLM 像编译器一样编译 Markdown Wiki。
+
+## 1. 核心概念
+
+### 1.1 定义
+
+LLM Wiki 是提前编译知识，而非临时检索合成 [7.4]。Karpathy 将其定义为持久化产物 [2.1][5.1]。
+
+## 8. 主要来源
+
+- [1.1] 示例来源
+`);
+
+    assert.ok(claims.length >= 2);
+    assert.equal(claims[0].section, '摘要');
+    assert.match(claims[0].text, /LLM Wiki/);
+    assert.match(claims.find((claim) => claim.section === '1.1 定义').text, /提前编译知识/);
+    assert.equal(claims.some((claim) => claim.section === '8. 主要来源'), false);
+  });
 });
 
 describe('benchmark rule scoring', () => {
@@ -109,6 +145,21 @@ describe('benchmark rule scoring', () => {
     );
 
     assert.deepEqual(health.flags.sort(), ['all_findings_failed', 'empty_sources', 'no_finding_sources']);
+  });
+
+  it('summarizes source enrichment health', () => {
+    const health = summarizeFindingsHealth(
+      [{ question: 'q1', sources: [{ title: 'A', url: 'https://a', snippet: 's' }] }],
+      [
+        { title: 'A', url: 'https://a', snippet: 's', fetchStatus: 'ok', content: 'full body' },
+        { title: 'B', url: 'https://b', snippet: 's', fetchStatus: 'failed' },
+      ],
+    );
+
+    assert.equal(health.enrichment.withContent, 1);
+    assert.equal(health.enrichment.enrichOk, 1);
+    assert.equal(health.enrichment.enrichFailed, 1);
+    assert.equal(health.enrichment.enrichOkRate, 0.5);
   });
 
   it('flags missing citations and platform mismatch', () => {
@@ -226,6 +277,78 @@ Karpathy LLM Wiki uses compiler-style RAG [1.1].
 
     assert.ok(result.artifactsHealth.flags.includes('empty_sources'));
     assert.ok(result.riskExamples.some((entry) => entry.flags.includes('citation_unresolved')));
+  });
+
+  it('scores enriched Chinese reports offline', async () => {
+    const dir = createFixture({
+      report: `# 报告
+
+## 摘要
+
+LLM Wiki 由 Karpathy 提出，强调编译式知识沉淀 [1.1]。
+
+## 3. 对比分析
+
+### 3.1 证据局限
+
+社区讨论未提供官方定量对比 [6.1-6.3]。
+`,
+      findings: [
+        {
+          question: 'q1',
+          sources: [{
+            title: 'Karpathy LLM Wiki',
+            url: 'https://zhuanlan.zhihu.com/p/1',
+            snippet: 'short',
+            content: 'Karpathy LLM Wiki compiler-style personal knowledge base',
+            engine: 'js-eyes:zhihu',
+          }],
+        },
+        {
+          question: 'q2',
+          sources: [],
+        },
+        {
+          question: 'q3',
+          sources: [],
+        },
+        {
+          question: 'q4',
+          sources: [],
+        },
+        {
+          question: 'q5',
+          sources: [],
+        },
+        {
+          question: 'q6',
+          sources: [
+            { title: 'S1', url: 'https://s1', snippet: 'a', engine: 'js-eyes:zhihu' },
+            { title: 'S2', url: 'https://s2', snippet: 'b', engine: 'js-eyes:zhihu' },
+            { title: 'S3', url: 'https://s3', snippet: 'c', engine: 'js-eyes:zhihu' },
+          ],
+        },
+      ],
+      sources: [{
+        title: 'Karpathy LLM Wiki',
+        url: 'https://zhuanlan.zhihu.com/p/1',
+        snippet: 'short',
+        content: 'Karpathy LLM Wiki compiler-style personal knowledge base',
+        fetchStatus: 'ok',
+        engine: 'js-eyes:zhihu',
+      }],
+    });
+
+    const result = await runBenchmark({
+      workDir: dir,
+      strictPlatform: 'js-eyes:zhihu',
+      llmEnabled: false,
+    });
+
+    assert.ok(result.metrics.claimCount >= 2);
+    assert.equal(result.metrics.claimsWithCitationsRate > 0, true);
+    assert.equal(result.metrics.enrichOkRate, 1);
+    assert.equal(result.metrics.contentPresenceRate, 1);
   });
 
   it('loads artifacts from disk', () => {

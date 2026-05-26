@@ -1,3 +1,5 @@
+import { sourceIsComplete } from './rule-score.mjs';
+
 function rate(numerator, denominator) {
   if (!denominator) return 0;
   return Number((numerator / denominator).toFixed(4));
@@ -40,10 +42,7 @@ export function aggregateBenchmark({
   );
   const resolvedCitationCount = totalCitations - unresolvedCitations;
   const resolvedSources = claimResults.flatMap((result) => result.rule.resolvedSources);
-  const completeSources = resolvedSources.filter((entry) => {
-    const source = entry.source || {};
-    return Boolean(source.title && source.url && source.snippet);
-  }).length;
+  const completeSources = resolvedSources.filter((entry) => sourceIsComplete(entry.source || {})).length;
   const platformMatches = claimResults.filter((result) => result.rule.platformMatch).length;
 
   const llmResults = claimResults.filter((result) => result.llm && !result.llm.skipped);
@@ -64,6 +63,8 @@ export function aggregateBenchmark({
       citationResolutionRate: rate(resolvedCitationCount, totalCitations),
       sourcePresenceRate: rate(completeSources, resolvedSources.length),
       platformMatchRate: rate(platformMatches, claimCount),
+      enrichOkRate: artifactsHealth?.enrichment?.enrichOkRate ?? 0,
+      contentPresenceRate: artifactsHealth?.enrichment?.contentRate ?? 0,
       supportedRate: rate(supported, llmResults.length),
       partialRate: rate(partial, llmResults.length),
       unsupportedRate: rate(unsupported, llmResults.length),

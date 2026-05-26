@@ -1,4 +1,4 @@
-const CITATION_PATTERN = /\[(\d+)\.(\d+)\]/g;
+const CITATION_PATTERN = /\[(\d+)\.(\d+)(?:-(\d+)\.(\d+))?\]/g;
 
 export function buildCitationMap(findings = []) {
   const map = new Map();
@@ -19,16 +19,39 @@ export function buildCitationMap(findings = []) {
   return map;
 }
 
+function addCitationKey(citations, seen, findingIndex, sourceIndex) {
+  const key = `${findingIndex}.${sourceIndex}`;
+  if (seen.has(key)) return;
+  seen.add(key);
+  citations.push(key);
+}
+
 export function parseCitations(text = '') {
   const citations = [];
   const seen = new Set();
 
   for (const match of String(text).matchAll(CITATION_PATTERN)) {
-    const key = `${match[1]}.${match[2]}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      citations.push(key);
+    const findingStart = Number(match[1]);
+    const sourceStart = Number(match[2]);
+    const findingEnd = match[3] ? Number(match[3]) : findingStart;
+    const sourceEnd = match[4] ? Number(match[4]) : sourceStart;
+
+    if (match[3] && match[4]) {
+      if (findingStart === findingEnd) {
+        for (let sourceIndex = sourceStart; sourceIndex <= sourceEnd; sourceIndex += 1) {
+          addCitationKey(citations, seen, findingStart, sourceIndex);
+        }
+      } else {
+        for (let findingIndex = findingStart; findingIndex <= findingEnd; findingIndex += 1) {
+          for (let sourceIndex = sourceStart; sourceIndex <= sourceEnd; sourceIndex += 1) {
+            addCitationKey(citations, seen, findingIndex, sourceIndex);
+          }
+        }
+      }
+      continue;
     }
+
+    addCitationKey(citations, seen, findingStart, sourceStart);
   }
 
   return citations;

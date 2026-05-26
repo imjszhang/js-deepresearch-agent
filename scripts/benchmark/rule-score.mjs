@@ -42,7 +42,7 @@ export function keywordOverlap(claimText = '', sources = []) {
   return overlap / claimTokens.size;
 }
 
-function sourceIsComplete(source = {}) {
+export function sourceIsComplete(source = {}) {
   const evidence = source.summary || source.content || source.snippet || '';
   return Boolean(String(source.title || '').trim())
     && Boolean(String(source.url || '').trim())
@@ -83,22 +83,44 @@ export function scoreClaimRule(claim, citationMap, options = {}) {
   };
 }
 
+function rate(numerator, denominator) {
+  if (!denominator) return 0;
+  return Number((numerator / denominator).toFixed(4));
+}
+
 export function summarizeFindingsHealth(findings = [], sources = []) {
   const findingErrors = findings.filter((finding) => finding?.error).length;
   const findingsWithSources = findings.filter(
     (finding) => Array.isArray(finding?.sources) && finding.sources.length > 0,
   ).length;
 
+  const withEvidence = sources.filter((source) => source.summary || source.content || source.snippet).length;
+  const withContent = sources.filter((source) => source.content).length;
+  const enrichOk = sources.filter((source) => source.fetchStatus === 'ok').length;
+  const enrichFailed = sources.filter((source) => source.fetchStatus === 'failed').length;
+  const enrichAttempted = sources.filter((source) => source.fetchStatus).length;
+
   const flags = [];
   if (sources.length === 0) flags.push('empty_sources');
   if (findingErrors === findings.length && findings.length > 0) flags.push('all_findings_failed');
   if (findingsWithSources === 0 && findings.length > 0) flags.push('no_finding_sources');
+  if (enrichAttempted > 0 && enrichOk === 0) flags.push('enrichment_all_failed');
 
   return {
     findingCount: findings.length,
     findingErrors,
     findingsWithSources,
     sourceCount: sources.length,
+    enrichment: {
+      withEvidence,
+      withContent,
+      enrichOk,
+      enrichFailed,
+      enrichAttempted,
+      evidenceRate: rate(withEvidence, sources.length),
+      contentRate: rate(withContent, sources.length),
+      enrichOkRate: rate(enrichOk, enrichAttempted),
+    },
     flags,
   };
 }
