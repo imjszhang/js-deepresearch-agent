@@ -33,6 +33,17 @@ export const JS_EYES_SKILL_PROFILES = Object.freeze({
     extraArgs: { 'read-mode': 'api' },
     platform: 'reddit',
   }),
+  'js-zhihu-ops-skill': Object.freeze({
+    driver: 'skill-run',
+    command: 'search',
+    limitFlag: '--limit',
+    serverFlag: '--ws-endpoint',
+    supportsMaxPages: true,
+    supportsQuiet: true,
+    supportsTimeoutMs: false,
+    extraArgs: {},
+    platform: 'zhihu',
+  }),
 });
 
 export function getSkillProfile(skillId) {

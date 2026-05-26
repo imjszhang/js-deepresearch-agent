@@ -18,7 +18,7 @@ import {
 } from '../src/search-providers/js-eyes/public.mjs';
 
 describe('JsEyesCliSearchEngine', () => {
-  it('calls the unified js-eyes search facade and normalizes items', async () => {
+  it('uses local skill-run driver for zhihu without the missing unified command', async () => {
     const calls = [];
     const engine = new JsEyesCliSearchEngine({
       maxResults: 2,
@@ -32,23 +32,20 @@ describe('JsEyesCliSearchEngine', () => {
         calls,
         stdout: JSON.stringify({
           ok: true,
-          query: 'openclaw',
-          items: [
-            {
-              title: 'OpenClaw @openclaw',
-              url: 'https://www.zhihu.com/question/1/answer/1',
-              snippet: 'OpenClaw release',
-              platform: 'zhihu',
-              engine: 'js-eyes:zhihu',
-            },
-            {
-              title: 'Example @example',
-              url: 'https://www.zhihu.com/question/2/answer/2',
-              snippet: 'Another tweet',
-              platform: 'zhihu',
-              engine: 'js-eyes:zhihu',
-            },
-          ],
+          result: {
+            items: [
+              {
+                title: 'OpenClaw @openclaw',
+                url: 'https://www.zhihu.com/question/1/answer/1',
+                excerpt: 'OpenClaw release',
+              },
+              {
+                title: 'Example @example',
+                url: 'https://www.zhihu.com/question/2/answer/2',
+                excerpt: 'Another tweet',
+              },
+            ],
+          },
         }),
       }),
     });
@@ -57,19 +54,18 @@ describe('JsEyesCliSearchEngine', () => {
 
     assert.equal(calls[0].command, 'custom-js-eyes');
     assert.deepEqual(calls[0].args, [
+      'skill',
+      'run',
+      'js-zhihu-ops-skill',
       'search',
       'openclaw',
-      '--skills',
-      'js-zhihu-ops-skill',
-      '--max-results',
+      '--limit',
       '2',
-      '--json',
       '--max-pages',
       '1',
-      '--server',
+      '--ws-endpoint',
       'ws://127.0.0.1:18080',
-      '--timeout-ms',
-      '5000',
+      '--quiet',
     ]);
     assert.deepEqual(results, [
       {
