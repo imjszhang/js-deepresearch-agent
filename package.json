@@ -17,6 +17,7 @@
     "preview": "node src/server.mjs",
     "test": "npm run test -w js-deepresearch-engine && node --test tests/*.test.mjs",
     "test:watch": "node --test --watch tests/*.test.mjs",
+    "benchmark": "node scripts/benchmark-research.mjs",
     "lint": "eslint ."
   },
   "keywords": [

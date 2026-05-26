@@ -279,6 +279,33 @@ npm exec jdr -- serve --port 3000
 
 ---
 
+## `benchmark` — 评估报告与来源匹配
+
+离线评估已保存调研产物，**不会**重新执行 `research` 或搜索。
+
+```bash
+node scripts/benchmark-research.mjs work_dir/source-based/2026-05-26_043125
+node scripts/benchmark-research.mjs work_dir/source-based/2026-05-26_043125 --no-llm --json
+node scripts/benchmark-research.mjs work_dir/source-based/2026-05-26_043125 --strict-platform js-eyes:zhihu
+```
+
+| Flag | 说明 |
+|---|---|
+| `--json` | 输出机器可读 JSON |
+| `--no-llm` | 仅规则层评分，不调用 LLM |
+| `--strict-platform` | 要求引用来源的 `engine` 匹配指定值，如 `js-eyes:zhihu` |
+
+输入目录需包含 `report.md`、`findings.json`、`sources.json`、`meta.json`。脚本会：
+
+1. 从 `findings.json` 建立 `[1.1]` 引用映射
+2. 从 `Summary` / `Key Findings` / `Evidence` 提取 claim
+3. 规则层检查引用是否存在、来源字段是否完整、平台是否匹配
+4. 可选调用当前 LLM 配置，判定 `supported / partially_supported / unsupported / unverifiable`
+
+典型用途：对比修复前后两次调研，例如 `sources.json` 为空但报告仍完整时，benchmark 会标记 `empty_sources` 与 `no_citation` 风险。
+
+---
+
 ## 配置优先级
 
 从高到低：

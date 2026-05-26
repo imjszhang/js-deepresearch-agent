@@ -49,6 +49,25 @@ npm exec jdr -- research "Explain the current state of local-first AI research" 
 npm exec jdr -- history list
 ```
 
+## Benchmark
+
+Evaluate whether a saved research report is supported by its cited sources. The benchmark reads artifacts from a work session directory and does not rerun search or research.
+
+```bash
+npm run benchmark -- work_dir/source-based/2026-05-26_043125
+npm run benchmark -- work_dir/source-based/2026-05-26_043125 --no-llm --json
+npm run benchmark -- work_dir/source-based/2026-05-26_043125 --strict-platform js-eyes:zhihu
+```
+
+Expected inputs in the work directory:
+
+- `report.md`
+- `findings.json`
+- `sources.json`
+- `meta.json`
+
+Use `--no-llm` for deterministic rule-only scoring in CI or offline checks. When LLM judging is enabled, the script reuses the project's saved LLM settings from SQLite and `.env`.
+
 You can also override settings for one run:
 
 ```bash
