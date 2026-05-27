@@ -1,6 +1,28 @@
-# AGENT.md — js-deepresearch-agent CLI 指南
+# AGENTS.md — js-deepresearch-agent Agent 指南
 
 本文档面向 **AI Agent**，说明如何在本地通过 CLI 运行深度调研、读写配置、查看历史、管理 **intel store** 归档、编译 **Obsidian Wiki**，以及理解输出产物。Web UI 与 CLI 共用同一套设置与 SQLite 存储。
+
+## 适用范围
+
+本文件适用于仓库根目录及所有子目录。若子目录未来新增更近的 `AGENTS.md`，以更近文件中的指令为准。
+
+## Agent 必读规则
+
+- 默认在仓库根目录执行命令，自动化脚本中使用 `npm exec jdr -- <command>` 调用本地 CLI，避免依赖全局 PATH。
+- 不要提交或展示 `.env`、API Key、`data/`、`work_dir/`、`wiki/` 等本地运行产物。
+- 修改 CLI 行为时优先查看 `src/cli.mjs`、`src/cli-research-run.mjs`、`src/cli-utils.mjs` 与相关测试。
+- 修改调研逻辑时优先改 `packages/js-deepresearch-engine`；修改归档或 Wiki 管线时分别查看 `src/storage/intel-store.mjs`、`packages/js-wiki-engine`。
+- 对一次性实验使用 CLI flags 覆盖配置，不要用 `config set` 写入持久设置，除非用户明确要求。
+
+## 常用开发命令
+
+```bash
+npm install
+npm run build
+npm test
+npm run lint
+npm exec jdr -- help
+```
 
 ## 项目概览
 
