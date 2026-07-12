@@ -36,6 +36,20 @@ export { QueryMemory, normalizeQuery, querySimilarity } from './research/query-m
 export { normalizeSourceUrl, selectDiverseSources, SourceCandidatePool } from './research/source-candidates.mjs';
 export { buildEvidenceArtifacts, extractClaims, stableSourceId } from './research/evidence-chain.mjs';
 export { createResearchProviders, deterministicResearchProviders } from './research/research-providers.mjs';
+export {
+  QUALITY_METRICS_VERSION,
+  CLAIM_EXTRACTION_VERSION,
+  CLAIM_EVALUATION_VERSION,
+  CLAIM_VERDICTS,
+  FACT_CLAIM_KINDS,
+  classifyClaimSection,
+  extractQualityClaims,
+  aggregateEvidenceVerdict,
+  buildClaimEvaluation,
+  normalizeClaim,
+  calculateQualityMetrics,
+  qualityGateFromClaims,
+} from './research/claim-quality.mjs';
 export { resetEngineRegistries } from './registry-reset.mjs';
 export {
   registerContentFetchHandler,

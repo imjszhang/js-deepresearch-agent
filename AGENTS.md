@@ -495,6 +495,8 @@ node scripts/benchmark-research.mjs --research-id imported__source-based__2026-0
 
 典型用途：对比修复前后两次调研，例如 `sources.json` 为空但报告仍完整时，benchmark 会标记 `empty_sources` 与 `no_citation` 风险。
 
+质量指标采用 v2 口径：按 claim 而非 evidence 条目计数；事实 claim 的五种互斥结论之和必须等于 `evaluatedClaimCount`。局限与建议保留展示但不进入事实支持率，Sources/参考文献条目不算 claim，分母为 0 时 rate 为 `null`（文本显示 `n/a`）。Schema v3 的 `--no-llm` 会复用归档 verdict，旧产物才运行本地规则；输出中的 `evaluationOrigin` 用于区分 stored/runtime 与 rules/llm。
+
 ---
 
 ## 配置优先级

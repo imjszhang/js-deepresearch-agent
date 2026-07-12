@@ -67,7 +67,9 @@ Expected inputs in the work directory:
 - `sources.json`
 - `meta.json`
 
-Use `--no-llm` for deterministic rule-only scoring in CI or offline checks. When LLM judging is enabled, the script reuses the project's saved LLM settings from SQLite and `.env`.
+Use `--no-llm` for offline checks. Schema v3 claims reuse their stored verdicts without calling an LLM; legacy artifacts are evaluated with deterministic rules. Output records whether each effective verdict came from `stored_rule`, `stored_llm`, `runtime_rule`, or `runtime_llm`.
+
+Quality metrics v2 count claims, not individual evidence links. Fact-claim verdicts are mutually exclusive (`supported`, `partially_supported`, `unsupported`, `unverifiable`, or `conflicting`), so their counts always add up to `evaluatedClaimCount`. Caveats and recommendations remain visible but are excluded from fact-claim support rates, source-list entries are not claims, and rates with no denominator are reported as `null`/`n/a` instead of a misleading zero.
 
 You can also override settings for one run:
 

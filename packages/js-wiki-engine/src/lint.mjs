@@ -49,6 +49,16 @@ function resolveWikilinkTarget(vaultDir, fromRelativePath, target) {
   return null;
 }
 
+function countNumberedItemsInSection(content, heading) {
+  const marker = `## ${heading}`;
+  const start = content.indexOf(marker);
+  if (start < 0) return 0;
+  const bodyStart = start + marker.length;
+  const nextHeading = content.indexOf('\n## ', bodyStart);
+  const section = content.slice(bodyStart, nextHeading < 0 ? content.length : nextHeading);
+  return (section.match(/^\d+\.\s+/gm) || []).length;
+}
+
 export function lintWiki({ vaultDir } = {}) {
   const root = resolveVaultDir(vaultDir);
   const issues = [];
@@ -85,7 +95,20 @@ export function lintWiki({ vaultDir } = {}) {
       }
     }
 
-    if (page.relativePath.startsWith('Evidence/') && fm.type === 'evidence' && Number(fm.evidenceCount || 0) === 0) {
+    if (page.relativePath.startsWith('Claims/') && fm.type === 'claim') {
+      const expected = Number(fm.claimCount || 0);
+      const actual = countNumberedItemsInSection(content, 'Fact Claims');
+      if (expected !== actual) {
+        issues.push({
+          severity: 'error',
+          code: 'claim_count_mismatch',
+          page: page.relativePath,
+          message: `Claims frontmatter declares ${expected} fact claims but the page contains ${actual}`,
+        });
+      }
+    }
+
+    if (page.relativePath.startsWith('Evidence/') && fm.type === 'evidence' && fm.verdict === 'supported' && Number(fm.evidenceCount || 0) === 0) {
       issues.push({ severity: 'error', code: 'supported_claim_no_evidence', page: page.relativePath, message: 'Evidence page has no linked passages' });
     }
     if (page.relativePath.startsWith('Evidence/') && fm.type === 'evidence' && Number(fm.missingPassages || 0) > 0) {

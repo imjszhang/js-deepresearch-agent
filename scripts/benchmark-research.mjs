@@ -35,7 +35,15 @@ async function main(argv) {
       results.push(await runBenchmark({ researchId: id, strictPlatform: flags['strict-platform'] || null, llm: null, llmEnabled: false }));
     }
     const queries = [...new Set(results.map((result) => result.query).filter(Boolean))];
-    const comparison = { query: queries.length === 1 ? queries[0] : null, warnings: queries.length > 1 ? ['Compared runs have different queries.'] : [], runs: results.map((result) => ({ researchId: result.researchId, strategy: result.strategy, metrics: result.metrics, artifactsHealth: result.artifactsHealth })) };
+    const metricVersions = [...new Set(results.map((result) => result.metrics.metricsVersion))];
+    const extractionVersions = [...new Set(results.map((result) => result.metrics.claimExtractionVersion))];
+    const evaluationOrigins = [...new Set(results.flatMap((result) => result.claims.map((claim) => claim.evaluationOrigin)))];
+    const warnings = [];
+    if (queries.length > 1) warnings.push('Compared runs have different queries.');
+    if (metricVersions.length > 1) warnings.push('Compared runs use different quality metrics versions.');
+    if (extractionVersions.length > 1) warnings.push('Compared runs use different claim extraction versions.');
+    if (evaluationOrigins.length > 1) warnings.push('Compared runs use different evaluation methods or origins.');
+    const comparison = { query: queries.length === 1 ? queries[0] : null, warnings, runs: results.map((result) => ({ researchId: result.researchId, strategy: result.strategy, evaluation: result.evaluation, metrics: result.metrics, artifactsHealth: result.artifactsHealth })) };
     console.log(flags.json ? JSON.stringify(comparison, null, 2) : comparison.runs.map((run) => `- ${run.researchId} (${run.strategy}): ${JSON.stringify(run.metrics)}`).join('\n'));
     return;
   }

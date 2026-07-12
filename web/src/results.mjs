@@ -26,6 +26,7 @@ async function main() {
         <button id="download">Download Markdown</button>
         ${record.status === 'completed' ? `<a class="wiki-cta" href="/wiki.html?researchId=${encodeURIComponent(record.id)}">Compile Obsidian Wiki</a>` : ''}
       </section>
+      ${renderQuality(record.quality)}
       <section class="card report">${renderMarkdown(record.report || record.error || 'No report yet.')}</section>
       <section class="card">
         <h2>Sources</h2>
@@ -42,6 +43,30 @@ async function main() {
   `;
 
   document.querySelector('#download').addEventListener('click', () => downloadMarkdown(record));
+}
+
+function renderQuality(quality) {
+  if (!quality) return '';
+  const metrics = quality.metrics || {};
+  const counts = metrics.claims || {};
+  return `
+    <section class="card">
+      <h2>Research Quality</h2>
+      <p>Gate: <strong>${escapeHtml(quality.gate || 'unknown')}</strong></p>
+      <div class="grid">
+        <p>Evaluated claims: <strong>${metrics.evaluatedClaimCount ?? 0}</strong></p>
+        <p>Key claim support: <strong>${formatRate(metrics.rates?.keyClaimSupportedRate)}</strong></p>
+        <p>Evidence coverage: <strong>${formatRate(metrics.rates?.evidenceCoverageRate)}</strong></p>
+        <p>Direct evidence: <strong>${formatRate(metrics.rates?.directEvidenceRate)}</strong></p>
+      </div>
+      <p class="muted">Supported ${counts.supported ?? 0} · Partial ${counts.partiallySupported ?? 0} · Unsupported ${counts.unsupported ?? 0} · Unverifiable ${counts.unverifiable ?? 0} · Conflicting ${counts.conflicting ?? 0}</p>
+      ${(quality.criticalGaps || []).length ? `<p>Open critical gaps: ${quality.criticalGaps.map(escapeHtml).join('; ')}</p>` : ''}
+    </section>
+  `;
+}
+
+function formatRate(value) {
+  return value === null || value === undefined ? 'n/a' : `${Math.round(value * 100)}%`;
 }
 
 function downloadMarkdown(record) {

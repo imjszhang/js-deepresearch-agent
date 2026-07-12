@@ -70,4 +70,12 @@ function migrate(database) {
       FOREIGN KEY (research_id) REFERENCES research_history(id) ON DELETE CASCADE
     );
   `);
+  ensureColumn(database, 'research_history', 'quality_json', 'TEXT');
+}
+
+function ensureColumn(database, table, column, type) {
+  const columns = database.prepare(`PRAGMA table_info(${table})`).all();
+  if (!columns.some((entry) => entry.name === column)) {
+    database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+  }
 }

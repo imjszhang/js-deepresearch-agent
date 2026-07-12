@@ -143,24 +143,37 @@ function buildTopicPage(topicTitle, sources, report = '') {
 }
 
 function buildClaimsPage(topicTitle, report, sources, claimArtifacts = [], researchId = '') {
-  const claims = claimArtifacts.length ? claimArtifacts : extractClaimLines(report);
-  const lines = claims.length
-    ? claims.map((claim, index) => {
-        const verdicts = [...new Set((claim.evidence || []).map((item) => item.verdict))];
-        const cite = claimArtifacts.length ? ` _(${verdicts.join(', ') || 'unverifiable'}; ${claim.evidence?.length || 0} evidence)_` : (claim.hasCitation ? ' _(has citation)_' : ' _(no citation)_');
-        const evidenceLink = claim.id && researchId ? ` — ${wikilinkPath(evidencePageRelativePath(researchId, claim.id), 'Evidence')}` : '';
-        return `${index + 1}. **${claim.section || 'General'}**: ${claim.text}${cite}${evidenceLink}`;
-      })
-    : ['_No extractable claims from report._'];
+  const claims = claimArtifacts.length
+    ? claimArtifacts.map(normalizeWikiClaim).filter((claim) => !['source_entry', 'metadata'].includes(claim.kind))
+    : extractClaimLines(report).map((claim) => ({ ...claim, kind: 'supporting_claim' }));
+  const facts = claims.filter((claim) => ['key_claim', 'supporting_claim'].includes(claim.kind));
+  const caveats = claims.filter((claim) => claim.kind === 'caveat');
+  const recommendations = claims.filter((claim) => claim.kind === 'recommendation');
+
+  function renderClaim(claim, index) {
+    const cite = claimArtifacts.length
+      ? ` _(${claim.effectiveVerdict}; ${claim.evidence?.length || 0} evidence; ${claim.evaluationOrigin})_`
+      : (claim.hasCitation ? ' _(has citation)_' : ' _(no citation)_');
+    const evidenceLink = claim.id && researchId ? ` — ${wikilinkPath(evidencePageRelativePath(researchId, claim.id), 'Evidence')}` : '';
+    return `${index + 1}. **${claim.section || 'General'}**: ${claim.text}${cite}${evidenceLink}`;
+  }
 
   const body = [
     `# ${topicTitle} Claims`,
     '',
     `Topic: ${wikilinkPath(topicPageRelativePath(topicTitle))}`,
     '',
-    '## Extracted Claims',
+    '## Fact Claims',
     '',
-    ...lines,
+    ...(facts.length ? facts.map(renderClaim) : ['_No extractable fact claims._']),
+    '',
+    '## Caveats',
+    '',
+    ...(caveats.length ? caveats.map(renderClaim) : ['_No caveats._']),
+    '',
+    '## Recommendations',
+    '',
+    ...(recommendations.length ? recommendations.map(renderClaim) : ['_No recommendations._']),
     '',
     '## Source Index',
     '',
@@ -174,11 +187,34 @@ function buildClaimsPage(topicTitle, report, sources, claimArtifacts = [], resea
         type: 'claim',
         topic: topicTitle,
         tags: ['claim'],
-        claimCount: claims.length,
+        claimCount: facts.length,
+        caveatCount: caveats.length,
+        recommendationCount: recommendations.length,
         updated: new Date().toISOString().slice(0, 10),
       },
       body,
     }),
+  };
+}
+
+function normalizeWikiClaim(claim = {}) {
+  const section = String(claim.section || '').toLowerCase();
+  const inferredKind = /sources|references|参考文献|主要来源|引用来源/.test(section)
+    ? 'source_entry'
+    : (/caveats|limitations|局限|限制/.test(section) ? 'caveat'
+      : (/recommend|建议/.test(section) ? 'recommendation'
+        : (/summary|key findings|摘要|主要发现|核心/.test(section) ? 'key_claim' : 'supporting_claim')));
+  const evidenceVerdicts = (claim.evidence || []).map((item) => item.verdict);
+  const legacyVerdict = evidenceVerdicts.includes('unsupported') && (evidenceVerdicts.includes('supported') || evidenceVerdicts.includes('partially_supported'))
+    ? 'conflicting'
+    : (evidenceVerdicts.includes('unsupported') ? 'unsupported'
+      : (evidenceVerdicts.includes('supported') ? 'supported'
+        : (evidenceVerdicts.includes('partially_supported') ? 'partially_supported' : 'unverifiable')));
+  return {
+    ...claim,
+    kind: claim.kind || inferredKind,
+    effectiveVerdict: claim.evaluation?.verdict || legacyVerdict,
+    evaluationOrigin: claim.evaluation?.origin || 'stored_rule',
   };
 }
 
@@ -202,7 +238,17 @@ function buildEvidencePage({ researchId, claim, passages, sources }) {
   return {
     relativePath: evidencePageRelativePath(researchId, claim.id),
     content: renderPage({
-      frontmatter: { type: 'evidence', researchId, claimId: claim.id, evidenceCount: claim.evidence?.length || 0, missingPassages, missingSources, updated: new Date().toISOString().slice(0, 10) },
+      frontmatter: {
+        type: 'evidence',
+        researchId,
+        claimId: claim.id,
+        claimKind: claim.kind,
+        verdict: claim.effectiveVerdict,
+        evidenceCount: claim.evidence?.length || 0,
+        missingPassages,
+        missingSources,
+        updated: new Date().toISOString().slice(0, 10),
+      },
       body: [`# Evidence for ${claim.id}`, '', claim.text, '', ...blocks].join('\n'),
     }),
   };
@@ -307,7 +353,10 @@ export function compileWiki({
     writeVaultFile(path.join(root, topicPage.relativePath), topicPage.content);
     topicPages.push(topicPage.relativePath);
 
-    const researchClaims = claims.filter((claim) => !claim.researchId || claim.researchId === researchId);
+    const researchClaims = claims
+      .filter((claim) => !claim.researchId || claim.researchId === researchId)
+      .map(normalizeWikiClaim)
+      .filter((claim) => !['source_entry', 'metadata'].includes(claim.kind));
     const claimsPage = buildClaimsPage(topicTitle, report, researchSources, researchClaims, researchId);
     writeVaultFile(path.join(root, claimsPage.relativePath), claimsPage.content);
     topicPages.push(claimsPage.relativePath);

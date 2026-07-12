@@ -225,7 +225,11 @@ describe('runBenchmark', () => {
     fs.writeFileSync(path.join(workDir, 'passages.json'), JSON.stringify([{ id: 'passage-1', sourceId: 'source-1', text: 'evidence-backed local research behavior' }]), 'utf8');
     fs.writeFileSync(path.join(workDir, 'claims.json'), JSON.stringify([{ id: 'claim-1', text: 'A sufficiently long claim about evidence-backed local research behavior.', importance: 'key', evidence: [{ sourceId: 'source-1', passageId: 'passage-1', verdict: 'supported', score: 0.9 }] }]), 'utf8');
     const result = await runBenchmark({ workDir, llmEnabled: false });
-    assert.equal(result.metrics.keyClaimEvidenceCoverageRate, 1);
+    assert.equal(result.metrics.rates.evidenceCoverageRate, 1);
+    assert.equal(result.metrics.rates.keyClaimSupportedRate, 1);
+    assert.equal(result.metrics.claims.supported, 1);
+    assert.equal(result.evaluation.llmInvoked, false);
+    assert.equal(result.evaluation.usedStoredRule, true);
     assert.equal(result.metrics.passageCount, 1);
     assert.equal(result.metrics.averageSourcesPerClaim, 1);
   });
@@ -276,7 +280,9 @@ Karpathy LLM Wiki uses compiler-style RAG [1.1].
 
     const json = JSON.parse(formatJsonSummary(result));
     assert.equal(json.claims.length, 2);
-    assert.equal(json.claims[0].llm.skipped, true);
+    assert.equal(json.evaluation.llmInvoked, false);
+    assert.equal(json.claims[0].evaluationOrigin, 'runtime_rule');
+    assert.equal(json.claims[0].llmVerdict, null);
   });
 
   it('marks unresolved citations and empty-source artifacts as risky', async () => {

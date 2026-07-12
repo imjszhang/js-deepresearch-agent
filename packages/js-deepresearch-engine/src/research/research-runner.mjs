@@ -9,6 +9,7 @@ import { buildEvidenceArtifacts } from './evidence-chain.mjs';
 import { evaluatePreReport } from './quality-gates.mjs';
 import { resolveSourceBasedSettings } from './source-based-settings.mjs';
 import { createResearchProviders } from './research-providers.mjs';
+import { calculateQualityMetrics, qualityGateFromClaims } from './claim-quality.mjs';
 
 export class ResearchRunner {
   async run({ query, settings, signal, onProgress = () => {}, llm: providedLlm, search: providedSearch }) {
@@ -62,27 +63,30 @@ export class ResearchRunner {
       emit({ stage: 'evaluating_report' });
       trace.push({ step: trace.length + 1, action: 'evaluate_report', reasonCode: 'claim_evidence_alignment', createdAt: new Date().toISOString() });
     }
-    const verdicts = evidence.claims.flatMap((claim) => claim.evidence || []).map((item) => item.verdict);
-    const unverifiedKeyClaims = evidence.claims.filter((claim) => claim.importance === 'key' && !claim.evidence?.some((item) => item.verdict === 'supported'));
+    const qualityMetrics = calculateQualityMetrics(evidence.claims);
+    const claimGate = qualityGateFromClaims(evidence.claims);
+    const unverifiedKeyClaims = evidence.claims.filter((claim) => claim.kind === 'key_claim' && claim.evaluation?.verdict !== 'supported');
     for (const claim of unverifiedKeyClaims) {
       report = report.replace(claim.text, `Unverified: ${claim.text}`);
     }
     if (unverifiedKeyClaims.length && !/## Evidence limitations/i.test(report)) {
       report += `\n\n## Evidence limitations\n\n${unverifiedKeyClaims.map((claim) => `- Insufficient direct evidence for: ${claim.text}`).join('\n')}`;
     }
+    const finalGate = preReport.gate === 'fail' || claimGate === 'fail'
+      ? 'fail'
+      : (preReport.gate === 'pass_with_warnings' || claimGate === 'pass_with_warnings' ? 'pass_with_warnings' : 'pass');
     const quality = {
       schemaVersion: 3,
+      qualityMetricsVersion: qualityMetrics.metricsVersion,
+      claimExtractionVersion: qualityMetrics.claimExtractionVersion,
+      claimEvaluationVersion: qualityMetrics.claimEvaluationVersion,
       ...preReport,
-      gate: preReport.gate === 'pass' && unverifiedKeyClaims.length ? 'pass_with_warnings' : preReport.gate,
+      gate: finalGate,
       flags: [...preReport.flags, ...(unverifiedKeyClaims.length ? ['unverified_key_claims'] : [])],
       limitations: [...preReport.limitations, ...unverifiedKeyClaims.map((claim) => `Insufficient direct evidence for: ${claim.text}`)],
       metrics: {
         ...preReport.metrics,
-        claimCount: evidence.claims.length,
-        supportedClaims: verdicts.filter((item) => item === 'supported').length,
-        partiallySupportedClaims: verdicts.filter((item) => item === 'partially_supported').length,
-        unsupportedClaims: verdicts.filter((item) => item === 'unsupported').length,
-        unverifiableClaims: evidence.claims.filter((claim) => !claim.evidence?.length).length,
+        ...qualityMetrics,
       },
       budget: budget.snapshot(),
     };

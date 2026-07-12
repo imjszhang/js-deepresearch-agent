@@ -46,8 +46,9 @@ export class JobRunner {
         onProgress: (event) => this.emitLog(id, event),
       });
       const budget = result.quality?.budget?.usage || {};
+      const qualityMetrics = result.quality?.metrics || {};
       this.emitLog(id, {
-        message: `Quality: ${result.quality?.gate || 'unknown'}; gaps=${result.gaps?.filter((gap) => gap.status === 'resolved').length || 0}/${result.gaps?.length || 0}; searches=${budget.searchRequests || 0}; reads=${budget.sourceReads || 0}`,
+        message: `Quality: ${result.quality?.gate || 'unknown'}; key-supported=${formatRate(qualityMetrics.rates?.keyClaimSupportedRate)}; direct-evidence=${formatRate(qualityMetrics.rates?.directEvidenceRate)}; gaps=${result.gaps?.filter((gap) => gap.status === 'resolved').length || 0}/${result.gaps?.length || 0}; searches=${budget.searchRequests || 0}; reads=${budget.sourceReads || 0}`,
         progress: 99,
       });
 
@@ -73,6 +74,7 @@ export class JobRunner {
       });
       const record = this.researchRepository.updateStatus(id, 'completed', {
         report: result.report,
+        quality: result.quality,
         completedAt: new Date().toISOString(),
       });
       this.eventBus.emit(id, { type: 'status', data: record });
@@ -93,4 +95,8 @@ export class JobRunner {
     const log = this.logRepository.add(id, { level, message, progress });
     this.eventBus.emit(id, { type: 'log', data: log });
   }
+}
+
+function formatRate(value) {
+  return value === null || value === undefined ? 'n/a' : `${Math.round(value * 100)}%`;
 }

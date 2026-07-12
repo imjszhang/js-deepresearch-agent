@@ -139,6 +139,8 @@ The engine does not read `.env` files or persist settings. Callers are responsib
 
 Schema v3 results retain `report`, `findings`, and `sources` and add `gaps`, `passages`, `claims`, `quality`, and a structured `trace`. Passage and claim generation run when `evidencePassages` is enabled (default for `source-based`). Semantic helpers use pluggable research providers and deterministic local fallbacks.
 
+Quality metrics v2 classify report statements as fact claims, caveats, recommendations, source entries, or metadata. Only key/supporting fact claims enter support-rate denominators. Every fact claim receives one aggregate verdict, including `conflicting` for contradictory evidence; zero-denominator rates are `null`. Artifacts record the metrics, extraction, and evaluation versions so benchmarks can distinguish stored evaluation from a new runtime judgment.
+
 ## Built-in LLM Providers
 
 - `openai-compatible` — any OpenAI-compatible chat completions API

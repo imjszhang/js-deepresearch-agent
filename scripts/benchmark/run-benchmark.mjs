@@ -1,9 +1,79 @@
+import {
+  CLAIM_EVALUATION_VERSION,
+  buildClaimEvaluation,
+  normalizeClaim,
+} from 'js-deepresearch-engine';
 import { loadArtifacts, loadArtifactsByResearchId } from './load-artifacts.mjs';
 import { buildCitationMap } from './citations.mjs';
 import { extractClaims } from './claims.mjs';
 import { scoreClaimRule, summarizeFindingsHealth } from './rule-score.mjs';
 import { judgeClaimWithLlm } from './llm-judge.mjs';
 import { aggregateBenchmark } from './aggregate.mjs';
+
+function schemaV3Rule(claim, artifacts, strictPlatform) {
+  const evidence = Array.isArray(claim.evidence) ? claim.evidence : [];
+  const resolvedSources = evidence.map((entry) => ({
+    key: entry.passageId,
+    source: artifacts.sources.find((source) => source.id === entry.sourceId) || {},
+    passage: artifacts.passages?.find((passage) => passage.id === entry.passageId) || null,
+  }));
+  const unresolvedCitations = evidence
+    .filter((entry) => !artifacts.passages?.some((passage) => passage.id === entry.passageId))
+    .map((entry) => entry.passageId);
+  return {
+    claim,
+    flags: unresolvedCitations.length ? ['missing_passage'] : [],
+    hasCitations: evidence.length > 0,
+    citationKeys: evidence.map((entry) => entry.passageId),
+    unresolvedCitations,
+    resolvedSources,
+    platformMatch: !strictPlatform || resolvedSources.every((entry) => entry.source.engine === strictPlatform),
+    keywordOverlap: null,
+  };
+}
+
+function evaluationFromLegacyRule(claim, rule) {
+  let verdict = 'unverifiable';
+  if (rule.resolvedSources.length > 0) {
+    verdict = rule.citationsResolved && rule.sourcesComplete && rule.keywordOverlap >= 0.2
+      ? 'supported'
+      : 'partially_supported';
+  }
+  return {
+    verdict,
+    confidence: verdict === 'supported' ? rule.keywordOverlap : (verdict === 'partially_supported' ? Math.max(0.1, rule.keywordOverlap) : 0),
+    method: 'rules',
+    origin: 'runtime_rule',
+    evaluatedAt: new Date().toISOString(),
+    evaluationVersion: CLAIM_EVALUATION_VERSION,
+    evidenceCounts: {
+      supported: verdict === 'supported' ? 1 : 0,
+      partiallySupported: verdict === 'partially_supported' ? 1 : 0,
+      unsupported: 0,
+      unverifiable: verdict === 'unverifiable' ? 1 : 0,
+    },
+  };
+}
+
+function storedEvaluation(claim) {
+  const evaluation = claim.evaluation || buildClaimEvaluation(claim);
+  return {
+    ...evaluation,
+    origin: evaluation.method === 'llm' ? 'stored_llm' : 'stored_rule',
+  };
+}
+
+function runtimeLlmEvaluation(llmResult, prior) {
+  return {
+    verdict: llmResult.verdict,
+    confidence: llmResult.confidence,
+    method: 'llm',
+    origin: 'runtime_llm',
+    evaluatedAt: new Date().toISOString(),
+    evaluationVersion: CLAIM_EVALUATION_VERSION,
+    evidenceCounts: prior?.evidenceCounts || {},
+  };
+}
 
 export async function runBenchmark({
   workDir,
@@ -17,47 +87,39 @@ export async function runBenchmark({
     ? loadArtifactsByResearchId(researchId, engine ? { engine } : {})
     : loadArtifacts(workDir);
   const citationMap = buildCitationMap(artifacts.findings);
-  const claims = Array.isArray(artifacts.claims) && artifacts.claims.length
-    ? artifacts.claims
-    : extractClaims(artifacts.report);
+  const schemaV3 = Array.isArray(artifacts.claims) && artifacts.claims.length > 0;
+  const claims = (schemaV3 ? artifacts.claims : extractClaims(artifacts.report))
+    .map((claim) => normalizeClaim(claim, { origin: schemaV3 ? 'stored_rule' : 'runtime_rule' }));
   const artifactsHealth = summarizeFindingsHealth(artifacts.findings, artifacts.sources);
-
   const claimResults = [];
-  for (const claim of claims) {
-    if (Array.isArray(claim.evidence)) {
-      const verdicts = claim.evidence.map((item) => item.verdict);
-      const verdict = verdicts.includes('supported') ? 'supported'
-        : (verdicts.includes('partially_supported') ? 'partially_supported'
-          : (verdicts.includes('unsupported') ? 'unsupported' : 'unverifiable'));
-      const resolvedSources = claim.evidence.map((entry) => ({
-        source: artifacts.sources.find((source) => source.id === entry.sourceId) || {},
-        passage: artifacts.passages?.find((passage) => passage.id === entry.passageId) || null,
-      }));
-      claimResults.push({
-        claim,
-        rule: {
-          flags: resolvedSources.some((item) => !item.passage) ? ['missing_passage'] : [],
-          hasCitations: claim.evidence.length > 0,
-          citationKeys: claim.evidence.map((entry) => entry.passageId),
-          unresolvedCitations: resolvedSources.filter((item) => !item.passage).map((item) => item.passage),
-          resolvedSources,
-          platformMatch: !strictPlatform || resolvedSources.every((item) => item.source.engine === strictPlatform),
-        },
-        llm: { verdict, confidence: Math.max(0, ...claim.evidence.map((entry) => Number(entry.score) || 0)), reason: 'Loaded from Schema v3 evidence alignment.', skipped: !llmEnabled },
-      });
-      continue;
-    }
-    const rule = scoreClaimRule(claim, citationMap, { strictPlatform });
-    const llmResult = llmEnabled
-      ? await judgeClaimWithLlm(claim, rule, llm)
-      : {
-          verdict: 'unverifiable',
-          confidence: 0,
-          reason: 'LLM judge disabled.',
-          skipped: true,
-        };
+  let llmInvoked = false;
 
-    claimResults.push({ claim, rule, llm: llmResult });
+  for (const claim of claims) {
+    const rule = schemaV3
+      ? schemaV3Rule(claim, artifacts, strictPlatform)
+      : scoreClaimRule(claim, citationMap, { strictPlatform });
+    const ruleEvaluation = schemaV3 ? storedEvaluation(claim) : evaluationFromLegacyRule(claim, rule);
+    let llmResult = null;
+    let effectiveEvaluation = ruleEvaluation;
+
+    if (llmEnabled && llm && ['key_claim', 'supporting_claim'].includes(claim.kind)) {
+      llmResult = await judgeClaimWithLlm(claim, rule, llm);
+      if (!llmResult.skipped) {
+        llmInvoked = true;
+        effectiveEvaluation = runtimeLlmEvaluation(llmResult, ruleEvaluation);
+      }
+    }
+
+    claimResults.push({
+      claim,
+      rule,
+      ruleVerdict: ruleEvaluation.verdict,
+      llmVerdict: llmResult?.skipped ? null : (llmResult?.verdict || null),
+      effectiveVerdict: effectiveEvaluation.verdict,
+      evaluationOrigin: effectiveEvaluation.origin,
+      effectiveEvaluation,
+      llm: llmResult,
+    });
   }
 
   const result = aggregateBenchmark({
@@ -65,17 +127,18 @@ export async function runBenchmark({
     artifactsHealth,
     claimResults,
     llmEnabled: llmEnabled && Boolean(llm),
+    llmInvoked,
   });
-  const keyClaims = claims.filter((claim) => claim.importance === 'key');
-  const linkedKeyClaims = keyClaims.filter((claim) => claim.evidence?.some((entry) => entry.passageId));
   const sourceHosts = new Set(artifacts.sources.map((source) => {
     try { return new URL(source.url).hostname; } catch { return ''; }
   }).filter(Boolean));
-  result.metrics.keyClaimEvidenceCoverageRate = keyClaims.length ? Number((linkedKeyClaims.length / keyClaims.length).toFixed(4)) : 0;
   result.metrics.sourceHostCount = sourceHosts.size;
   result.metrics.passageCount = artifacts.passages?.length || 0;
-  result.metrics.averageSourcesPerClaim = claims.length
-    ? Number((claims.reduce((sum, claim) => sum + new Set((claim.evidence || []).map((entry) => entry.sourceId)).size, 0) / claims.length).toFixed(4))
-    : 0;
+  result.metrics.averageSourcesPerClaim = result.metrics.evaluatedClaimCount
+    ? Number((claims
+      .filter((claim) => ['key_claim', 'supporting_claim'].includes(claim.kind))
+      .reduce((sum, claim) => sum + new Set((claim.evidence || []).map((entry) => entry.sourceId)).size, 0)
+      / result.metrics.evaluatedClaimCount).toFixed(4))
+    : null;
   return result;
 }

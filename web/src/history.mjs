@@ -32,13 +32,14 @@ function renderHistory(history) {
   return `
     <table width="100%" cellspacing="0" cellpadding="8">
       <thead>
-        <tr><th align="left">Query</th><th>Status</th><th>Created</th><th>Actions</th></tr>
+        <tr><th align="left">Query</th><th>Status</th><th>Quality</th><th>Created</th><th>Actions</th></tr>
       </thead>
       <tbody>
         ${history.map((item) => `
           <tr>
             <td>${escapeHtml(item.query)}</td>
             <td>${escapeHtml(item.status)}</td>
+            <td>${escapeHtml(item.quality?.gate || '—')}</td>
             <td>${new Date(item.createdAt).toLocaleString()}</td>
             <td>
               <a href="/results.html?id=${item.id}">Open</a>

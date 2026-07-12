@@ -92,7 +92,11 @@ describe('compileWiki', () => {
   it('compiles Schema v3 evidence and open-question pages incrementally', () => {
     const vaultDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wiki-v3-'));
     tempDirs.push(vaultDir);
-    const claims = [{ id: 'claim-1', text: 'LLM Wiki uses incremental manifests.', section: 'Findings', evidence: [{ sourceId: 'run-1/source-001', passageId: 'passage-1', verdict: 'supported', score: 0.9 }] }];
+    const claims = [
+      { id: 'claim-1', text: 'LLM Wiki uses incremental manifests.', kind: 'key_claim', section: 'Findings', evaluation: { verdict: 'supported', origin: 'stored_rule' }, evidence: [{ sourceId: 'run-1/source-001', passageId: 'passage-1', verdict: 'supported', score: 0.9 }] },
+      { id: 'claim-source', text: 'https://example.com/wiki', kind: 'source_entry', section: 'Sources', evidence: [] },
+      { id: 'claim-caveat', text: 'The available evidence is limited.', kind: 'caveat', section: 'Limitations', evaluation: { verdict: 'unverifiable', origin: 'stored_rule' }, evidence: [] },
+    ];
     const passages = [{ id: 'passage-1', sourceId: 'run-1/source-001', text: 'Manifest enables incremental compile.', contentHash: 'abc' }];
     const gaps = [{ id: 'gap-1', question: 'How does it evolve?', status: 'deferred', priority: 'normal', reason: 'Needs future evidence.' }];
     const summary = compileWiki({ vaultDir, sources: sampleSources, report, meta: { query: 'llm wiki' }, claims, passages, gaps });
@@ -103,5 +107,9 @@ describe('compileWiki', () => {
     assert.ok(manifest.passages['passage-1']);
     assert.ok(manifest.gaps['gap-1']);
     assert.equal(lintWiki({ vaultDir }).errorCount, 0);
+    const claimsPage = fs.readFileSync(path.join(vaultDir, 'Claims', 'Llm Wiki Claims.md'), 'utf8');
+    assert.match(claimsPage, /claimCount: 1/);
+    assert.match(claimsPage, /## Caveats/);
+    assert.doesNotMatch(claimsPage, /claim-source/);
   });
 });

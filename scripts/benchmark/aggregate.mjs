@@ -1,3 +1,4 @@
+import { calculateQualityMetrics } from 'js-deepresearch-engine';
 import { sourceIsComplete } from './rule-score.mjs';
 
 function rate(numerator, denominator) {
@@ -7,20 +8,18 @@ function rate(numerator, denominator) {
 
 function collectRiskExamples(results = []) {
   return results
-    .filter((result) => {
-      const llmVerdict = result.llm?.verdict;
-      return result.rule.flags.length > 0
-        || llmVerdict === 'unsupported'
-        || llmVerdict === 'partially_supported';
-    })
+    .filter((result) => result.rule.flags.length > 0
+      || ['partially_supported', 'unsupported', 'unverifiable', 'conflicting'].includes(result.effectiveEvaluation?.verdict))
     .slice(0, 10)
     .map((result) => ({
       section: result.claim.section,
+      kind: result.claim.kind,
       text: result.claim.text,
       flags: result.rule.flags,
       unresolvedCitations: result.rule.unresolvedCitations,
-      llmVerdict: result.llm?.verdict || null,
-      llmReason: result.llm?.reason || null,
+      effectiveVerdict: result.effectiveEvaluation?.verdict || 'unverifiable',
+      evaluationOrigin: result.effectiveEvaluation?.origin || 'not_evaluated',
+      reason: result.llm?.reason || null,
     }));
 }
 
@@ -29,46 +28,49 @@ export function aggregateBenchmark({
   artifactsHealth,
   claimResults = [],
   llmEnabled = false,
+  llmInvoked = false,
 }) {
-  const claimCount = claimResults.length;
-  const claimsWithCitations = claimResults.filter((result) => result.rule.hasCitations).length;
-  const totalCitations = claimResults.reduce(
-    (sum, result) => sum + result.rule.citationKeys.length,
-    0,
-  );
-  const unresolvedCitations = claimResults.reduce(
-    (sum, result) => sum + result.rule.unresolvedCitations.length,
-    0,
-  );
-  const resolvedCitationCount = totalCitations - unresolvedCitations;
-  const resolvedSources = claimResults.flatMap((result) => result.rule.resolvedSources);
+  const evaluatedClaims = claimResults.map((result) => ({
+    ...result.claim,
+    evaluation: result.effectiveEvaluation,
+  }));
+  const quality = calculateQualityMetrics(evaluatedClaims);
+  const factResults = claimResults.filter((result) => ['key_claim', 'supporting_claim'].includes(result.claim.kind));
+  const claimsWithCitations = factResults.filter((result) => result.rule.hasCitations).length;
+  const totalCitations = factResults.reduce((sum, result) => sum + result.rule.citationKeys.length, 0);
+  const unresolvedCitations = factResults.reduce((sum, result) => sum + result.rule.unresolvedCitations.length, 0);
+  const resolvedSources = factResults.flatMap((result) => result.rule.resolvedSources);
   const completeSources = resolvedSources.filter((entry) => sourceIsComplete(entry.source || {})).length;
-  const platformMatches = claimResults.filter((result) => result.rule.platformMatch).length;
-
-  const llmResults = claimResults.filter((result) => result.llm && !result.llm.skipped);
-  const supported = llmResults.filter((result) => result.llm.verdict === 'supported').length;
-  const partial = llmResults.filter((result) => result.llm.verdict === 'partially_supported').length;
-  const unsupported = llmResults.filter((result) => result.llm.verdict === 'unsupported').length;
-  const unverifiable = llmResults.filter((result) => result.llm.verdict === 'unverifiable').length;
+  const platformMatches = factResults.filter((result) => result.rule.platformMatch).length;
 
   return {
     query: meta?.query || '',
     strategy: meta?.strategy || '',
     researchId: meta?.researchId || null,
     llmEnabled,
+    evaluation: {
+      metricsVersion: quality.metricsVersion,
+      llmInvoked,
+      usedStoredRule: claimResults.some((result) => result.effectiveEvaluation?.origin === 'stored_rule'),
+      usedStoredLlm: claimResults.some((result) => result.effectiveEvaluation?.origin === 'stored_llm'),
+      usedRuntimeRule: claimResults.some((result) => result.effectiveEvaluation?.origin === 'runtime_rule'),
+      usedRuntimeLlm: claimResults.some((result) => result.effectiveEvaluation?.origin === 'runtime_llm'),
+    },
     artifactsHealth,
     metrics: {
-      claimCount,
-      claimsWithCitationsRate: rate(claimsWithCitations, claimCount),
-      citationResolutionRate: rate(resolvedCitationCount, totalCitations),
+      ...quality,
+      claimsWithCitationsRate: rate(claimsWithCitations, factResults.length),
+      citationResolutionRate: rate(totalCitations - unresolvedCitations, totalCitations),
       sourcePresenceRate: rate(completeSources, resolvedSources.length),
-      platformMatchRate: rate(platformMatches, claimCount),
+      platformMatchRate: rate(platformMatches, factResults.length),
       enrichOkRate: artifactsHealth?.enrichment?.enrichOkRate ?? 0,
       contentPresenceRate: artifactsHealth?.enrichment?.contentRate ?? 0,
-      supportedRate: rate(supported, llmResults.length),
-      partialRate: rate(partial, llmResults.length),
-      unsupportedRate: rate(unsupported, llmResults.length),
-      unverifiableRate: rate(unverifiable, llmResults.length),
+      // Backward-compatible aliases; canonical values live under rates.
+      supportedRate: quality.rates.supportedRate,
+      partialRate: quality.rates.partiallySupportedRate,
+      unsupportedRate: quality.rates.unsupportedRate,
+      unverifiableRate: quality.rates.unverifiableRate,
+      conflictingRate: quality.rates.conflictingRate,
     },
     claims: claimResults,
     riskExamples: collectRiskExamples(claimResults),

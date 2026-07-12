@@ -89,6 +89,9 @@ describe('work output', () => {
     assert.equal(meta.settings.iterations, 1);
     assert.equal(meta.settings.questionsPerIteration, 2);
     assert.equal(meta.artifactSchemaVersion, 3);
+    assert.equal(meta.qualityMetricsVersion, 2);
+    assert.equal(meta.claimExtractionVersion, 2);
+    assert.equal(meta.claimEvaluationVersion, 2);
     for (const key of ['gapsPath', 'passagesPath', 'claimsPath', 'qualityPath', 'tracePath']) {
       assert.equal(fs.existsSync(artifacts[key]), true);
       assert.equal(meta.artifacts[key], artifacts[key]);

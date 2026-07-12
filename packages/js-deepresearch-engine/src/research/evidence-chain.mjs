@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { normalizeSourceUrl } from './source-candidates.mjs';
+import { buildClaimEvaluation, extractQualityClaims } from './claim-quality.mjs';
 
 function hash(prefix, value) {
   return `${prefix}-${crypto.createHash('sha256').update(value).digest('hex').slice(0, 16)}`;
@@ -70,23 +71,23 @@ export function buildEvidenceArtifacts({ query, findings = [], report = '', opti
     return { ...finding, id, gapId: finding.gapId || null, sourceIds, passageIds, evidenceStatus: passageIds.length ? 'direct_evidence' : ((finding.sources || []).length ? 'search_snippet' : 'missing') };
   });
 
-  const claims = options.claimAlignment ? extractClaims(report).map((claim, index) => {
+  const claims = options.claimAlignment ? extractQualityClaims(report).map((claim, index) => {
     const candidates = passages.map((passage) => ({ passage, score: overlap(claim.text, passage.text) })).sort((a, b) => b.score - a.score).slice(0, 3);
     const evidence = candidates.filter((item) => item.score > 0).map(({ passage, score }) => ({ sourceId: passage.sourceId, passageId: passage.id, verdict: score >= 0.45 ? 'supported' : (score >= 0.2 ? 'partially_supported' : 'unverifiable'), score, method: 'rules' }));
-    return { id: hash('claim', `${index}:${claim.text}`), ...claim, findingIds: [...new Set(evidence.flatMap((item) => passages.find((passage) => passage.id === item.passageId)?.findingIds || []))], evidence };
+    const normalized = {
+      id: hash('claim', `${index}:${claim.text}`),
+      ...claim,
+      ...(claim.parentClaimText ? { parentClaimId: hash('claim-parent', claim.parentClaimText) } : {}),
+      findingIds: [...new Set(evidence.flatMap((item) => passages.find((passage) => passage.id === item.passageId)?.findingIds || []))],
+      evidence,
+    };
+    normalized.evaluation = buildClaimEvaluation(normalized);
+    return normalized;
   }) : [];
 
   return { findings: normalizedFindings, sources: [...sourceMap.values()], passages, claims };
 }
 
 export function extractClaims(report = '') {
-  let section = '';
-  const claims = [];
-  for (const raw of String(report).split('\n')) {
-    const line = raw.trim();
-    if (/^#{1,6}\s+/.test(line)) { section = line.replace(/^#{1,6}\s+/, ''); continue; }
-    const text = line.replace(/^[-*]\s+/, '').replace(/^\d+[.)]\s+/, '').trim();
-    if (text.length >= 40 && !/^https?:\/\//.test(text)) claims.push({ text, section, importance: /^summary|key findings|结论|主要发现/i.test(section) ? 'key' : 'supporting' });
-  }
-  return claims;
+  return extractQualityClaims(report);
 }

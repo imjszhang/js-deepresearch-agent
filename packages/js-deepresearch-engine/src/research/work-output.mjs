@@ -1,5 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import {
+  QUALITY_METRICS_VERSION,
+  CLAIM_EXTRACTION_VERSION,
+  CLAIM_EVALUATION_VERSION,
+} from './claim-quality.mjs';
 
 export function resolveWorkDir(settings, cwd = process.cwd()) {
   const configured = settings?.research?.workDir || 'work_dir';
@@ -60,6 +65,9 @@ export function saveResearchArtifacts({
         strategy,
         researchId,
         artifactSchemaVersion: 3,
+        qualityMetricsVersion: result.quality?.qualityMetricsVersion || QUALITY_METRICS_VERSION,
+        claimExtractionVersion: result.quality?.claimExtractionVersion || CLAIM_EXTRACTION_VERSION,
+        claimEvaluationVersion: result.quality?.claimEvaluationVersion || CLAIM_EVALUATION_VERSION,
         createdAt: new Date().toISOString(),
         artifacts: {
           gapsPath: artifacts.gapsPath,

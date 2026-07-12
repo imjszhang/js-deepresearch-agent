@@ -82,6 +82,7 @@ describe('CLI research cancellation', () => {
             report: '# Report',
             findings: [],
             sources: [{ title: 'A', url: 'https://example.com', snippet: 'A' }],
+            quality: { gate: 'pass', qualityMetricsVersion: 2 },
           };
         },
       },
@@ -91,6 +92,10 @@ describe('CLI research cancellation', () => {
 
     assert.equal(observedStatus, 'running');
     assert.equal(researchRepository.get('test-running-id').status, 'completed');
+    assert.deepEqual(researchRepository.get('test-running-id').quality, {
+      gate: 'pass',
+      qualityMetricsVersion: 2,
+    });
     db.close();
   });
 

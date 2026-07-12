@@ -127,6 +127,7 @@ export async function runCliResearch({
       });
       services.researchRepository.updateStatus(recordId, 'completed', {
         report: result.report,
+        quality: result.quality,
         completedAt: new Date().toISOString(),
       });
     }

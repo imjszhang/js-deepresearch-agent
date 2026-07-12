@@ -54,7 +54,14 @@ describe('intel store archive', () => {
         gaps: [{ id: 'gap-1', question: 'Q1', status: 'resolved' }],
         passages: [{ id: 'passage-1', sourceId: 'source-1', contentHash: 'hash-1', text: 'Evidence' }],
         claims: [{ id: 'claim-1', text: 'Claim', evidence: [{ passageId: 'passage-1', sourceId: 'source-1', verdict: 'supported' }] }],
-        quality: { schemaVersion: 3, gate: 'pass', flags: [] },
+        quality: {
+          schemaVersion: 3,
+          gate: 'pass',
+          flags: [],
+          qualityMetricsVersion: 2,
+          claimExtractionVersion: 2,
+          claimEvaluationVersion: 2,
+        },
         trace: [{ step: 1, action: 'search', reasonCode: 'test' }],
       },
       artifacts: {
@@ -74,6 +81,9 @@ describe('intel store archive', () => {
     assert.equal(run.query, 'What is LLM Wiki?');
     assert.equal(run.strategy, 'source-based');
     assert.equal(run.archiveSchemaVersion, ARCHIVE_SCHEMA_VERSION);
+    assert.equal(run.qualityMetricsVersion, 2);
+    assert.equal(run.claimExtractionVersion, 2);
+    assert.equal(run.claimEvaluationVersion, 2);
     assert.equal(run.findingsCount, 1);
     assert.equal(run.sourcesCount, 3);
     assert.equal(run.reportPath, reportPath);
