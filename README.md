@@ -169,11 +169,11 @@ For Xiaohongshu-only search, set `JS_EYES_SKILL=js-xiaohongshu-ops-skill`. On Li
 Available research strategies are exposed through `/api/strategies` and shared by the web UI:
 
 - `rapid`: fast research that searches the original query plus a few follow-up questions.
-- `source-based`: default iterative research that generates source-informed follow-up questions. Optional URL enrichment (`research.sourceBased.fetchMode`: `disabled` | `full` | `summary`) fetches page content before report synthesis; relevance filtering is off by default.
+- `source-based`: default iterative research that generates source-informed follow-up questions. Default URL enrichment uses `research.sourceBased.fetchMode: summary` (LLM-compressed page summaries before report synthesis). Use `disabled` for snippet-only fast runs; relevance filtering stays off by default.
 - `parallel`: broad research that runs generated questions with controlled concurrency.
 - `adaptive`: experimental gap-driven research with bounded steps, shared budgets, structured progress, and evidence evaluation.
 
-Research controls are opt-in. One-off CLI runs can use `--max-llm-tokens`, `--max-search-requests`, `--max-source-reads`, `--reserve-report-tokens`, `--source-adaptive-control`, `--source-query-memory`, `--source-cluster-results`, `--source-max-per-hostname`, `--source-evidence-passages`, `--source-claim-alignment`, and `--source-pre-report-gate`. Boolean flags accept explicit `true` or `false` values and do not persist settings.
+`source-based` defaults to a quality preset: `fetchMode: summary`, query memory, source clustering, passage/claim evidence, adaptive early-stop, and soft budgets (`maxSearchRequests: 10`, `maxSourceReads: 8`). Override per run with CLI flags such as `--source-fetch-mode disabled` or `config set` / Web UI settings. `preReportGate` and LLM relevance filtering remain off by default.
 
 Completed work sessions use artifact schema v3. The original `report.md`, `findings.json`, `sources.json`, and `meta.json` remain compatible; optional `gaps.json`, `passages.json`, `claims.json`, `quality.json`, and `trace.json` preserve evidence links, quality state, budgets, and structured actions. Intel Store v2 runs remain readable and can be upgraded idempotently with `intel import --upgrade-existing`.
 

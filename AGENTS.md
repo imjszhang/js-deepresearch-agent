@@ -118,7 +118,7 @@ npm exec jdr -- research "Explain the current state of local-first AI research"
 | `--questions` | `research.questionsPerIteration` | 每轮生成问题数 |
 | `--concurrency` | `research.concurrency` | 并发搜索数 |
 | `--work-dir` | `research.workDir` | 产物根目录（相对 cwd 或绝对路径） |
-| `--source-fetch-mode` | `research.sourceBased.fetchMode` | `disabled`（默认）\| `full` \| `summary`；抓取 URL 正文或 LLM 摘要 |
+| `--source-fetch-mode` | `research.sourceBased.fetchMode` | `summary`（默认）\| `disabled` \| `full`；抓取 URL 正文或 LLM 摘要 |
 | `--source-fetch-backend` | `research.sourceBased.fetchBackend` | `auto`（默认）\| `http` \| `js-eyes`；知乎来源优先走 js-eyes 浏览器读取 |
 | `--source-max-urls` | `research.sourceBased.maxUrlsTotal` | 单次调研最多 enrich 的 URL 数 |
 | `--source-enable-filter` | `research.sourceBased.enableRelevanceFilter` | 是否启用 LLM 来源相关性过滤 |
@@ -550,17 +550,17 @@ Agent 选型建议：
 
 ### 研究控制与 Schema v3
 
-预算、查询记忆、来源聚类、轮间 gate、片段证据和 claim 对齐默认关闭。单次实验优先使用 `--max-llm-tokens`、`--max-search-requests`、`--max-source-reads`、`--reserve-report-tokens`、`--source-adaptive-control`、`--source-query-memory`、`--source-cluster-results`、`--source-max-per-hostname`、`--source-evidence-passages`、`--source-claim-alignment` 与 `--source-pre-report-gate`；boolean flag 应显式传 `true`/`false`。
+预算、查询记忆、来源聚类、passage/claim 证据链与自适应停轮**默认已开启**（质量优先预设）。快速摸底可用 `--source-fetch-mode disabled`、`--source-evidence-passages false` 等 flag 单次关闭。`preReportGate` 与 LLM 相关性过滤仍默认关闭。单次实验也可用 `--max-llm-tokens`、`--max-search-requests`、`--max-source-reads` 等覆盖预算。
 
 Schema v3 在旧四件套之外写入 `gaps.json`、`passages.json`、`claims.json`、`quality.json`、`trace.json`。Intel Store 继续读取 v2；`intel import --upgrade-existing` 可从有正文的旧产物派生 passage/claim，不能从 snippet 伪造正文证据。Wiki 会为 v3 生成 `Evidence/` 与 `Open Questions/` 页面。
 
 ### Source-Based 深度阅读（可选）
 
-默认 `fetchMode: disabled`，行为与旧版一致（仅使用搜索 snippet）。开启后会在每轮搜索后按 URL 抓取正文或 LLM 摘要，并在报告阶段优先使用 `summary || content || snippet` 作为 Evidence。
+默认 `fetchMode: summary`：每轮搜索后抓取 URL 并用 LLM 压缩摘要；报告阶段优先使用 `summary || content || snippet` 作为 Evidence。快速模式可设为 `disabled`（仅 snippet）。
 
 | 配置键 / Flag | 默认 | 说明 |
 |---|---|---|
-| `research.sourceBased.fetchMode` / `--source-fetch-mode` | `disabled` | `full` 抓取正文；`summary` 抓取后 LLM 压缩 |
+| `research.sourceBased.fetchMode` / `--source-fetch-mode` | `summary` | `disabled` 仅 snippet；`full` 抓取正文 |
 | `research.sourceBased.fetchBackend` / `--source-fetch-backend` | `auto` | `js-eyes` 强制浏览器读取；`http` 仅 HTTP fetch |
 | `research.sourceBased.maxUrlsTotal` / `--source-max-urls` | `24` | 全局 enrich URL 上限 |
 | `research.sourceBased.enableRelevanceFilter` / `--source-enable-filter` | `false` | LLM 相关性过滤 |
@@ -649,7 +649,7 @@ js-eyes skill run js-reddit-ops-skill search "openclaw" --limit 3 --read-mode ap
 
 各 skill 串行查询；单 skill 失败时仍返回其他 skill 结果（**AbortError 除外**，取消会立即停止后续 skill）；全部失败才报错。浏览器-backed skill 会自动将问题并发限制为 1。
 
-**取消与 js-eyes**：每次搜索可能触发浏览器 `open_url`（如 Reddit）。`source-based` 默认约 2 轮 ×（原问题 + 3 子问题）≈ 7 次搜索；取消后不再调度新搜索，但已打开的标签页需手动关闭。
+**取消与 js-eyes**：每次搜索可能触发浏览器 `open_url`（如 Reddit）。`source-based` 默认约 2 轮 ×（原问题 + 2 子问题）≈ 6 次搜索，并可能额外抓取最多 12 个 URL；取消后不再调度新搜索，但已打开的标签页需手动关闭。
 
 ---
 

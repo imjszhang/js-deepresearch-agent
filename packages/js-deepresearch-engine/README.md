@@ -135,9 +135,9 @@ The engine does not read `.env` files or persist settings. Callers are responsib
 
 ## Research Controls and Schema v3
 
-All behavior-changing controls are disabled by default. `research.budget` caps LLM tokens, searches, source reads, and estimated cost; zero means unlimited. `research.sourceBased.adaptiveControl`, `queryMemory`, `sourceSelection`, `evidencePassages`, and `preReportGate` can be enabled independently.
+`source-based` defaults to a quality-oriented preset: `fetchMode: summary`, enabled `queryMemory`, `sourceSelection`, `evidencePassages` (with `claimAlignment`), and `adaptiveControl`, plus soft budgets (`maxSearchRequests: 10`, `maxSourceReads: 8`). Set `fetchMode: disabled` or turn individual controls off when embedding the engine in latency-sensitive paths. `preReportGate` and LLM relevance filtering stay disabled by default.
 
-Schema v3 results retain `report`, `findings`, and `sources` and add `gaps`, `passages`, `claims`, `quality`, and a structured `trace`. Passage and claim generation only runs when enabled; stable finding/source IDs and the quality/budget summary remain available for downstream archives. Semantic helpers use pluggable research providers and deterministic local fallbacks.
+Schema v3 results retain `report`, `findings`, and `sources` and add `gaps`, `passages`, `claims`, `quality`, and a structured `trace`. Passage and claim generation run when `evidencePassages` is enabled (default for `source-based`). Semantic helpers use pluggable research providers and deterministic local fallbacks.
 
 ## Built-in LLM Providers
 

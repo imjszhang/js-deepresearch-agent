@@ -32,11 +32,17 @@ function mockHtmlFetch(html) {
 }
 
 describe('source-based settings', () => {
-  it('defaults fetchMode to disabled', () => {
+  it('defaults to the quality deep-research preset', () => {
     const resolved = resolveSourceBasedSettings({});
-    assert.equal(resolved.fetchMode, 'disabled');
+    assert.equal(resolved.fetchMode, 'summary');
     assert.equal(resolved.fetchBackend, 'auto');
-    assert.equal(resolved.maxUrlsTotal, 24);
+    assert.equal(resolved.maxUrlsTotal, 12);
+    assert.equal(resolved.adaptiveControl.enabled, true);
+    assert.equal(resolved.queryMemory.enabled, true);
+    assert.equal(resolved.sourceSelection.enabled, true);
+    assert.equal(resolved.sourceSelection.clusterResults, true);
+    assert.equal(resolved.evidencePassages.enabled, true);
+    assert.equal(resolved.evidencePassages.claimAlignment, true);
   });
 
   it('prefers summary/content/snippet for evidence', () => {
@@ -377,7 +383,10 @@ describe('source-based pipeline', () => {
           iterations: 2,
           questionsPerIteration: 1,
           concurrency: 1,
-          sourceBased: { fetchMode: 'disabled' },
+          sourceBased: {
+            fetchMode: 'disabled',
+            adaptiveControl: { enabled: false },
+          },
         },
       },
       search: {

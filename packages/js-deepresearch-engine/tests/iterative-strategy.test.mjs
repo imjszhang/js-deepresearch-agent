@@ -15,6 +15,10 @@ describe('iterative strategy pipeline', () => {
           iterations: 2,
           questionsPerIteration: 1,
           concurrency: 1,
+          sourceBased: {
+            fetchMode: 'disabled',
+            adaptiveControl: { enabled: false },
+          },
         },
       },
       search: {
