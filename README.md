@@ -41,12 +41,12 @@ The Vite dev server proxies `/api` requests to `http://127.0.0.1:3000`.
 ## CLI Usage
 
 ```bash
-npm exec jdr -- help
-npm exec jdr -- config get
-npm exec jdr -- config set llm.apiKey "YOUR_API_KEY"
-npm exec jdr -- config set search.baseUrl "http://127.0.0.1:8080"
-npm exec jdr -- research "Explain the current state of local-first AI research" --output report.md
-npm exec jdr -- history list
+npm exec --package=. -- jdr help
+npm exec --package=. -- jdr config get
+npm exec --package=. -- jdr config set llm.apiKey "YOUR_API_KEY"
+npm exec --package=. -- jdr config set search.baseUrl "http://127.0.0.1:8080"
+npm exec --package=. -- jdr research "Explain the current state of local-first AI research" --output report.md
+npm exec --package=. -- jdr history list
 ```
 
 ## Benchmark
@@ -71,10 +71,16 @@ Use `--no-llm` for offline checks. Schema v3 claims reuse their stored verdicts 
 
 Quality metrics v2 count claims, not individual evidence links. Fact-claim verdicts are mutually exclusive (`supported`, `partially_supported`, `unsupported`, `unverifiable`, or `conflicting`), so their counts always add up to `evaluatedClaimCount`. Caveats and recommendations remain visible but are excluded from fact-claim support rates, source-list entries are not claims, and rates with no denominator are reported as `null`/`n/a` instead of a misleading zero.
 
+Report output is validated before a run can complete. The engine requires a Markdown heading and at least `research.reportValidation.minChars` characters (default `200`), retries once by default, and raises `REPORT_OUTPUT_INVALID` if the provider still returns an empty or placeholder response. Failed validation writes no report artifacts and the CLI/Web history state is `failed`. LLM progress records purpose, duration, output length, finish reason, and whether reasoning metadata existed, but never stores prompts or reasoning text.
+
+Qwen models used through an OpenAI-compatible endpoint automatically request `reasoning_effort: none`; this prevents small summary/report token budgets from being consumed entirely by a hidden `reasoning` field while final `content` remains empty.
+
+For `source-based` research, official documentation, repositories, specifications, and papers receive a primary-source boost. Missing primary evidence opens a focused follow-up query and is preserved as a quality limitation. Direct-evidence passages are created only from successfully fetched source bodies; search snippets remain `search_snippet` evidence.
+
 You can also override settings for one run:
 
 ```bash
-npm exec jdr -- research "Compare SearXNG and Brave Search APIs" \
+npm exec --package=. -- jdr research "Compare SearXNG and Brave Search APIs" \
   --provider openai-compatible \
   --model gpt-4o-mini \
   --base-url https://api.openai.com/v1 \
@@ -85,13 +91,13 @@ npm exec jdr -- research "Compare SearXNG and Brave Search APIs" \
   --concurrency 2
 
 # Override JS Eyes skills for one run without editing .env
-npm exec jdr -- research "openclaw" \
+npm exec --package=. -- jdr research "openclaw" \
   --search js-eyes \
   --search-skills js-reddit-ops-skill \
   --strategy rapid
 
 # Source-based deep reading: fetch page content or LLM summaries before report synthesis
-npm exec jdr -- research "llm wiki" \
+npm exec --package=. -- jdr research "llm wiki" \
   --search js-eyes \
   --search-skills js-zhihu-ops-skill \
   --strategy source-based \
@@ -159,7 +165,7 @@ JS_EYES_SKILL=js-zhihu-ops-skill,js-xiaohongshu-ops-skill
 Or pass skills only for the current CLI run:
 
 ```bash
-npm exec jdr -- research "openclaw" --search js-eyes --search-skills js-reddit-ops-skill
+npm exec --package=. -- jdr research "openclaw" --search js-eyes --search-skills js-reddit-ops-skill
 ```
 
 Legacy `--js-eyes-skill` and `JS_EYES_*` env vars remain supported.

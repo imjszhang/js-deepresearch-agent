@@ -181,6 +181,7 @@ describe('source enricher', () => {
     });
 
     assert.equal(finding.sources[0].fetchStatus, 'ok');
+    assert.equal(finding.sources[0].contentOrigin, 'fetched');
     assert.match(finding.sources[0].content, /Detailed LLM wiki article body/);
   });
 
@@ -476,6 +477,30 @@ describe('source-based pipeline', () => {
     assert.equal(searches.length, 2);
     assert.equal(findings.length, 2);
     assert.ok(stages.includes('evaluating_evidence'));
+  });
+
+  it('focuses the next iteration on primary sources when only secondary coverage exists', async () => {
+    const searches = [];
+    const trace = [];
+    const findings = await runSourceBasedPipeline({
+      query: 'compare open source research framework architecture',
+      iterations: 2,
+      questionCount: 1,
+      concurrency: 1,
+      settings: { research: { sourceBased: { fetchMode: 'disabled', adaptiveControl: { enabled: true, minIterations: 1, maxIterations: 2, earlyStop: true } } } },
+      search: { async search(question) {
+        searches.push(question);
+        return question.includes('site:github.com')
+          ? [{ title: 'Official repository', url: 'https://github.com/example/research-agent', snippet: 'primary implementation' }]
+          : [{ title: 'Secondary overview', url: `https://blog.csdn.net/${searches.length}`, snippet: 'secondary summary' }];
+      } },
+      llm: { async complete() { return JSON.stringify(['general comparison']); } },
+      emit: () => {},
+      trace,
+    });
+    assert.ok(searches.some((question) => question.includes('site:github.com')));
+    assert.ok(findings.some((finding) => finding.sources.some((source) => source.url.includes('github.com'))));
+    assert.ok(trace.some((entry) => entry.flags?.includes('primary_source_missing')));
   });
 });
 

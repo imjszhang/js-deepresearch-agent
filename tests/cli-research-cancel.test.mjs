@@ -69,11 +69,12 @@ describe('CLI research cancellation', () => {
     const researchRepository = new ResearchRepository(db);
     const sourceRepository = new SourceRepository(db);
     let observedStatus = null;
+    const progressLogs = [];
 
     await runCliResearch({
       query: 'hello',
       settings: { research: { strategy: 'rapid' } },
-      flags: {},
+      flags: { json: true, 'no-work-dir': true },
       services: { researchRepository, sourceRepository },
       runner: {
         run: async () => {
@@ -88,6 +89,7 @@ describe('CLI research cancellation', () => {
       },
       cryptoRandomId: () => 'test-running-id',
       signalTarget: new EventEmitter(),
+      onProgressLog: (...entry) => progressLogs.push(entry),
     });
 
     assert.equal(observedStatus, 'running');
@@ -96,6 +98,52 @@ describe('CLI research cancellation', () => {
       gate: 'pass',
       qualityMetricsVersion: 2,
     });
+    assert.ok(progressLogs.length === 0, 'the injected runner emitted no progress in this fixture');
+    db.close();
+  });
+
+  it('keeps JSON stdout compatible while sending progress to stderr callbacks', async () => {
+    isolateIntelStore();
+    const db = createTestDb();
+    const logs = [];
+    await runCliResearch({
+      query: 'observable run',
+      settings: { research: { strategy: 'rapid' } },
+      flags: { json: true, 'no-save': true, 'no-work-dir': true },
+      services: { researchRepository: new ResearchRepository(db), sourceRepository: new SourceRepository(db) },
+      runner: {
+        run: async ({ onProgress }) => {
+          onProgress({ level: 'info', progress: null, message: 'LLM call started: report' });
+          return { report: '# Report', findings: [], sources: [], quality: { gate: 'pass' } };
+        },
+      },
+      signalTarget: new EventEmitter(),
+      onProgressLog: (...entry) => logs.push(entry),
+    });
+    assert.deepEqual(logs, [['info', null, 'LLM call started: report']]);
+    db.close();
+  });
+
+  it('marks invalid report generation as failed and writes no artifacts', async () => {
+    const db = createTestDb();
+    const researchRepository = new ResearchRepository(db);
+    let artifactWrites = 0;
+    const error = new Error('Report generation produced no usable report');
+    error.name = 'ReportGenerationError';
+    error.code = 'REPORT_OUTPUT_INVALID';
+    await assert.rejects(() => runCliResearch({
+      query: 'empty report',
+      settings: { research: { strategy: 'source-based' } },
+      flags: {},
+      services: { researchRepository, sourceRepository: new SourceRepository(db) },
+      runner: { run: async () => { throw error; } },
+      saveArtifacts: () => { artifactWrites += 1; },
+      cryptoRandomId: () => 'invalid-report-id',
+      signalTarget: new EventEmitter(),
+    }), /no usable report/);
+    assert.equal(artifactWrites, 0);
+    assert.equal(researchRepository.get('invalid-report-id').status, 'failed');
+    assert.equal(researchRepository.get('invalid-report-id').error, error.message);
     db.close();
   });
 

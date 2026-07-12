@@ -21,6 +21,20 @@ export function stableSourceId(source = {}) {
   return hash('source', identity);
 }
 
+function mergeSourceRecord(existing, incoming) {
+  if (!existing) return { ...incoming };
+  const merged = { ...existing };
+  for (const field of ['title', 'url', 'snippet', 'engine', 'platform', 'publishedAt', 'date', 'updatedAt']) {
+    if (!merged[field] && incoming[field]) merged[field] = incoming[field];
+  }
+  if (String(incoming.summary || '').length > String(merged.summary || '').length) merged.summary = incoming.summary;
+  if (String(incoming.content || '').length > String(merged.content || '').length) merged.content = incoming.content;
+  if (incoming.fetchStatus === 'ok' || !merged.fetchStatus) merged.fetchStatus = incoming.fetchStatus || merged.fetchStatus;
+  if (incoming.contentOrigin) merged.contentOrigin = incoming.contentOrigin;
+  if (!merged.fetchError && incoming.fetchError) merged.fetchError = incoming.fetchError;
+  return merged;
+}
+
 function splitContent(content, maxChars) {
   const chunks = [];
   let section = '';
@@ -55,8 +69,10 @@ export function buildEvidenceArtifacts({ query, findings = [], report = '', opti
       const sourceId = stableSourceId(source);
       source.id = source.id || sourceId;
       sourceIds.push(sourceId);
-      sourceMap.set(sourceId, source);
-      if (!passageEnabled || !source.content) continue;
+      sourceMap.set(sourceId, mergeSourceRecord(sourceMap.get(sourceId), source));
+      const hasFetchedContent = source.content
+        && (source.fetchStatus === 'ok' || source.contentOrigin === 'fetched');
+      if (!passageEnabled || !hasFetchedContent) continue;
       const ranked = splitContent(source.content, maxChars)
         .map((passage) => ({ ...passage, retrievalScore: overlap(`${query} ${finding.question}`, passage.text) }))
         .sort((a, b) => b.retrievalScore - a.retrievalScore)
@@ -64,7 +80,7 @@ export function buildEvidenceArtifacts({ query, findings = [], report = '', opti
       for (const passage of ranked) {
         const contentHash = crypto.createHash('sha256').update(passage.text).digest('hex');
         const idValue = hash('passage', `${sourceId}:${contentHash}`);
-        if (!passages.some((item) => item.id === idValue)) passages.push({ id: idValue, sourceId, findingIds: [id], ...passage, observedAt: new Date().toISOString(), contentHash });
+        if (!passages.some((item) => item.id === idValue)) passages.push({ id: idValue, sourceId, findingIds: [id], ...passage, evidenceOrigin: 'source_content', observedAt: new Date().toISOString(), contentHash });
         passageIds.push(idValue);
       }
     }

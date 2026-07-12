@@ -64,6 +64,7 @@ async function enrichOneSource(source, {
       ...source,
       title: source.title || fetched.title,
       content: fetched.content,
+      contentOrigin: 'fetched',
       fetchStatus: 'ok',
       relatedLinks: settings?.research?.sourceBased?.sourceSelection?.expandPageLinks
         ? (fetched.links || []).slice(0, settings.research.sourceBased.sourceSelection.maxExpandedLinksPerPage || 5)
@@ -82,12 +83,14 @@ async function enrichOneSource(source, {
     signal,
     temperature: 0,
     maxTokens: 600,
+    purpose: 'source_summary',
   });
 
   return {
     ...source,
     title: source.title || fetched.title,
     content: fetched.content,
+    contentOrigin: 'fetched',
     summary: String(summary || '').trim() || source.snippet,
     fetchStatus: 'ok',
     relatedLinks: settings?.research?.sourceBased?.sourceSelection?.expandPageLinks
@@ -118,6 +121,7 @@ export async function enrichFindingSources(finding, options = {}) {
 
   const candidates = [];
   for (const source of finding.sources) {
+    if (budget && !budget.canClaim('sourceReads')) break;
     const url = String(source.url || '').trim();
     if (!url || seenUrls.has(url)) continue;
     if (enrichedCount.value >= maxUrlsTotal) break;
@@ -127,6 +131,7 @@ export async function enrichFindingSources(finding, options = {}) {
   }
 
   if (candidates.length === 0) {
+    if (budget && !budget.canClaim('sourceReads')) budget.markExhausted('sourceReads');
     return finding;
   }
 
@@ -139,6 +144,11 @@ export async function enrichFindingSources(finding, options = {}) {
         const error = new Error('Research aborted');
         error.name = 'AbortError';
         throw error;
+      }
+
+      if (budget && !budget.canClaim('sourceReads')) {
+        budget.markExhausted('sourceReads');
+        break;
       }
 
       const index = nextIndex;

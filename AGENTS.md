@@ -8,7 +8,7 @@
 
 ## Agent 必读规则
 
-- 默认在仓库根目录执行命令，自动化脚本中使用 `npm exec jdr -- <command>` 调用本地 CLI，避免依赖全局 PATH。
+- 默认在仓库根目录执行命令，自动化脚本中使用 `npm exec --package=. -- jdr <command>` 调用本地 CLI，避免依赖全局 PATH。
 - 不要提交或展示 `.env`、API Key、`data/`、`work_dir/`、`wiki/` 等本地运行产物。
 - 修改 CLI 行为时优先查看 `src/cli.mjs`、`src/cli-research-run.mjs`、`src/cli-utils.mjs` 与相关测试。
 - 修改调研逻辑时优先改 `packages/js-deepresearch-engine`；修改归档或 Wiki 管线时分别查看 `src/storage/intel-store.mjs`、`packages/js-wiki-engine`。
@@ -21,7 +21,7 @@ npm install
 npm run build
 npm test
 npm run lint
-npm exec jdr -- help
+npm exec --package=. -- jdr help
 ```
 
 ## 项目概览
@@ -47,16 +47,16 @@ CLI 通过 [`src/cli.mjs`](src/cli.mjs) 分发命令；前台 `research` 由 [`s
 
 ```bash
 # 推荐：通过 npm exec 调用本地 bin
-npm exec jdr -- help
-npm exec jdr -- research "你的调研问题"
+npm exec --package=. -- jdr help
+npm exec --package=. -- jdr research "你的调研问题"
 
 # 等价别名
-npm exec js-deepresearch-agent -- help
+npm exec --package=. -- js-deepresearch-agent help
 ```
 
 全局安装后也可直接使用 `jdr` 或 `js-deepresearch-agent`（需先 `npm install -g` 或 `npm link`）。
 
-**Agent 注意**：在 npm script 或自动化脚本中，始终用 `npm exec jdr -- <command>`，避免依赖全局 PATH。
+**Agent 注意**：在 npm script 或自动化脚本中，始终用 `npm exec --package=. -- jdr <command>`，避免依赖全局 PATH。
 
 ## 命令一览
 
@@ -85,7 +85,7 @@ Commands:
 ### 基本用法
 
 ```bash
-npm exec jdr -- research "Explain the current state of local-first AI research"
+npm exec --package=. -- jdr research "Explain the current state of local-first AI research"
 ```
 
 查询字符串为剩余 positional 参数拼接而成，必须非空。
@@ -131,7 +131,7 @@ npm exec jdr -- research "Explain the current state of local-first AI research"
 ### 完整示例
 
 ```bash
-npm exec jdr -- research "Compare SearXNG and Brave Search APIs" \
+npm exec --package=. -- jdr research "Compare SearXNG and Brave Search APIs" \
   --provider openai-compatible \
   --model gpt-4o-mini \
   --base-url https://api.openai.com/v1 \
@@ -143,7 +143,7 @@ npm exec jdr -- research "Compare SearXNG and Brave Search APIs" \
   --output report.md
 
 # 单次运行临时指定 JS Eyes skill（不写入 .env / SQLite）
-npm exec jdr -- research "openclaw" \
+npm exec --package=. -- jdr research "openclaw" \
   --search js-eyes \
   --search-skills js-reddit-ops-skill \
   --search-server-url ws://localhost:18080 \
@@ -163,12 +163,14 @@ npm exec jdr -- research "openclaw" \
 
 `--json` 模式下进度只走 stderr，stdout 仅为 JSON，便于 Agent 解析。
 
+报告生成有硬校验：默认至少 200 字符且包含 Markdown 标题，空内容或过短内容会自动重试一次；仍无有效报告时任务标记为 `failed`，不写 `work_dir`、report 或 Intel 半成品。进度会记录 LLM 阶段、耗时、输出字符数和安全的响应元数据，但不会记录 prompt、推理文本或密钥。`source-based` 会为缺失的原始问题/官方证据保留 gap 与 limitation；只有成功读取的正文才能生成 direct-evidence passage，snippet 只能标记为 `search_snippet`。
+
 ### 取消调研（Ctrl+C）
 
 前台 `research` 命令支持优雅取消。实现位于 [`src/cli-research-run.mjs`](src/cli-research-run.mjs)：`SIGINT` / `SIGTERM` → `AbortController` → `ResearchRunner.run({ signal })` → 搜索层 / js-eyes 子进程。
 
 ```bash
-npm exec jdr -- research "deep research" --search js-eyes --search-skills js-reddit-ops-skill
+npm exec --package=. -- jdr research "deep research" --search js-eyes --search-skills js-reddit-ops-skill
 # 按一次 Ctrl+C：停止后续 LLM / 搜索 / js-eyes 子进程，历史标记为 cancelled
 # 再按一次 Ctrl+C：强制退出（exit code 130）
 ```
@@ -220,21 +222,21 @@ Agent 应优先读取 `report.md` 给用户摘要；需要溯源或二次处理�
 
 ```bash
 # 全部设置（JSON）
-npm exec jdr -- config get
+npm exec --package=. -- jdr config get
 
 # 点分键
-npm exec jdr -- config get llm.model
-npm exec jdr -- config get search.engine
-npm exec jdr -- config get research.strategy
+npm exec --package=. -- jdr config get llm.model
+npm exec --package=. -- jdr config get search.engine
+npm exec --package=. -- jdr config get research.strategy
 ```
 
 ### 写入
 
 ```bash
-npm exec jdr -- config set llm.apiKey "YOUR_API_KEY"
-npm exec jdr -- config set search.baseUrl "http://127.0.0.1:8080"
-npm exec jdr -- config set research.strategy "rapid"
-npm exec jdr -- config set research.iterations 3
+npm exec --package=. -- jdr config set llm.apiKey "YOUR_API_KEY"
+npm exec --package=. -- jdr config set search.baseUrl "http://127.0.0.1:8080"
+npm exec --package=. -- jdr config set research.strategy "rapid"
+npm exec --package=. -- jdr config set research.iterations 3
 ```
 
 `config set` 会将字符串 `"true"` / `"false"` 转为布尔，`"123"` 转为数字。
@@ -277,11 +279,11 @@ npm exec jdr -- config set research.iterations 3
 
 ```bash
 # 列表（默认）
-npm exec jdr -- history
-npm exec jdr -- history list
+npm exec --package=. -- jdr history
+npm exec --package=. -- jdr history list
 
 # 查看某次报告
-npm exec jdr -- history show <researchId>
+npm exec --package=. -- jdr history show <researchId>
 ```
 
 列表格式：`id  status     createdAt  query`（制表对齐）。无历史时输出 `No research history.`。
@@ -312,20 +314,20 @@ CLI `research`（未加 `--no-save`）与 Web UI 任务共用 `research_history`
 
 ```bash
 # 列出归档（默认最近 20 条）
-npm exec jdr -- intel list
-npm exec jdr -- intel list --limit 50 --json
+npm exec --package=. -- jdr intel list
+npm exec --package=. -- jdr intel list --limit 50 --json
 
 # 查看单次 run 摘要
-npm exec jdr -- intel show <researchId>
+npm exec --package=. -- jdr intel show <researchId>
 
 # 查看来源 / findings
-npm exec jdr -- intel sources <researchId> --limit 10
-npm exec jdr -- intel findings <researchId> --limit 10
+npm exec --package=. -- jdr intel sources <researchId> --limit 10
+npm exec --package=. -- jdr intel findings <researchId> --limit 10
 
 # 从 work_dir 历史回填 intel store
-npm exec jdr -- intel import --dry-run
-npm exec jdr -- intel import --strategy source-based
-npm exec jdr -- intel import --force --json
+npm exec --package=. -- jdr intel import --dry-run
+npm exec --package=. -- jdr intel import --strategy source-based
+npm exec --package=. -- jdr intel import --force --json
 ```
 
 | 子命令 | 说明 |
@@ -376,18 +378,18 @@ npm run intel:inspect -- list
 
 ```bash
 # 初始化 vault 目录与模板
-npm exec jdr -- wiki init
-npm exec jdr -- wiki init --vault ./my-wiki --init-obsidian-config
+npm exec --package=. -- jdr wiki init
+npm exec --package=. -- jdr wiki init --vault ./my-wiki --init-obsidian-config
 
 # 编译（默认取 intel store 最近一条 run）
-npm exec jdr -- wiki compile
-npm exec jdr -- wiki compile --research-id 00176e84-2548-4160-add1-7df5a49f7e27 --vault wiki --lint
+npm exec --package=. -- jdr wiki compile
+npm exec --package=. -- jdr wiki compile --research-id 00176e84-2548-4160-add1-7df5a49f7e27 --vault wiki --lint
 
 # 仅检查断链 / manifest
-npm exec jdr -- wiki lint --vault wiki --json
+npm exec --package=. -- jdr wiki lint --vault wiki --json
 
 # 确定性检索相关页面（无 LLM）
-npm exec jdr -- wiki ask "What is LLM Wiki?" --vault wiki --limit 5
+npm exec --package=. -- jdr wiki ask "What is LLM Wiki?" --vault wiki --limit 5
 ```
 
 | 子命令 | 说明 |
@@ -438,8 +440,8 @@ npm run wiki:compile -- --research-id <id> --vault wiki --lint
 ## `serve` — 启动 HTTP 服务
 
 ```bash
-npm exec jdr -- serve
-npm exec jdr -- serve --port 3000
+npm exec --package=. -- jdr serve
+npm exec --package=. -- jdr serve --port 3000
 ```
 
 默认端口：`3000`，或环境变量 `PORT`。启动后访问 `http://127.0.0.1:<port>`。
@@ -571,7 +573,7 @@ Schema v3 在旧四件套之外写入 `gaps.json`、`passages.json`、`claims.js
 示例（知乎 + 摘要模式）：
 
 ```bash
-npm exec jdr -- research "llm wiki" \
+npm exec --package=. -- jdr research "llm wiki" \
   --search js-eyes \
   --search-skills js-zhihu-ops-skill \
   --strategy source-based \
@@ -640,7 +642,7 @@ JS_EYES_SKILL=js-zhihu-ops-skill,js-xiaohongshu-ops-skill
 JS_EYES_SKILL=js-reddit-ops-skill
 
 # 或单次 CLI 覆盖（推荐临时实验）
-npm exec jdr -- research "query" --search js-eyes --search-skills js-reddit-ops-skill
+npm exec --package=. -- jdr research "query" --search js-eyes --search-skills js-reddit-ops-skill
 ```
 
 **Reddit 排障**：若 unified `js-eyes search` 返回 0 条或参数报错，确认 deepresearch 侧已启用本地 registry（默认已包含 `js-reddit-ops-skill`）。可手动验证：
@@ -661,15 +663,15 @@ js-eyes skill run js-reddit-ops-skill search "openclaw" --limit 3 --read-mode ap
 
 ```bash
 npm install
-npm exec jdr -- config get llm.provider
-npm exec jdr -- config get search.baseUrl
+npm exec --package=. -- jdr config get llm.provider
+npm exec --package=. -- jdr config get search.baseUrl
 # 若使用 js-eyes：js-eyes doctor --json
 ```
 
 ### 2. 执行调研并保存可解析结果
 
 ```bash
-npm exec jdr -- research "用户的问题" \
+npm exec --package=. -- jdr research "用户的问题" \
   --strategy source-based \
   --json \
   --output tmp/report.md
@@ -680,24 +682,24 @@ npm exec jdr -- research "用户的问题" \
 ### 3. 只读历史、不重复跑
 
 ```bash
-npm exec jdr -- history list
-npm exec jdr -- history show <id>
+npm exec --package=. -- jdr history list
+npm exec --package=. -- jdr history show <id>
 ```
 
 ### 3b. 归档与 Wiki（LLM Wiki 管线）
 
 ```bash
 # 历史 work_dir 回填 intel（首次或补数据）
-npm exec jdr -- intel import --strategy source-based
+npm exec --package=. -- jdr intel import --strategy source-based
 
 # 确认 researchId
-npm exec jdr -- intel list --limit 5
+npm exec --package=. -- jdr intel list --limit 5
 
 # 编译 Obsidian vault 并 lint
-npm exec jdr -- wiki compile --research-id <id> --vault wiki --lint
+npm exec --package=. -- jdr wiki compile --research-id <id> --vault wiki --lint
 
 # 在 vault 内检索相关页
-npm exec jdr -- wiki ask "用户问题" --vault wiki
+npm exec --package=. -- jdr wiki ask "用户问题" --vault wiki
 ```
 
 新完成的 `research` 会自动尝试写入 intel store；若只关心 SQLite 历史可跳过上述步骤。
@@ -720,7 +722,7 @@ npm exec jdr -- wiki ask "用户问题" --vault wiki
 
 1. 若 CLI 前台仍在跑：发送 Ctrl+C（或 `kill -INT <pid>`），等待 stderr 出现 `Research cancelled.`
 2. 若通过 Web UI 启动：调用 `POST /api/research/:id/cancel`
-3. 确认：`npm exec jdr -- history list` 中对应条目应为 `cancelled`
+3. 确认：`npm exec --package=. -- jdr history list` 中对应条目应为 `cancelled`
 4. 若 js-eyes 仍偶发开页：检查是否有孤儿 `node ... js-eyes` 进程；Windows 可 `js-eyes server stop` 后重启 server（会切断所有浏览器自动化，慎用）
 
 详见 journal：[`journal/2026-05-26/cli-research-cancel.md`](journal/2026-05-26/cli-research-cancel.md)
@@ -791,33 +793,33 @@ CLI 顶层错误输出 `error.message` 到 stderr；普通错误退出码 `1`，
 
 ```bash
 # 帮助
-npm exec jdr -- help
+npm exec --package=. -- jdr help
 
 # 跑调研（默认策略 + 存库 + work_dir）
-npm exec jdr -- research "问题"
+npm exec --package=. -- jdr research "问题"
 
 # 机器可读输出
-npm exec jdr -- research "问题" --json --no-save
+npm exec --package=. -- jdr research "问题" --json --no-save
 
 # 取消：前台 Ctrl+C 一次（graceful），两次（force exit 130）
 
 # 查/改配置
-npm exec jdr -- config get
-npm exec jdr -- config set llm.model "gpt-4o-mini"
+npm exec --package=. -- jdr config get
+npm exec --package=. -- jdr config set llm.model "gpt-4o-mini"
 
 # 历史
-npm exec jdr -- history list
-npm exec jdr -- history show <id>
+npm exec --package=. -- jdr history list
+npm exec --package=. -- jdr history show <id>
 
 # Intel 归档
-npm exec jdr -- intel list
-npm exec jdr -- intel import --dry-run
-npm exec jdr -- intel show <researchId>
+npm exec --package=. -- jdr intel list
+npm exec --package=. -- jdr intel import --dry-run
+npm exec --package=. -- jdr intel show <researchId>
 
 # Wiki
-npm exec jdr -- wiki compile --research-id <id> --lint
-npm exec jdr -- wiki ask "问题" --vault wiki
+npm exec --package=. -- jdr wiki compile --research-id <id> --lint
+npm exec --package=. -- jdr wiki ask "问题" --vault wiki
 
 # Web 服务
-npm exec jdr -- serve --port 3000
+npm exec --package=. -- jdr serve --port 3000
 ```

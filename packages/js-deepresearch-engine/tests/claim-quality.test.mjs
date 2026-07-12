@@ -104,5 +104,7 @@ describe('quality metrics v2 verdict aggregation', () => {
     assert.equal(qualityGateFromClaims([supported]), 'pass');
     assert.equal(qualityGateFromClaims([partial]), 'pass_with_warnings');
     assert.equal(qualityGateFromClaims([conflict]), 'fail');
+    assert.equal(qualityGateFromClaims([]), 'fail');
+    assert.equal(qualityGateFromClaims([{ kind: 'caveat', evidence: [] }]), 'fail');
   });
 });

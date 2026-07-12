@@ -89,9 +89,7 @@ export async function runCliResearch({
       settings,
       signal: controller.signal,
       onProgress: ({ message, progress, level }) => {
-        if (!flags.json) {
-          onProgressLog(level, progress, message);
-        }
+        onProgressLog(level, progress, message);
       },
     });
 

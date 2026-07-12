@@ -242,6 +242,8 @@ export function calculateQualityMetrics(claims = []) {
 export function qualityGateFromClaims(claims = []) {
   const normalized = claims.map((claim) => normalizeClaim(claim));
   const keyClaims = normalized.filter((claim) => claim.kind === 'key_claim');
+  const facts = normalized.filter((claim) => FACT_CLAIM_KINDS.has(claim.kind));
+  if (facts.length === 0) return 'fail';
   if (keyClaims.length === 0) return 'pass_with_warnings';
   if (keyClaims.some((claim) => ['unsupported', 'conflicting'].includes(claim.evaluation.verdict))) return 'fail';
   if (keyClaims.some((claim) => ['partially_supported', 'unverifiable'].includes(claim.evaluation.verdict))) return 'pass_with_warnings';

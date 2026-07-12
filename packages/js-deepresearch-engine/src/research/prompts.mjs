@@ -16,7 +16,10 @@ export function questionPrompt({ query, count, mode = 'initial', context = '' })
   return [
     {
       role: 'system',
-      content: 'You are a research planner. Return only a JSON array of concise search questions.',
+      content: [
+        'You are a research planner. Return only a JSON array of concise search questions.',
+        'When the topic concerns software, open-source projects, standards, scientific claims, or product behavior, include at least one question aimed at primary sources such as official documentation, repositories, specifications, or papers.',
+      ].join(' '),
     },
     {
       role: 'user',
@@ -56,6 +59,17 @@ export function reportPrompt({ query, findings, limitations = [] }) {
         limitations.length ? `Quality constraints:\n${limitations.map((item) => `- ${item}`).join('\n')}\nDo not state these unsupported areas as established facts.` : '',
         `Collected evidence:\n${sourceBlock}`,
       ].filter(Boolean).join('\n\n'),
+    },
+  ];
+}
+
+export function reportRetryPrompt({ query, findings, limitations = [] }) {
+  const messages = reportPrompt({ query, findings, limitations });
+  return [
+    ...messages,
+    {
+      role: 'user',
+      content: 'The previous response contained no usable final report. Return the final Markdown report now. Do not return analysis, reasoning, JSON, or an empty response.',
     },
   ];
 }

@@ -19,7 +19,21 @@ export class ResearchRunner {
     const emit = createProgressEmitter(onProgress);
     const trace = [];
     const budget = new BudgetManager(settings, emit);
-    const { llm, search } = wrapProvidersWithBudget({ llm: rawLlm, search: rawSearch, budget });
+    const { llm, search } = wrapProvidersWithBudget({
+      llm: rawLlm,
+      search: rawSearch,
+      budget,
+      onLlmEvent: (event) => {
+        trace.push({
+          step: trace.length + 1,
+          action: 'llm_call',
+          reasonCode: event.purpose,
+          ...event,
+          createdAt: new Date().toISOString(),
+        });
+        emit({ stage: event.status === 'started' ? 'llm_call_started' : 'llm_call_finished', ...event });
+      },
+    });
     const sourceBased = resolveSourceBasedSettings(settings);
     const researchProviders = createResearchProviders(settings?.research?.providers || {});
     const queryMemory = new QueryMemory({
@@ -38,10 +52,14 @@ export class ResearchRunner {
       trace.push({ step: trace.length + 1, action: 'research_stopped', reasonCode: 'budget_exhausted', kind: error.kind, createdAt: new Date().toISOString() });
     }
 
-    let gaps = strategy === 'adaptive' ? buildGapsFromFindings(findings, query) : [];
-    const preReport = sourceBased.preReportGate.enabled
-      ? evaluatePreReport({ findings, gaps })
-      : { gate: 'pass', flags: [], criticalGaps: [], limitations: [], metrics: {} };
+    const tracksGaps = strategy === 'adaptive' || strategy === 'source-based';
+    let gaps = tracksGaps ? buildGapsFromFindings(findings, query) : [];
+    const preReport = evaluatePreReport({ findings, gaps, query });
+    const budgetBeforeReport = budget.snapshot();
+    const budgetLimitation = budgetBeforeReport.stopReason
+      ? `The ${budgetBeforeReport.stopReason} budget was exhausted; remaining research actions were not scheduled.`
+      : null;
+    const reportLimitations = [...preReport.limitations, ...(budgetLimitation ? [budgetLimitation] : [])];
     if (sourceBased.preReportGate.blockUnsupportedClaims && preReport.gate === 'fail') {
       const error = new Error(`Research quality gate failed: ${preReport.flags.join(', ')}`);
       error.name = 'ResearchQualityError';
@@ -49,8 +67,20 @@ export class ResearchRunner {
     }
     emit({ stage: 'synthesizing_report' });
     let report = await buildReport({
-      llm, query, findings, signal, purpose: 'report', limitations: preReport.limitations,
+      llm, query, findings, signal, purpose: 'report', limitations: reportLimitations,
       maxTokens: budget.limits.llmTokens > 0 ? budget.reserveReportTokens : undefined,
+      minChars: settings?.research?.reportValidation?.minChars,
+      maxAttempts: settings?.research?.reportValidation?.maxAttempts,
+      onAttempt: (event) => {
+        trace.push({
+          step: trace.length + 1,
+          action: event.status === 'invalid' ? 'report_retry_requested' : 'draft',
+          reasonCode: event.status === 'invalid' ? event.flags?.[0] : `report_attempt_${event.status}`,
+          ...event,
+          createdAt: new Date().toISOString(),
+        });
+        if (event.status === 'invalid') emit({ stage: 'report_retrying', ...event });
+      },
     });
     const evidenceOptions = strategy === 'adaptive'
       ? { ...sourceBased.evidencePassages, enabled: true, claimAlignment: true }
@@ -58,7 +88,7 @@ export class ResearchRunner {
     if (evidenceOptions.enabled) emit({ stage: 'extracting_passages' });
     const evidence = buildEvidenceArtifacts({ query, findings, report, options: evidenceOptions });
     findings = evidence.findings;
-    gaps = strategy === 'adaptive' ? buildGapsFromFindings(findings, query) : [];
+    gaps = tracksGaps ? buildGapsFromFindings(findings, query) : [];
     if (evidenceOptions.claimAlignment) {
       emit({ stage: 'evaluating_report' });
       trace.push({ step: trace.length + 1, action: 'evaluate_report', reasonCode: 'claim_evidence_alignment', createdAt: new Date().toISOString() });
@@ -72,7 +102,8 @@ export class ResearchRunner {
     if (unverifiedKeyClaims.length && !/## Evidence limitations/i.test(report)) {
       report += `\n\n## Evidence limitations\n\n${unverifiedKeyClaims.map((claim) => `- Insufficient direct evidence for: ${claim.text}`).join('\n')}`;
     }
-    const finalGate = preReport.gate === 'fail' || claimGate === 'fail'
+    const noClaims = evidenceOptions.claimAlignment && evidence.claims.length === 0;
+    const finalGate = preReport.gate === 'fail' || claimGate === 'fail' || noClaims
       ? 'fail'
       : (preReport.gate === 'pass_with_warnings' || claimGate === 'pass_with_warnings' ? 'pass_with_warnings' : 'pass');
     const quality = {
@@ -82,8 +113,18 @@ export class ResearchRunner {
       claimEvaluationVersion: qualityMetrics.claimEvaluationVersion,
       ...preReport,
       gate: finalGate,
-      flags: [...preReport.flags, ...(unverifiedKeyClaims.length ? ['unverified_key_claims'] : [])],
-      limitations: [...preReport.limitations, ...unverifiedKeyClaims.map((claim) => `Insufficient direct evidence for: ${claim.text}`)],
+      flags: [
+        ...preReport.flags,
+        ...(budgetLimitation ? ['budget_exhausted'] : []),
+        ...(noClaims ? ['no_claims'] : []),
+        ...(unverifiedKeyClaims.length ? ['unverified_key_claims'] : []),
+      ],
+      limitations: [
+        ...preReport.limitations,
+        ...(budgetLimitation ? [budgetLimitation] : []),
+        ...(noClaims ? ['No evaluable claims could be extracted from the report.'] : []),
+        ...unverifiedKeyClaims.map((claim) => `Insufficient direct evidence for: ${claim.text}`),
+      ],
       metrics: {
         ...preReport.metrics,
         ...qualityMetrics,
@@ -110,16 +151,34 @@ export class ResearchRunner {
 }
 
 function buildGapsFromFindings(findings, query) {
-  return findings.map((finding, index) => ({
-    id: finding.gapId || `gap-${index + 1}`,
-    question: finding.question || query,
-    parentId: index === 0 ? null : 'gap-1',
-    depth: index === 0 ? 0 : 1,
-    status: (finding.sources || []).length ? 'resolved' : 'deferred',
-    priority: index === 0 ? 'critical' : 'normal',
-    reason: (finding.sources || []).length ? 'Usable sources found.' : 'No usable sources found.',
-    findingIds: finding.id ? [finding.id] : [],
-    createdAtStep: 1,
-    resolvedAtStep: (finding.sources || []).length ? index + 1 : null,
-  }));
+  const gaps = new Map();
+  for (const [index, finding] of findings.entries()) {
+    const question = String(finding.question || query).trim();
+    const key = question.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ');
+    const resolved = (finding.sources || []).length > 0;
+    const existing = gaps.get(key);
+    if (existing) {
+      if (finding.id && !existing.findingIds.includes(finding.id)) existing.findingIds.push(finding.id);
+      if (resolved) {
+        existing.status = 'resolved';
+        existing.reason = 'Usable sources found.';
+        existing.resolvedAtStep ??= index + 1;
+      }
+      continue;
+    }
+    const gapIndex = gaps.size;
+    gaps.set(key, {
+      id: finding.gapId || `gap-${gapIndex + 1}`,
+      question,
+      parentId: gapIndex === 0 ? null : 'gap-1',
+      depth: gapIndex === 0 ? 0 : 1,
+      status: resolved ? 'resolved' : 'open',
+      priority: gapIndex === 0 || question === query ? 'critical' : 'normal',
+      reason: resolved ? 'Usable sources found.' : 'No usable sources found.',
+      findingIds: finding.id ? [finding.id] : [],
+      createdAtStep: 1,
+      resolvedAtStep: resolved ? index + 1 : null,
+    });
+  }
+  return [...gaps.values()];
 }

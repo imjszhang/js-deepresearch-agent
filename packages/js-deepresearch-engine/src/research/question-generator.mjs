@@ -5,6 +5,7 @@ export async function generateQuestions({ llm, query, count, signal, mode = 'ini
     messages: questionPrompt({ query, count, mode, context }),
     signal,
     temperature: 0.1,
+    purpose: 'question_generation',
   });
 
   const parsed = parseJsonArray(raw);

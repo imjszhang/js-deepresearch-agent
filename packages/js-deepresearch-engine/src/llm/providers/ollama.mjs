@@ -3,7 +3,12 @@ export class OllamaProvider {
     this.config = config;
   }
 
-  async complete({ messages, signal, temperature }) {
+  async complete(args) {
+    const result = await this.completeWithMetadata(args);
+    return result.text;
+  }
+
+  async completeWithMetadata({ messages, signal, temperature }) {
     const baseUrl = (this.config.baseUrl || 'http://127.0.0.1:11434').replace(/\/$/, '');
     const response = await fetch(`${baseUrl}/api/chat`, {
       method: 'POST',
@@ -28,6 +33,13 @@ export class OllamaProvider {
     }
 
     const data = await response.json();
-    return data.message?.content?.trim() || '';
+    return {
+      text: data.message?.content?.trim() || '',
+      usage: Number.isFinite(data.prompt_eval_count) || Number.isFinite(data.eval_count)
+        ? { totalTokens: Number(data.prompt_eval_count || 0) + Number(data.eval_count || 0) }
+        : undefined,
+      finishReason: data.done_reason || null,
+      metadata: { responseFields: Object.keys(data), hasContent: Boolean(data.message?.content?.trim()) },
+    };
   }
 }

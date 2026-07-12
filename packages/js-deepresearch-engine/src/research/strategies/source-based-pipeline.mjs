@@ -26,11 +26,13 @@ export async function runSourceBasedPipeline(context) {
     settings,
     budget,
     queryMemory,
+    trace = [],
   } = context;
 
   const sourceBased = resolveSourceBasedSettings(settings);
   const resolvedConcurrency = resolveStrategyConcurrency(search, concurrency, questionCount + 1);
   const findings = [];
+  let focusedQuestions = [];
 
   const iterationLimit = sourceBased.adaptiveControl.enabled
     ? Math.max(sourceBased.adaptiveControl.minIterations, sourceBased.adaptiveControl.maxIterations)
@@ -49,7 +51,7 @@ export async function runSourceBasedPipeline(context) {
       iterations: iterationLimit,
     });
 
-    const questions = await generateQuestions({
+    const generatedQuestions = await generateQuestions({
       llm,
       query,
       count: questionCount,
@@ -57,6 +59,9 @@ export async function runSourceBasedPipeline(context) {
       mode: iteration === 1 ? 'initial' : 'followup',
       context: priorContext,
     });
+    const questions = [...focusedQuestions, ...generatedQuestions]
+      .filter((question, index, all) => all.indexOf(question) === index)
+      .slice(0, questionCount);
 
     const iterationQuestions = iteration === 1 ? [query, ...questions] : questions;
 
@@ -114,10 +119,22 @@ export async function runSourceBasedPipeline(context) {
 
     if (sourceBased.adaptiveControl.enabled) {
       const gate = evaluateEvidenceSufficiency({ findings, iteration, minIterations: sourceBased.adaptiveControl.minIterations, query });
+      focusedQuestions = gate.recommendedQuestions;
+      trace.push({
+        step: trace.length + 1,
+        action: 'evaluate_gap',
+        reasonCode: gate.decision,
+        iteration,
+        flags: gate.flags,
+        criticalGaps: gate.criticalGaps,
+        recommendedQuestions: gate.recommendedQuestions,
+        method: gate.method,
+        createdAt: new Date().toISOString(),
+      });
       emit({ stage: 'evaluating_evidence', iteration, iterations: iterationLimit, decision: gate.decision, flags: gate.flags });
       if (gate.decision === 'stop' && sourceBased.adaptiveControl.earlyStop) break;
       if (gate.criticalGaps.length && !sourceBased.adaptiveControl.continueOnCriticalGaps) break;
-      if (!budget?.canClaim('searchRequests') && iteration < iterationLimit) break;
+      if (budget && !budget.canClaim('searchRequests') && iteration < iterationLimit) break;
     }
   }
 

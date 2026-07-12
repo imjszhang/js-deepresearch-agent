@@ -141,6 +141,10 @@ Schema v3 results retain `report`, `findings`, and `sources` and add `gaps`, `pa
 
 Quality metrics v2 classify report statements as fact claims, caveats, recommendations, source entries, or metadata. Only key/supporting fact claims enter support-rate denominators. Every fact claim receives one aggregate verdict, including `conflicting` for contradictory evidence; zero-denominator rates are `null`. Artifacts record the metrics, extraction, and evaluation versions so benchmarks can distinguish stored evaluation from a new runtime judgment.
 
+Report synthesis validates non-empty Markdown output with `research.reportValidation.minChars` (default `200`) and `maxAttempts` (default `2`). Invalid output is retried with a final-answer-only prompt, then raises `ReportGenerationError` instead of returning a completed run. Structured LLM telemetry records only safe operational metadata. Source-based runs also emit gaps and rule-based limitations, focus follow-up searches on missing primary evidence, and only build direct passages from source bodies whose fetch completed successfully.
+
+Some Qwen OpenAI-compatible servers spend bounded completion tokens in a `reasoning` field and return empty final `content`. The built-in adapter automatically requests `reasoning_effort: none` for Qwen models, preserves token/finish metadata, and records only whether a reasoning field existed—not its contents.
+
 ## Built-in LLM Providers
 
 - `openai-compatible` — any OpenAI-compatible chat completions API

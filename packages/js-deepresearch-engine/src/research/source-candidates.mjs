@@ -18,6 +18,27 @@ function hostname(value) {
   try { return new URL(value).hostname.toLowerCase().replace(/^www\./, ''); } catch { return ''; }
 }
 
+const PRIMARY_HOSTS = /(?:^|\.)(?:github\.com|gitlab\.com|codeberg\.org|arxiv\.org|doi\.org)$/;
+const SECONDARY_HOSTS = /(?:^|\.)(?:csdn\.net|zhihu\.com|163\.com|qq\.com|cnblogs\.com)$/;
+
+export function isPrimarySource(source = {}) {
+  const host = hostname(source.url);
+  const title = titleKey(source.title);
+  if (PRIMARY_HOSTS.test(host)) return true;
+  if (/^(?:docs|developer|support)\./.test(host) && !SECONDARY_HOSTS.test(host)
+    && /\b(?:official|documentation|docs|api|reference|specification)\b|官方|文档|规范|接口参考/.test(title)) return true;
+  return !SECONDARY_HOSTS.test(host)
+    && /\b(?:official|documentation|repository|specification|paper)\b|官方(?:文档|仓库|网站)|源代码|论文/.test(title);
+}
+
+function sourceAuthorityScore(source) {
+  const host = hostname(source.url);
+  if (isPrimarySource(source)) return 0.8;
+  if (SECONDARY_HOSTS.test(host)) return -0.15;
+  if (/(?:^|\.)(?:gov|edu)\.[a-z]+$/.test(host)) return 0.35;
+  return 0;
+}
+
 function titleKey(value = '') {
   return String(value).normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 }
@@ -85,6 +106,11 @@ export class SourceCandidatePool {
     existing.weight += weight;
     existing.title ||= source?.title || '';
     existing.snippet ||= source?.snippet || '';
+    if (!existing.summary || String(source?.summary || '').length > String(existing.summary || '').length) existing.summary = source?.summary || existing.summary;
+    if (!existing.content || String(source?.content || '').length > String(existing.content || '').length) existing.content = source?.content || existing.content;
+    if (source?.fetchStatus === 'ok' || !existing.fetchStatus) existing.fetchStatus = source?.fetchStatus || existing.fetchStatus;
+    if (source?.contentOrigin) existing.contentOrigin = source.contentOrigin;
+    if (source?.fetchError && !existing.fetchError) existing.fetchError = source.fetchError;
     this.candidates.set(key, existing);
     return existing;
   }
@@ -105,9 +131,9 @@ export class SourceCandidatePool {
     const ranked = [...this.candidates.values()].filter((item) => !blocked.has(hostname(item.url))).map((item) => {
       const host = hostname(item.url);
       const relevance = Math.max(0, ...item.queries.map((query) => lexicalScore(query, item)));
-      const authority = /(?:^|\.)(?:gov|edu)\.[a-z]+$/.test(host) || /^(?:docs|developer|support)\./.test(host) ? 0.3 : 0;
+      const authority = sourceAuthorityScore(item);
       const score = relevance + freshnessScore(item) * 0.25 + Math.min(item.hits, 3) * 0.1 + authority + (boosted.has(host) ? 0.5 : 0);
-      return { ...item, score };
+      return { ...item, sourceKind: isPrimarySource(item) ? 'primary' : 'secondary', score };
     }).sort((a, b) => {
       const aPenalty = this.hostFailures.get(hostname(a.url)) || 0;
       const bPenalty = this.hostFailures.get(hostname(b.url)) || 0;

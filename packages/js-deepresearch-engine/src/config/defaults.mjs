@@ -24,6 +24,10 @@ export const defaultSettings = Object.freeze({
     questionsPerIteration: 2,
     concurrency: 1,
     workDir: 'work_dir',
+    reportValidation: {
+      minChars: 200,
+      maxAttempts: 2,
+    },
     budget: {
       maxLlmTokens: 0,
       maxSearchRequests: 10,
@@ -103,6 +107,10 @@ export function mergeSettings(overrides = {}) {
       budget: {
         ...defaultSettings.research.budget,
         ...(overrides.research?.budget || {}),
+      },
+      reportValidation: {
+        ...defaultSettings.research.reportValidation,
+        ...(overrides.research?.reportValidation || {}),
       },
       sourceBased: {
         ...defaultSettings.research.sourceBased,
