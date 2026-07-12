@@ -100,7 +100,7 @@ export function normalizeJsEyesSearchConfig(config = {}) {
     provider,
   };
 
-  for (const [key, value] of Object.entries(legacy)) {
+  for (const key of Object.keys(legacy)) {
     if (options[key] !== undefined) {
       merged[key] = options[key];
     }

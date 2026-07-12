@@ -27,6 +27,19 @@ async function main(argv) {
     return;
   }
 
+  if (flags.compare) {
+    const ids = String(flags.compare).split(',').map((id) => id.trim()).filter(Boolean);
+    if (ids.length < 2) throw new Error('--compare requires at least two comma-separated research IDs');
+    const results = [];
+    for (const id of ids) {
+      results.push(await runBenchmark({ researchId: id, strictPlatform: flags['strict-platform'] || null, llm: null, llmEnabled: false }));
+    }
+    const queries = [...new Set(results.map((result) => result.query).filter(Boolean))];
+    const comparison = { query: queries.length === 1 ? queries[0] : null, warnings: queries.length > 1 ? ['Compared runs have different queries.'] : [], runs: results.map((result) => ({ researchId: result.researchId, strategy: result.strategy, metrics: result.metrics, artifactsHealth: result.artifactsHealth })) };
+    console.log(flags.json ? JSON.stringify(comparison, null, 2) : comparison.runs.map((run) => `- ${run.researchId} (${run.strategy}): ${JSON.stringify(run.metrics)}`).join('\n'));
+    return;
+  }
+
   const { workDir, researchId } = resolveBenchmarkTarget({ args, flags });
 
   const llmEnabled = !flags['no-llm'];
@@ -64,6 +77,7 @@ Usage:
 
 Options:
   --research-id <id>       Load artifacts from js-intel-store by researchId
+  --compare <id1,id2>      Compare archived runs without re-running research
   --json                   JSON output
   --no-llm                 Disable LLM judge
   --strict-platform <id>   e.g. js-eyes:zhihu

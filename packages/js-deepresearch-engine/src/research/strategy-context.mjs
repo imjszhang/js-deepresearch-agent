@@ -20,7 +20,7 @@ function withProgressProfile(emit, progressProfile) {
  * @param {import('../types.mjs').StrategyRunInput} input
  * @returns {import('../types.mjs').StrategyContext}
  */
-export function buildStrategyContext({ query, settings, llm, search, signal, emit, progressProfile }) {
+export function buildStrategyContext({ query, settings, llm, search, signal, emit, progressProfile, budget, queryMemory, trace }) {
   return {
     query,
     iterations: positiveInteger(settings?.research?.iterations, 1),
@@ -32,5 +32,8 @@ export function buildStrategyContext({ query, settings, llm, search, signal, emi
     emit: withProgressProfile(emit, progressProfile),
     progressProfile,
     settings,
+    budget,
+    queryMemory,
+    trace,
   };
 }

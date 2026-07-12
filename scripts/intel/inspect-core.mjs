@@ -16,6 +16,8 @@ export function listArchivedRuns(engine = getIntelStoreEngine(), { limit = 50 } 
       status: run.status,
       sourcesCount: run.sourcesCount ?? 0,
       findingsCount: run.findingsCount ?? 0,
+      passagesCount: run.passagesCount ?? 0,
+      claimsCount: run.claimsCount ?? 0,
       sessionDir: run.sessionDir,
       archivedAt: run.archivedAt ?? run.last_seen ?? run.first_seen,
     }));
@@ -30,6 +32,11 @@ export function showArchivedRun(researchId, engine = getIntelStoreEngine()) {
   const reportMeta = engine.readSource('research_reports', { name: researchId });
   const findings = engine.readSource('research_findings', { entity_id: researchId }) || [];
   const sources = engine.readSource('research_sources', { entity_id: researchId }) || [];
+  const safeCount = (name) => {
+    try { return (engine.readSource(name, { entity_id: researchId }) || []).length; } catch { return 0; }
+  };
+  let quality = null;
+  try { quality = engine.readSource('research_quality', { name: researchId }); } catch { /* v2 */ }
 
   return {
     researchId: run.name,
@@ -41,6 +48,11 @@ export function showArchivedRun(researchId, engine = getIntelStoreEngine()) {
     reportLength: reportMeta?.reportLength ?? run.reportLength,
     findingsCount: findings.length,
     sourcesCount: sources.length,
+    gapsCount: safeCount('research_gaps'),
+    passagesCount: safeCount('research_passages'),
+    claimsCount: safeCount('research_claims'),
+    qualityGate: quality?.gate ?? null,
+    archiveSchemaVersion: run.archiveSchemaVersion ?? 2,
     archivedAt: run.archivedAt ?? run.last_seen ?? run.first_seen,
     settings: run.settings ?? {},
   };
@@ -49,7 +61,8 @@ export function showArchivedRun(researchId, engine = getIntelStoreEngine()) {
 export function listArchivedSources(researchId, engine = getIntelStoreEngine(), { limit = 20 } = {}) {
   const sources = engine.readSource('research_sources', { entity_id: researchId }) || [];
   return sources.slice(0, limit).map((source) => {
-    const { _post_id, _entity_id, dedup_id, ...rest } = source;
+    const rest = { ...source };
+    for (const key of ['_post_id', '_entity_id', 'dedup_id']) delete rest[key];
     return {
       title: rest.title ?? '',
       url: rest.url ?? '',

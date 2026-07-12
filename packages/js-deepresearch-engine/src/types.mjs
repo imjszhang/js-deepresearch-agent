@@ -42,6 +42,8 @@
  * @property {number} [concurrency]
  * @property {string} [workDir]
  * @property {SourceBasedSettings} [sourceBased]
+ * @property {Record<string, number>} [budget]
+ * @property {Record<string, unknown>} [adaptive]
  */
 
 /**
@@ -83,7 +85,7 @@
 
 /**
  * @typedef {Object} StrategyProgressEvent
- * @property {'research_started'|'synthesizing_report'|'research_complete'|'generating_questions'|'searching'|'search_item_complete'|'search_progress'|'enriching_sources'|'filtering_sources'} stage
+ * @property {string} stage
  * @property {number} [iteration]
  * @property {number} [iterations]
  * @property {number} [completed]
@@ -132,6 +134,9 @@
  * @property {(input: string|StrategyProgressEvent, progress?: number, level?: 'info'|'error') => void} emit
  * @property {StrategyProgressProfile} [progressProfile]
  * @property {Settings} [settings]
+ * @property {import('./research/budget-manager.mjs').BudgetManager} [budget]
+ * @property {import('./research/query-memory.mjs').QueryMemory} [queryMemory]
+ * @property {Array<Record<string, unknown>>} [trace]
  */
 
 /**

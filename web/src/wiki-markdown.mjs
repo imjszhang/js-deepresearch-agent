@@ -39,7 +39,7 @@ function stripCodeSpans(markdown) {
 }
 
 function restoreCodeSpans(text, placeholders) {
-  return text.replace(/\u0000CODE(\d+)\u0000/g, (_, index) => placeholders[Number(index)] ?? '');
+  return text.replace(new RegExp(`${String.fromCharCode(0)}CODE(\\d+)${String.fromCharCode(0)}`, 'g'), (_, index) => placeholders[Number(index)] ?? '');
 }
 
 export function wikilinksToMarkdownLinks(markdown) {

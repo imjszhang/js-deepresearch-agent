@@ -3,6 +3,7 @@ import { apiGet, apiSend } from './api.mjs';
 import { renderNav } from './nav.mjs';
 
 const app = document.querySelector('#app');
+let loadedSettings = null;
 
 main().catch((error) => {
   app.innerHTML = `<main class="shell"><p>${error.message}</p></main>`;
@@ -15,6 +16,7 @@ async function main() {
     apiGet('/api/search-engines'),
     apiGet('/api/strategies'),
   ]);
+  loadedSettings = settings;
 
   app.innerHTML = `
     <main class="shell">
@@ -69,6 +71,20 @@ async function main() {
             <label for="concurrency">Concurrency</label>
             <input id="concurrency" type="number" min="1" max="8" value="${settings.research.concurrency}" />
           </div>
+          <div>
+            <label for="maxSearchRequests">Max search requests (0 = unlimited)</label>
+            <input id="maxSearchRequests" type="number" min="0" value="${settings.research.budget?.maxSearchRequests ?? 0}" />
+          </div>
+          <div>
+            <label for="maxSourceReads">Max source reads (0 = unlimited)</label>
+            <input id="maxSourceReads" type="number" min="0" value="${settings.research.budget?.maxSourceReads ?? 0}" />
+          </div>
+          <div>
+            <label><input id="adaptiveControl" type="checkbox" ${settings.research.sourceBased?.adaptiveControl?.enabled ? 'checked' : ''} /> Adaptive iteration control</label>
+          </div>
+          <div>
+            <label><input id="evidencePassages" type="checkbox" ${settings.research.sourceBased?.evidencePassages?.enabled ? 'checked' : ''} /> Passage-level evidence (experimental)</label>
+          </div>
         </div>
 
         <p><button type="submit">Start research</button></p>
@@ -97,22 +113,44 @@ async function submitResearch(event) {
 function collectSettings() {
   return {
     llm: {
+      ...(loadedSettings?.llm || {}),
       provider: value('#provider'),
       model: value('#model'),
       baseUrl: value('#baseUrl'),
       apiKey: value('#apiKey'),
     },
     search: {
+      ...(loadedSettings?.search || {}),
       engine: value('#searchEngine'),
       baseUrl: value('#searchBaseUrl'),
     },
     research: {
+      ...(loadedSettings?.research || {}),
       strategy: value('#strategy'),
       questionsPerIteration: Number(value('#questions') || 3),
       iterations: Number(value('#iterations') || 2),
       concurrency: Number(value('#concurrency') || 2),
+      budget: {
+        ...currentResearchBudget(),
+        ...(loadedSettings?.research?.budget || {}),
+        maxSearchRequests: Number(value('#maxSearchRequests') || 0),
+        maxSourceReads: Number(value('#maxSourceReads') || 0),
+      },
+      sourceBased: {
+        ...(loadedSettings?.research?.sourceBased || {}),
+        adaptiveControl: { ...(loadedSettings?.research?.sourceBased?.adaptiveControl || {}), enabled: checked('#adaptiveControl') },
+        evidencePassages: { ...(loadedSettings?.research?.sourceBased?.evidencePassages || {}), enabled: checked('#evidencePassages'), claimAlignment: checked('#evidencePassages') },
+      },
     },
   };
+}
+
+function currentResearchBudget() {
+  return { maxLlmTokens: 0, maxEstimatedCost: 0, reserveReportTokens: 1200 };
+}
+
+function checked(selector) {
+  return document.querySelector(selector).checked;
 }
 
 function value(selector) {

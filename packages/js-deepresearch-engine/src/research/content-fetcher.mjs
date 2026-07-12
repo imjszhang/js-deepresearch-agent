@@ -19,6 +19,17 @@ function extractTitle(html = '') {
   return match ? stripHtml(match[1]) : '';
 }
 
+function extractLinks(html = '', baseUrl = '') {
+  const links = [];
+  for (const match of String(html).matchAll(/<a\b[^>]*href=["']([^"']+)["'][^>]*>/gi)) {
+    try {
+      const url = new URL(match[1], baseUrl);
+      if (/^https?:$/.test(url.protocol)) links.push(url.toString());
+    } catch { /* ignore malformed links */ }
+  }
+  return [...new Set(links)];
+}
+
 export async function fetchUrlContent(url, { signal, maxChars = 8000, timeoutMs = 15000 } = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -26,7 +37,9 @@ export async function fetchUrlContent(url, { signal, maxChars = 8000, timeoutMs 
   if (signal) {
     if (signal.aborted) {
       clearTimeout(timeout);
-      throw new Error('Research aborted');
+      const error = new Error('Research aborted');
+      error.name = 'AbortError';
+      throw error;
     }
     signal.addEventListener('abort', () => controller.abort(), { once: true });
   }
@@ -51,6 +64,7 @@ export async function fetchUrlContent(url, { signal, maxChars = 8000, timeoutMs 
     const contentType = response.headers.get('content-type') || '';
     const raw = await response.text();
     const title = extractTitle(raw) || url;
+    const links = contentType.includes('html') ? extractLinks(raw, url) : [];
     let content = contentType.includes('html') ? stripHtml(raw) : raw.trim();
 
     if (content.length > maxChars) {
@@ -68,6 +82,7 @@ export async function fetchUrlContent(url, { signal, maxChars = 8000, timeoutMs 
       status: 'ok',
       title,
       content,
+      links,
     };
   } catch (error) {
     if (error?.name === 'AbortError') throw error;

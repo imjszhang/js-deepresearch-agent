@@ -131,6 +131,13 @@ The engine does not read `.env` files or persist settings. Callers are responsib
 - `rapid` — original query plus a few fast follow-up searches
 - `source-based` — iterative, source-informed follow-up questions (default)
 - `parallel` — broad coverage with controlled concurrency
+- `adaptive` — experimental, budgeted gap-driven state machine with structured trace output
+
+## Research Controls and Schema v3
+
+All behavior-changing controls are disabled by default. `research.budget` caps LLM tokens, searches, source reads, and estimated cost; zero means unlimited. `research.sourceBased.adaptiveControl`, `queryMemory`, `sourceSelection`, `evidencePassages`, and `preReportGate` can be enabled independently.
+
+Schema v3 results retain `report`, `findings`, and `sources` and add `gaps`, `passages`, `claims`, `quality`, and a structured `trace`. Passage and claim generation only runs when enabled; stable finding/source IDs and the quality/budget summary remain available for downstream archives. Semantic helpers use pluggable research providers and deterministic local fallbacks.
 
 ## Built-in LLM Providers
 

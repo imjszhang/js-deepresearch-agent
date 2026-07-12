@@ -484,6 +484,7 @@ node scripts/benchmark-research.mjs --research-id imported__source-based__2026-0
 | `--json` | 输出机器可读 JSON |
 | `--no-llm` | 仅规则层评分，不调用 LLM |
 | `--strict-platform` | 要求引用来源的 `engine` 匹配指定值，如 `js-eyes:zhihu` |
+| `--compare <id1,id2>` | 横向比较多个 Intel Store run 的质量、证据、成本指标，不重新调研 |
 
 输入需包含 `report.md`、`findings.json`、`sources.json`、`meta.json`（目录或 intel 归档均可）。脚本会：
 
@@ -538,12 +539,20 @@ node scripts/benchmark-research.mjs --research-id imported__source-based__2026-0
 | `rapid` | 快 | 浅 | 快速概览；不支持多轮 `iterations` |
 | `source-based` | 均衡 | 深 | **默认**；基于来源迭代追问；可选 URL 正文/摘要 enrichment |
 | `parallel` | 快 | 广 | 大量并行子问题，覆盖面广 |
+| `adaptive` | 可变 | 深 | **实验性**；受预算与最大步数约束的 gap 驱动状态机 |
 
 Agent 选型建议：
 
 - 用户要**快速答案** → `--strategy rapid`
 - 用户要**引用与深度** → `--strategy source-based`（默认）
 - 用户要**广泛扫描** → `--strategy parallel`，可适当提高 `--concurrency`
+- 用户要**实验性自适应研究** → `--strategy adaptive`；默认策略仍为 `source-based`
+
+### 研究控制与 Schema v3
+
+预算、查询记忆、来源聚类、轮间 gate、片段证据和 claim 对齐默认关闭。单次实验优先使用 `--max-llm-tokens`、`--max-search-requests`、`--max-source-reads`、`--reserve-report-tokens`、`--source-adaptive-control`、`--source-query-memory`、`--source-cluster-results`、`--source-max-per-hostname`、`--source-evidence-passages`、`--source-claim-alignment` 与 `--source-pre-report-gate`；boolean flag 应显式传 `true`/`false`。
+
+Schema v3 在旧四件套之外写入 `gaps.json`、`passages.json`、`claims.json`、`quality.json`、`trace.json`。Intel Store 继续读取 v2；`intel import --upgrade-existing` 可从有正文的旧产物派生 passage/claim，不能从 snippet 伪造正文证据。Wiki 会为 v3 生成 `Evidence/` 与 `Open Questions/` 页面。
 
 ### Source-Based 深度阅读（可选）
 

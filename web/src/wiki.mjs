@@ -362,7 +362,7 @@ function bindHandlers(vaultDir) {
 
   document.querySelector('.wiki-path')?.addEventListener('click', async () => {
     try {
-      await navigator.clipboard.writeText(vaultDir);
+      await globalThis.navigator.clipboard.writeText(vaultDir);
       statusEl.textContent = 'Vault path copied to clipboard.';
     } catch {
       statusEl.textContent = vaultDir;

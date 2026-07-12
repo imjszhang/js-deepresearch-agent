@@ -1,4 +1,4 @@
-const INVALID_CHARS = /[<>:"/\\|?*#^\[\]]/g;
+const INVALID_CHARS = /[<>:"/\\|?*#^[\]]/g;
 
 export function safeObsidianFilename(title, { maxLength = 120 } = {}) {
   const cleaned = String(title ?? 'Untitled')

@@ -45,6 +45,11 @@ export class JobRunner {
         signal: controller.signal,
         onProgress: (event) => this.emitLog(id, event),
       });
+      const budget = result.quality?.budget?.usage || {};
+      this.emitLog(id, {
+        message: `Quality: ${result.quality?.gate || 'unknown'}; gaps=${result.gaps?.filter((gap) => gap.status === 'resolved').length || 0}/${result.gaps?.length || 0}; searches=${budget.searchRequests || 0}; reads=${budget.sourceReads || 0}`,
+        progress: 99,
+      });
 
       this.sourceRepository.addMany(id, result.sources);
       const artifacts = saveResearchToWorkDir({

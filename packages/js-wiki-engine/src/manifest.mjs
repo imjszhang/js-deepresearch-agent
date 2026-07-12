@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 export const MANIFEST_VERSION = '0.1.0';
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export function manifestPath(vaultDir) {
   return path.join(vaultDir, 'manifest.json');
@@ -28,8 +28,20 @@ export function createEmptyManifest() {
     compiledAt: null,
     sources: {},
     topics: {},
+    claims: {},
+    passages: {},
+    gaps: {},
     pages: {},
   };
+}
+
+export function shouldRecompileEntity(manifest, kind, id, hash) {
+  return manifest[kind]?.[id]?.hash !== hash;
+}
+
+export function recordEntityCompile(manifest, kind, id, hash, pages) {
+  manifest[kind] ||= {};
+  manifest[kind][id] = { hash, pages: [...pages], updatedAt: new Date().toISOString() };
 }
 
 export function shouldRecompileSource(manifest, sourceId, hash) {

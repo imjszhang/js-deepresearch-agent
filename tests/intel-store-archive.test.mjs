@@ -51,6 +51,11 @@ describe('intel store archive', () => {
           { title: 'B', url: 'https://a.test', snippet: 'dup' },
           { title: 'C', url: '', snippet: 'no url' },
         ],
+        gaps: [{ id: 'gap-1', question: 'Q1', status: 'resolved' }],
+        passages: [{ id: 'passage-1', sourceId: 'source-1', contentHash: 'hash-1', text: 'Evidence' }],
+        claims: [{ id: 'claim-1', text: 'Claim', evidence: [{ passageId: 'passage-1', sourceId: 'source-1', verdict: 'supported' }] }],
+        quality: { schemaVersion: 3, gate: 'pass', flags: [] },
+        trace: [{ step: 1, action: 'search', reasonCode: 'test' }],
       },
       artifacts: {
         sessionDir,
@@ -91,6 +96,26 @@ describe('intel store archive', () => {
     assert.equal(loaded.findings.length, 1);
     assert.equal(loaded.sources.length, 2);
     assert.equal(loaded.report, '# Report\n\nDone.');
+    assert.equal(loaded.gaps.length, 1);
+    assert.equal(loaded.passages.length, 1);
+    assert.equal(loaded.claims.length, 1);
+    assert.equal(loaded.quality.gate, 'pass');
+    assert.equal(loaded.trace.length, 1);
+
+    archiveResearchResult({
+      researchId: 'run-1', query: 'What is LLM Wiki?', strategy: 'source-based',
+      result: {
+        report: '# Report\n\nDone.',
+        findings: [{ question: 'Q1', iteration: 1, sources: [] }],
+        sources: [], gaps: [{ id: 'gap-1', question: 'Q1' }],
+        passages: [{ id: 'passage-1', sourceId: 'source-1', contentHash: 'hash-1', text: 'Evidence' }],
+        claims: [{ id: 'claim-1', text: 'Claim', evidence: [] }], trace: [],
+      },
+      engine,
+    });
+    assert.equal(engine.readSource('research_passages', { entity_id: 'run-1' }).length, 1);
+    assert.equal(engine.readSource('research_claims', { entity_id: 'run-1' }).length, 1);
+    assert.equal(engine.readSource('research_findings', { entity_id: 'run-1' }).length, 1);
   });
 
   it('loads inline report when work_dir report file is missing', () => {
@@ -115,6 +140,19 @@ describe('intel store archive', () => {
 
     const loaded = readArchivedResearch('portable-run', engine);
     assert.equal(loaded.report, '# Portable\n\nInline report body.');
+  });
+
+  it('reads legacy v2 archives with empty Schema v3 collections', () => {
+    const baseDir = makeTempRoot();
+    const engine = createIntelStoreEngine({ baseDir: path.join(baseDir, 'intel') });
+    engine.ingest('research_runs', { name: 'legacy-v2', query: 'legacy', strategy: 'source-based', archiveSchemaVersion: 2, status: 'completed' });
+    engine.ingest('research_reports', { name: 'legacy-v2', report: '# Legacy' });
+    const loaded = readArchivedResearch('legacy-v2', engine);
+    assert.deepEqual(loaded.gaps, []);
+    assert.deepEqual(loaded.passages, []);
+    assert.deepEqual(loaded.claims, []);
+    assert.equal(loaded.quality.schemaVersion, 2);
+    assert.equal(loaded.report, '# Legacy');
   });
 
   it('sourceDedupId falls back to content hash then unknown index', () => {

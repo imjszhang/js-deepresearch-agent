@@ -2,11 +2,13 @@ import { buildStrategyContext } from './strategy-context.mjs';
 import { parallelStrategyDefinition, runParallel } from './strategies/parallel.mjs';
 import { rapidStrategyDefinition, runRapid } from './strategies/rapid.mjs';
 import { runSourceBased, sourceBasedStrategyDefinition } from './strategies/source-based.mjs';
+import { adaptiveStrategyDefinition, runAdaptive } from './strategies/adaptive.mjs';
 
 const BUILTIN_STRATEGIES = [
   { ...rapidStrategyDefinition, run: runRapid },
   { ...sourceBasedStrategyDefinition, run: runSourceBased },
   { ...parallelStrategyDefinition, run: runParallel },
+  { ...adaptiveStrategyDefinition, run: runAdaptive },
 ];
 
 const strategyRegistry = {};

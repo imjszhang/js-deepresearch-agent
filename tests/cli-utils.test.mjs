@@ -104,4 +104,26 @@ describe('CLI utilities', () => {
     assert.equal(settings.search.provider.maxPages, 2);
     assert.equal(settings.search.provider.timeoutMs, 45000);
   });
+
+  it('maps budget and Schema v3 feature flags with explicit booleans', () => {
+    const settings = applyResearchFlags({ search: {}, research: {} }, {
+      strategy: 'adaptive',
+      'max-search-requests': '12',
+      'max-source-reads': '5',
+      'source-adaptive-control': 'true',
+      'source-query-memory': 'false',
+      'source-cluster-results': 'true',
+      'source-evidence-passages': 'true',
+      'source-claim-alignment': 'true',
+      'source-pre-report-gate': 'true',
+    });
+    assert.equal(settings.research.strategy, 'adaptive');
+    assert.equal(settings.research.budget.maxSearchRequests, 12);
+    assert.equal(settings.research.budget.maxSourceReads, 5);
+    assert.equal(settings.research.sourceBased.adaptiveControl.enabled, true);
+    assert.equal(settings.research.sourceBased.queryMemory.enabled, false);
+    assert.equal(settings.research.sourceBased.sourceSelection.enabled, true);
+    assert.equal(settings.research.sourceBased.evidencePassages.claimAlignment, true);
+    assert.equal(settings.research.sourceBased.preReportGate.enabled, true);
+  });
 });

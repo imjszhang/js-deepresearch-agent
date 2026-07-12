@@ -31,6 +31,11 @@ export {
 } from './research/work-output.mjs';
 export { normalizeSearchConfig } from './search/normalize-search-config.mjs';
 export { resolveSearchConcurrency } from './search/search-capabilities.mjs';
+export { BudgetManager, BudgetExceededError } from './research/budget-manager.mjs';
+export { QueryMemory, normalizeQuery, querySimilarity } from './research/query-memory.mjs';
+export { normalizeSourceUrl, selectDiverseSources, SourceCandidatePool } from './research/source-candidates.mjs';
+export { buildEvidenceArtifacts, extractClaims, stableSourceId } from './research/evidence-chain.mjs';
+export { createResearchProviders, deterministicResearchProviders } from './research/research-providers.mjs';
 export { resetEngineRegistries } from './registry-reset.mjs';
 export {
   registerContentFetchHandler,

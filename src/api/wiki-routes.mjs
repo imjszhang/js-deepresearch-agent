@@ -90,6 +90,9 @@ export function registerWikiRoutes(app, { settingsStore }) {
         sources: loaded.sources,
         report: loaded.report,
         meta: loaded.meta,
+        claims: loaded.claims,
+        passages: loaded.passages,
+        gaps: loaded.gaps,
         force,
       });
 

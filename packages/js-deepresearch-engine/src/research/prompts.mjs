@@ -30,7 +30,7 @@ export function questionPrompt({ query, count, mode = 'initial', context = '' })
   ];
 }
 
-export function reportPrompt({ query, findings }) {
+export function reportPrompt({ query, findings, limitations = [] }) {
   const sourceBlock = findings.map((finding, index) => {
     const sources = finding.sources.map((source, sourceIndex) => (
       `[${index + 1}.${sourceIndex + 1}] ${source.title}\n${source.url}\nEvidence: ${getSourceEvidence(source)}`
@@ -51,7 +51,11 @@ export function reportPrompt({ query, findings }) {
     },
     {
       role: 'user',
-      content: `Research query:\n${query}\n\nCollected evidence:\n${sourceBlock}`,
+      content: [
+        `Research query:\n${query}`,
+        limitations.length ? `Quality constraints:\n${limitations.map((item) => `- ${item}`).join('\n')}\nDo not state these unsupported areas as established facts.` : '',
+        `Collected evidence:\n${sourceBlock}`,
+      ].filter(Boolean).join('\n\n'),
     },
   ];
 }

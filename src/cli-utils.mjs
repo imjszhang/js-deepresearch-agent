@@ -106,12 +106,26 @@ export function applyResearchFlags(settings, flags) {
     'source-max-urls': 'research.sourceBased.maxUrlsTotal',
     'source-enable-filter': 'research.sourceBased.enableRelevanceFilter',
     'source-max-sources': 'research.sourceBased.maxSourcesForReport',
+    'max-llm-tokens': 'research.budget.maxLlmTokens',
+    'max-search-requests': 'research.budget.maxSearchRequests',
+    'max-source-reads': 'research.budget.maxSourceReads',
+    'reserve-report-tokens': 'research.budget.reserveReportTokens',
+    'source-adaptive-control': 'research.sourceBased.adaptiveControl.enabled',
+    'source-query-memory': 'research.sourceBased.queryMemory.enabled',
+    'source-cluster-results': 'research.sourceBased.sourceSelection.clusterResults',
+    'source-max-per-hostname': 'research.sourceBased.sourceSelection.maxPerHostname',
+    'source-evidence-passages': 'research.sourceBased.evidencePassages.enabled',
+    'source-claim-alignment': 'research.sourceBased.evidencePassages.claimAlignment',
+    'source-pre-report-gate': 'research.sourceBased.preReportGate.enabled',
   };
 
   for (const [flag, key] of Object.entries(mappings)) {
     if (flags[flag] !== undefined) {
       setDeepValue(settings, key, flags[flag]);
     }
+  }
+  if (flags['source-cluster-results'] !== undefined || flags['source-max-per-hostname'] !== undefined) {
+    setDeepValue(settings, 'research.sourceBased.sourceSelection.enabled', 'true');
   }
 
   applyProviderOverrides(settings, flags);

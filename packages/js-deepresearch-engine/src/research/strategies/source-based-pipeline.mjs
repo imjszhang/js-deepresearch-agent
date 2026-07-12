@@ -5,6 +5,8 @@ import { resolveSourceBasedSettings } from '../source-based-settings.mjs';
 import { formatSourcesForResearchContext } from '../source-context.mjs';
 import { filterFindingsByRelevance } from '../source-relevance-filter.mjs';
 import { resolveStrategyConcurrency, uniqueQuestionCount } from '../strategy-utils.mjs';
+import { applySourceSelection } from '../source-candidates.mjs';
+import { evaluateEvidenceSufficiency } from '../quality-gates.mjs';
 
 /**
  * Source-based pipeline with optional URL enrichment and relevance filtering.
@@ -22,13 +24,18 @@ export async function runSourceBasedPipeline(context) {
     signal,
     emit,
     settings,
+    budget,
+    queryMemory,
   } = context;
 
   const sourceBased = resolveSourceBasedSettings(settings);
   const resolvedConcurrency = resolveStrategyConcurrency(search, concurrency, questionCount + 1);
   const findings = [];
 
-  for (let iteration = 1; iteration <= iterations; iteration += 1) {
+  const iterationLimit = sourceBased.adaptiveControl.enabled
+    ? Math.max(sourceBased.adaptiveControl.minIterations, sourceBased.adaptiveControl.maxIterations)
+    : iterations;
+  for (let iteration = 1; iteration <= iterationLimit; iteration += 1) {
     const priorContext = iteration === 1
       ? ''
       : formatSourcesForResearchContext(findings, {
@@ -39,7 +46,7 @@ export async function runSourceBasedPipeline(context) {
     emit({
       stage: 'generating_questions',
       iteration,
-      iterations,
+      iterations: iterationLimit,
     });
 
     const questions = await generateQuestions({
@@ -56,7 +63,7 @@ export async function runSourceBasedPipeline(context) {
     emit({
       stage: 'searching',
       iteration,
-      iterations,
+      iterations: iterationLimit,
       total: uniqueQuestionCount(iterationQuestions),
     });
 
@@ -65,24 +72,27 @@ export async function runSourceBasedPipeline(context) {
       search,
       signal,
       concurrency: resolvedConcurrency,
+      queryMemory,
+      onSkip: ({ question }) => emit({ stage: 'query_skipped_duplicate', question, iteration, iterations: iterationLimit }),
       onProgress: ({ completed, total }) => {
         emit({
           stage: 'search_progress',
           iteration,
-          iterations,
+          iterations: iterationLimit,
           completed,
           total,
         });
       },
     });
 
-    const iterationFindings = results.map((finding) => ({ ...finding, iteration }));
+    let iterationFindings = results.map((finding) => ({ ...finding, iteration }));
+    iterationFindings = applySourceSelection(iterationFindings, sourceBased.sourceSelection);
 
     if (sourceBased.fetchMode !== 'disabled') {
       emit({
         stage: 'enriching_sources',
         iteration,
-        iterations,
+        iterations: iterationLimit,
       });
 
       const enriched = await enrichFindings(iterationFindings, {
@@ -95,10 +105,19 @@ export async function runSourceBasedPipeline(context) {
         llm,
         signal,
         settings,
+        budget,
       });
       findings.push(...enriched);
     } else {
       findings.push(...iterationFindings);
+    }
+
+    if (sourceBased.adaptiveControl.enabled) {
+      const gate = evaluateEvidenceSufficiency({ findings, iteration, minIterations: sourceBased.adaptiveControl.minIterations, query });
+      emit({ stage: 'evaluating_evidence', iteration, iterations: iterationLimit, decision: gate.decision, flags: gate.flags });
+      if (gate.decision === 'stop' && sourceBased.adaptiveControl.earlyStop) break;
+      if (gate.criticalGaps.length && !sourceBased.adaptiveControl.continueOnCriticalGaps) break;
+      if (!budget?.canClaim('searchRequests') && iteration < iterationLimit) break;
     }
   }
 

@@ -3,7 +3,8 @@ import path from 'node:path';
 import { normalizeWikiSource } from '../schema.mjs';
 
 function stripJsonlEntityFields(record) {
-  const { _post_id, _entity_id, _seq, dedup_id, raw, archivedAt, ...rest } = record;
+  const rest = { ...record };
+  for (const key of ['_post_id', '_entity_id', '_seq', 'dedup_id', 'raw', 'archivedAt']) delete rest[key];
   return rest;
 }
 
@@ -54,6 +55,15 @@ export function loadSourcesFromIntelStore({ engine, researchId }) {
 
   const sourcesRaw = engine.readSource('research_sources', { entity_id: researchId }) || [];
   const reportMeta = engine.readSource('research_reports', { name: researchId });
+  const safeRead = (name) => {
+    try { return (engine.readSource(name, { entity_id: researchId }) || []).map(stripJsonlEntityFields); }
+    catch { return []; }
+  };
+  const claims = safeRead('research_claims');
+  const passages = safeRead('research_passages');
+  const gaps = safeRead('research_gaps');
+  let quality = null;
+  try { quality = engine.readSource('research_quality', { name: researchId }); } catch { /* v2 store */ }
 
   const report = resolveReportFromIntel(run, reportMeta);
   const artifactPaths = artifactPathsFromRun(run, reportMeta);
@@ -91,5 +101,9 @@ export function loadSourcesFromIntelStore({ engine, researchId }) {
     },
     report,
     sources,
+    claims,
+    passages,
+    gaps,
+    quality,
   };
 }

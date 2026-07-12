@@ -10,7 +10,7 @@ import {
 } from '../src/research/content-resolver.mjs';
 import { reportPrompt } from '../src/research/prompts.mjs';
 import { formatSourcesForResearchContext } from '../src/research/source-context.mjs';
-import { enrichFindings, enrichFindingSources } from '../src/research/source-enricher.mjs';
+import { enrichFindings } from '../src/research/source-enricher.mjs';
 import { getSourceEvidence, resolveSourceBasedSettings } from '../src/research/source-based-settings.mjs';
 import { filterFindingsByRelevance } from '../src/research/source-relevance-filter.mjs';
 import { runSourceBasedPipeline } from '../src/research/strategies/source-based-pipeline.mjs';
@@ -452,6 +452,21 @@ describe('source-based pipeline', () => {
 
     assert.ok(stages.includes('enriching_sources'));
     assert.ok(stages.includes('filtering_sources'));
+  });
+
+  it('stops source-based research early when the runtime evidence gate passes', async () => {
+    const searches = [];
+    const stages = [];
+    const findings = await runSourceBasedPipeline({
+      query: 'well covered topic', iterations: 2, questionCount: 1, concurrency: 1,
+      settings: { research: { sourceBased: { fetchMode: 'disabled', adaptiveControl: { enabled: true, minIterations: 1, maxIterations: 4, earlyStop: true } } } },
+      search: { async search(question) { searches.push(question); return [{ title: question, url: `https://source-${searches.length}.test`, snippet: 'usable evidence' }]; } },
+      llm: { async complete() { return JSON.stringify(['independent angle']); } },
+      emit: (event) => stages.push(event.stage),
+    });
+    assert.equal(searches.length, 2);
+    assert.equal(findings.length, 2);
+    assert.ok(stages.includes('evaluating_evidence'));
   });
 });
 

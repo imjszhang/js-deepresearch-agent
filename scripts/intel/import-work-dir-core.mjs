@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { loadArtifacts } from '../benchmark/load-artifacts.mjs';
 import { archiveResearchResult } from '../../src/storage/intel-store.mjs';
+import { buildEvidenceArtifacts } from 'js-deepresearch-engine';
 
 const REQUIRED_FILES = ['report.md', 'findings.json', 'sources.json', 'meta.json'];
 const SESSION_DIR_PATTERN = /^\d{4}-\d{2}-\d{2}_\d{6}$/;
@@ -117,6 +118,15 @@ export function importWorkDirSessions({
 
       if (dryRun) {
         item.status = existing ? 'dry-run-upgrade' : 'dry-run';
+        const derived = upgradeExisting && (!artifacts.passages?.length || !artifacts.claims?.length)
+          ? buildEvidenceArtifacts({ query: artifacts.meta?.query ?? '', findings: artifacts.findings, report: artifacts.report, options: { maxPassagesPerSource: 5, maxPassageChars: 1200, claimAlignment: true } })
+          : null;
+        item.preview = {
+          gaps: artifacts.gaps?.length || 0,
+          passages: artifacts.passages?.length || derived?.passages.length || 0,
+          claims: artifacts.claims?.length || derived?.claims.length || 0,
+          upgradeWarnings: derived && derived.passages.length === 0 ? ['No source content available; no passages derived.'] : [],
+        };
         if (existing) {
           summary.upgraded += 1;
         } else {
@@ -130,7 +140,26 @@ export function importWorkDirSessions({
         report: artifacts.report,
         findings: artifacts.findings,
         sources: artifacts.sources,
+        gaps: artifacts.gaps || [],
+        passages: artifacts.passages || [],
+        claims: artifacts.claims || [],
+        quality: artifacts.quality || undefined,
+        trace: artifacts.trace || [],
       };
+
+      if (upgradeExisting && result.passages.length === 0 && result.claims.length === 0) {
+        const derived = buildEvidenceArtifacts({
+          query: artifacts.meta?.query ?? '',
+          findings: result.findings,
+          report: result.report,
+          options: { maxPassagesPerSource: 5, maxPassageChars: 1200, claimAlignment: true },
+        });
+        result.findings = derived.findings;
+        result.sources = derived.sources.length ? derived.sources : result.sources;
+        result.passages = derived.passages;
+        result.claims = derived.claims;
+        result.quality ||= { schemaVersion: 3, gate: 'pass_with_warnings', flags: ['upgraded_from_v2'], metrics: {}, budget: {}, limitations: [] };
+      }
 
       archiveResearchResult({
         researchId,
@@ -143,6 +172,11 @@ export function importWorkDirSessions({
           findingsPath: path.join(sessionDir, 'findings.json'),
           sourcesPath: path.join(sessionDir, 'sources.json'),
           metaPath: path.join(sessionDir, 'meta.json'),
+          gapsPath: path.join(sessionDir, 'gaps.json'),
+          passagesPath: path.join(sessionDir, 'passages.json'),
+          claimsPath: path.join(sessionDir, 'claims.json'),
+          qualityPath: path.join(sessionDir, 'quality.json'),
+          tracePath: path.join(sessionDir, 'trace.json'),
         },
         settings: { research: artifacts.meta?.settings ?? {} },
         engine,

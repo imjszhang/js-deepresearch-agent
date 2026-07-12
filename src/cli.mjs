@@ -238,6 +238,9 @@ async function wikiCommand(argv) {
       sources: loaded.sources,
       report: loaded.report,
       meta: loaded.meta,
+      claims: loaded.claims,
+      passages: loaded.passages,
+      gaps: loaded.gaps,
       force: Boolean(flags.force || flags.full),
     });
 
@@ -340,6 +343,8 @@ function printIntelPayload(command, payload, baseDir) {
         run.strategy,
         `sources=${run.sourcesCount}`,
         `findings=${run.findingsCount}`,
+        `passages=${run.passagesCount ?? 0}`,
+        `claims=${run.claimsCount ?? 0}`,
         run.query,
       ].join('  |  '));
     }
@@ -373,7 +378,9 @@ function printHelp() {
 js-deepresearch-agent
 
 Commands:
-  research "query" [--search js-eyes|searxng] [--search-skills skillA,skillB] [--js-eyes-skill skillA,skillB] [--search-server-url ws://localhost:18080] [--search-base-url http://127.0.0.1:8080] [--strategy source-based|rapid|parallel] [--iterations 2] [--questions 3] [--concurrency 2] [--work-dir work_dir] [--output report.md] [--json] [--no-save] [--no-work-dir]
+  research "query" [--search js-eyes|searxng] [--search-skills skillA,skillB] [--search-server-url ws://localhost:18080] [--strategy source-based|rapid|parallel|adaptive] [--iterations 2] [--questions 3] [--concurrency 2] [--max-search-requests 0] [--max-source-reads 0] [--source-adaptive-control true|false] [--source-query-memory true|false] [--source-evidence-passages true|false] [--source-claim-alignment true|false] [--source-pre-report-gate true|false] [--work-dir work_dir] [--output report.md] [--json] [--no-save] [--no-work-dir]
+    Budgets: --max-llm-tokens 0 --max-search-requests 0 --max-source-reads 0 --reserve-report-tokens 1200
+    Source controls: --source-cluster-results true|false --source-max-per-hostname 2
     Press Ctrl+C once to cancel gracefully; press again to force exit.
   config get [key]
   config set <key> <value>

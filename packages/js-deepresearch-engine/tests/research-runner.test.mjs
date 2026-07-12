@@ -61,6 +61,7 @@ describe('ResearchRunner', () => {
       'rapid',
       'source-based',
       'parallel',
+      'adaptive',
     ]);
     assert.equal(strategyMetadata[0].supportsConcurrency, true);
   });
@@ -112,5 +113,44 @@ describe('ResearchRunner', () => {
       runStrategy({ strategy: 'unknown' }),
       /Unsupported research strategy: unknown/,
     );
+  });
+
+  it('runs the experimental adaptive strategy with structured trace and gaps', async () => {
+    const events = [];
+    const runner = new ResearchRunner();
+    const result = await runner.run({
+      query: 'adaptive topic',
+      settings: {
+        llm: {}, search: {},
+        research: {
+          strategy: 'adaptive', concurrency: 2,
+          budget: { maxSearchRequests: 5, maxSourceReads: 0, maxLlmTokens: 0 },
+          adaptive: { maxSteps: 10, maxOpenGaps: 3, maxQueriesPerStep: 2, plannerParallelism: 2 },
+          sourceBased: { fetchMode: 'disabled', sourceSelection: { enabled: true, maxPerHostname: 2 } },
+        },
+      },
+      onProgress: (event) => events.push(event.message),
+      search: { async search(question) { return [{ title: question, url: `https://example.com/${encodeURIComponent(question)}`, snippet: 'evidence' }]; } },
+      llm: { async complete({ messages }) { return messages[0].content.includes('research planner') ? JSON.stringify(['gap two']) : '# Report\n\nAdaptive evidence report.'; } },
+    });
+    assert.ok(result.gaps.length >= 2);
+    assert.ok(result.trace.some((entry) => entry.action === 'plan'));
+    assert.ok(result.trace.some((entry) => entry.action === 'evaluate_gap'));
+    assert.ok(result.trace.length <= 10);
+    assert.equal(result.trace.at(-1).action, 'stop');
+    assert.ok(events.includes('Assessing research query'));
+  });
+
+  it('never exceeds a configured search request budget', async () => {
+    let calls = 0;
+    const result = await new ResearchRunner().run({
+      query: 'budgeted topic',
+      settings: { llm: {}, search: {}, research: { strategy: 'rapid', questionsPerIteration: 2, concurrency: 2, budget: { maxSearchRequests: 1 } } },
+      search: { async search(question) { calls += 1; return [{ title: question, url: 'https://example.test', snippet: 'x' }]; } },
+      llm: { async complete({ messages }) { return messages[0].content.includes('research planner') ? JSON.stringify(['q1', 'q2']) : '# Report'; } },
+    });
+    assert.equal(calls, 1);
+    assert.equal(result.quality.budget.usage.searchRequests, 1);
+    assert.equal(result.quality.budget.stopReason, 'searchRequests');
   });
 });

@@ -11,7 +11,7 @@ function yamlValue(value) {
 
 function yamlScalar(value) {
   const str = String(value);
-  if (/[:#\[\]{}&*!|>'"%@`]/.test(str) || str.includes('\n')) {
+  if (/[:#[\]{}&*!|>'"%@`]/.test(str) || str.includes('\n')) {
     return `"${str.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
   }
   return str;

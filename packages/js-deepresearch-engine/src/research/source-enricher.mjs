@@ -33,6 +33,7 @@ async function enrichOneSource(source, {
   fetchMode,
   maxContentChars,
   settings,
+  budget,
 }) {
   const url = String(source.url || '').trim();
   if (!url) {
@@ -43,6 +44,7 @@ async function enrichOneSource(source, {
     };
   }
 
+  budget?.claim('sourceReads');
   const fetched = await resolveUrlContent(url, {
     source,
     settings,
@@ -63,6 +65,9 @@ async function enrichOneSource(source, {
       title: source.title || fetched.title,
       content: fetched.content,
       fetchStatus: 'ok',
+      relatedLinks: settings?.research?.sourceBased?.sourceSelection?.expandPageLinks
+        ? (fetched.links || []).slice(0, settings.research.sourceBased.sourceSelection.maxExpandedLinksPerPage || 5)
+        : undefined,
     };
   }
 
@@ -85,6 +90,9 @@ async function enrichOneSource(source, {
     content: fetched.content,
     summary: String(summary || '').trim() || source.snippet,
     fetchStatus: 'ok',
+    relatedLinks: settings?.research?.sourceBased?.sourceSelection?.expandPageLinks
+      ? (fetched.links || []).slice(0, settings.research.sourceBased.sourceSelection.maxExpandedLinksPerPage || 5)
+      : undefined,
   };
 }
 
@@ -99,6 +107,7 @@ export async function enrichFindingSources(finding, options = {}) {
     llm,
     signal,
     settings,
+    budget,
     seenUrls = new Set(),
     enrichedCount = { value: 0 },
   } = options;
@@ -145,6 +154,7 @@ export async function enrichFindingSources(finding, options = {}) {
           fetchMode,
           maxContentChars,
           settings,
+          budget,
         });
         enrichedByUrl.set(source.url, enriched);
         if (enriched.fetchStatus === 'ok') {

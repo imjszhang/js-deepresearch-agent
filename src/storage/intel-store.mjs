@@ -8,7 +8,7 @@ import {
 } from 'js-intel-store';
 
 export const DEFAULT_INTEL_BASE_DIR = 'data/intel';
-export const ARCHIVE_SCHEMA_VERSION = 2;
+export const ARCHIVE_SCHEMA_VERSION = 3;
 
 export function resolveIntelBaseDir(baseDir) {
   return baseDir ?? process.env.JDR_INTEL_STORE_DIR ?? DEFAULT_INTEL_BASE_DIR;
@@ -24,6 +24,7 @@ export function createResearchIntelRegistry() {
     new DataSourceSpec({
       name: 'research_findings',
       storageType: 'entity_jsonl',
+      dedupKey: 'dedup_id',
       description: 'Findings per research run',
     }),
     new DataSourceSpec({
@@ -37,6 +38,11 @@ export function createResearchIntelRegistry() {
       storageType: 'entity_json',
       description: 'Report metadata per research run',
     }),
+    new DataSourceSpec({ name: 'research_gaps', storageType: 'entity_jsonl', dedupKey: 'dedup_id', description: 'Research gaps per run' }),
+    new DataSourceSpec({ name: 'research_passages', storageType: 'entity_jsonl', dedupKey: 'dedup_id', description: 'Source passages per run' }),
+    new DataSourceSpec({ name: 'research_claims', storageType: 'entity_jsonl', dedupKey: 'dedup_id', description: 'Report claims per run' }),
+    new DataSourceSpec({ name: 'research_quality', storageType: 'entity_json', description: 'Quality summary per run' }),
+    new DataSourceSpec({ name: 'research_trace', storageType: 'entity_jsonl', dedupKey: 'dedup_id', description: 'Structured research trace per run' }),
   ]);
 }
 
@@ -108,6 +114,7 @@ function flattenFindings(findings, researchId) {
   return findings.map((finding, seq) => ({
     _entity_id: researchId,
     _seq: seq,
+    dedup_id: finding?.id || crypto.createHash('sha256').update(`${finding?.question || ''}:${finding?.iteration || ''}`).digest('hex'),
     question: finding?.question ?? null,
     iteration: finding?.iteration ?? null,
     error: finding?.error ?? null,
@@ -134,8 +141,18 @@ function reconstructFindings(records) {
 }
 
 function stripEntityJsonlFields(record) {
-  const { _post_id, _entity_id, _seq, dedup_id, raw, ...rest } = record;
+  const rest = { ...record };
+  for (const key of ['_post_id', '_entity_id', '_seq', 'dedup_id', 'raw']) delete rest[key];
   return rest;
+}
+
+function entityRecords(items, researchId, fallbackPrefix) {
+  return (Array.isArray(items) ? items : []).map((item, index) => ({
+    ...item,
+    _entity_id: researchId,
+    _seq: index,
+    dedup_id: item?.id || item?.contentHash || `${fallbackPrefix}-${index}`,
+  }));
 }
 
 /**
@@ -158,6 +175,10 @@ export function archiveResearchResult({
   const archivedAt = new Date().toISOString();
   const findings = Array.isArray(result?.findings) ? result.findings : [];
   const sources = Array.isArray(result?.sources) ? result.sources : [];
+  const gaps = Array.isArray(result?.gaps) ? result.gaps : [];
+  const passages = Array.isArray(result?.passages) ? result.passages : [];
+  const claims = Array.isArray(result?.claims) ? result.claims : [];
+  const trace = Array.isArray(result?.trace) ? result.trace : [];
 
   engine.ingest('research_runs', {
     name: researchId,
@@ -172,11 +193,15 @@ export function archiveResearchResult({
     metaPath: artifacts?.metaPath ?? null,
     findingsCount: findings.length,
     sourcesCount: sources.length,
+    gapsCount: gaps.length,
+    passagesCount: passages.length,
+    claimsCount: claims.length,
     reportLength: result?.report?.length ?? 0,
     settings: {
       iterations: settings?.research?.iterations,
       questionsPerIteration: settings?.research?.questionsPerIteration,
       concurrency: settings?.research?.concurrency,
+      budget: settings?.research?.budget,
     },
     archivedAt,
   });
@@ -197,6 +222,21 @@ export function archiveResearchResult({
       })),
     );
   }
+
+  for (const [name, records] of [
+    ['research_passages', entityRecords(passages, researchId, 'passage')],
+    ['research_gaps', entityRecords(gaps, researchId, 'gap')],
+    ['research_claims', entityRecords(claims, researchId, 'claim')],
+    ['research_trace', entityRecords(trace, researchId, 'trace')],
+  ]) {
+    if (records.length > 0) engine.ingest(name, records);
+  }
+
+  engine.ingest('research_quality', {
+    name: researchId,
+    ...(result?.quality || { schemaVersion: ARCHIVE_SCHEMA_VERSION, gate: 'pass', flags: [] }),
+    archivedAt,
+  });
 
   engine.ingest('research_reports', {
     name: researchId,
@@ -232,6 +272,18 @@ export function readArchivedResearch(researchId, engine = getIntelStoreEngine())
   const findingsRaw = engine.readSource('research_findings', { entity_id: researchId });
   const sourcesRaw = engine.readSource('research_sources', { entity_id: researchId });
   const reportMeta = engine.readSource('research_reports', { name: researchId });
+  const warnings = [];
+  const safeReadMany = (name) => {
+    try { return engine.readSource(name, { entity_id: researchId }) || []; }
+    catch (error) { warnings.push(`${name}: ${error.message}`); return []; }
+  };
+  const gapsRaw = safeReadMany('research_gaps');
+  const passagesRaw = safeReadMany('research_passages');
+  const claimsRaw = safeReadMany('research_claims');
+  const traceRaw = safeReadMany('research_trace');
+  let quality = null;
+  try { quality = engine.readSource('research_quality', { name: researchId }); }
+  catch (error) { warnings.push(`research_quality: ${error.message}`); }
 
   const report = resolveArchivedReport(run, reportMeta);
 
@@ -249,6 +301,12 @@ export function readArchivedResearch(researchId, engine = getIntelStoreEngine())
     meta,
     findings: reconstructFindings(findingsRaw),
     sources: sourcesRaw.map(stripEntityJsonlFields),
+    gaps: gapsRaw.map(stripEntityJsonlFields),
+    passages: passagesRaw.map(stripEntityJsonlFields),
+    claims: claimsRaw.map(stripEntityJsonlFields),
+    quality: quality || { schemaVersion: run.archiveSchemaVersion || 2, gate: 'pass', flags: [] },
+    trace: traceRaw.map(stripEntityJsonlFields),
+    archiveWarnings: warnings,
     report,
     run,
     reportMeta,

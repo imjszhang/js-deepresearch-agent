@@ -82,6 +82,17 @@ export function mapStructuredProgressEvent(event) {
         progress: 75,
         level,
       };
+    case 'assessing_query': return { message: 'Assessing research query', progress: 8, level };
+    case 'planning_research': return { message: 'Planning research gaps', progress: 12, level };
+    case 'gap_opened': return { message: `Research gap opened: ${event.question || event.gapId}`, progress: null, level };
+    case 'gap_resolved': return { message: `Research gap resolved: ${event.question || event.gapId}`, progress: null, level };
+    case 'query_skipped_duplicate': return { message: `Skipped duplicate query: ${event.question}`, progress: null, level };
+    case 'selecting_sources': return { message: 'Selecting diverse sources', progress: 45, level };
+    case 'extracting_passages': return { message: 'Extracting evidence passages', progress: 72, level };
+    case 'evaluating_evidence': return { message: 'Evaluating evidence sufficiency', progress: 74, level };
+    case 'evaluating_report': return { message: 'Evaluating report claims', progress: 88, level };
+    case 'research_stopped': return { message: `Research stopped: ${event.reason || 'complete'}`, progress: 78, level };
+    case 'budget_exhausted': return { message: `Research budget exhausted: ${event.kind}`, progress: 78, level };
     default:
       break;
   }

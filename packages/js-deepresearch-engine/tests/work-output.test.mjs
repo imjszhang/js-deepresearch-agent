@@ -88,5 +88,10 @@ describe('work output', () => {
     assert.equal(meta.researchId, 'research-123');
     assert.equal(meta.settings.iterations, 1);
     assert.equal(meta.settings.questionsPerIteration, 2);
+    assert.equal(meta.artifactSchemaVersion, 3);
+    for (const key of ['gapsPath', 'passagesPath', 'claimsPath', 'qualityPath', 'tracePath']) {
+      assert.equal(fs.existsSync(artifacts[key]), true);
+      assert.equal(meta.artifacts[key], artifacts[key]);
+    }
   });
 });

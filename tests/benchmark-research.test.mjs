@@ -216,6 +216,20 @@ describe('benchmark rule scoring', () => {
 });
 
 describe('runBenchmark', () => {
+  it('prefers Schema v3 claims and validates passage links', async () => {
+    const workDir = createFixture({
+      report: '# Key Findings\n\nA sufficiently long claim about evidence-backed local research behavior.',
+      findings: [{ id: 'finding-1', question: 'q', sources: [{ id: 'source-1', title: 'S', url: 'https://example.test', snippet: 'evidence', engine: 'test' }] }],
+      sources: [{ id: 'source-1', title: 'S', url: 'https://example.test', snippet: 'evidence', engine: 'test' }],
+    });
+    fs.writeFileSync(path.join(workDir, 'passages.json'), JSON.stringify([{ id: 'passage-1', sourceId: 'source-1', text: 'evidence-backed local research behavior' }]), 'utf8');
+    fs.writeFileSync(path.join(workDir, 'claims.json'), JSON.stringify([{ id: 'claim-1', text: 'A sufficiently long claim about evidence-backed local research behavior.', importance: 'key', evidence: [{ sourceId: 'source-1', passageId: 'passage-1', verdict: 'supported', score: 0.9 }] }]), 'utf8');
+    const result = await runBenchmark({ workDir, llmEnabled: false });
+    assert.equal(result.metrics.keyClaimEvidenceCoverageRate, 1);
+    assert.equal(result.metrics.passageCount, 1);
+    assert.equal(result.metrics.averageSourcesPerClaim, 1);
+  });
+
   it('runs offline with --no-llm semantics', async () => {
     const dir = createFixture({
       report: `# Report

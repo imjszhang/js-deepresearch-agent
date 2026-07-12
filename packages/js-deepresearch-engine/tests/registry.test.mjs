@@ -107,6 +107,7 @@ describe('registry APIs', () => {
       'rapid',
       'source-based',
       'parallel',
+      'adaptive',
     ]);
     assert.ok(providerMetadata.some((entry) => entry.id === 'openai-compatible'));
     assert.ok(searchEngineMetadata.some((entry) => entry.id === 'searxng'));

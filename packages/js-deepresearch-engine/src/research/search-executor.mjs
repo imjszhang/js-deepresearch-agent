@@ -1,5 +1,11 @@
-export async function searchQuestion({ question, search, signal }) {
+export async function searchQuestion({ question, search, signal, queryMemory, gapId = null, onSkip = () => {} }) {
+  const duplicate = await queryMemory?.findDuplicate(question, gapId);
+  if (duplicate) {
+    onSkip({ question, duplicateOf: duplicate.entry.query, score: duplicate.score });
+    return { question, sources: [], skipped: 'duplicate_query' };
+  }
   const sources = await search.search(question, { signal });
+  queryMemory?.record({ query: question, gapId, provider: search.id || '', status: sources?.length ? 'useful' : 'empty', results: Array.isArray(sources) ? sources : [] });
   return {
     question,
     sources: Array.isArray(sources) ? sources : [],
@@ -12,6 +18,9 @@ export async function searchQuestions({
   signal,
   concurrency = 1,
   onProgress = () => {},
+  onSkip = () => {},
+  queryMemory,
+  gapId = null,
 }) {
   const uniqueQuestions = uniqueNonEmptyStrings(questions);
   if (uniqueQuestions.length === 0) return [];
@@ -30,9 +39,10 @@ export async function searchQuestions({
       const question = uniqueQuestions[index];
 
       try {
-        results[index] = await searchQuestion({ question, search, signal });
+        results[index] = await searchQuestion({ question, search, signal, queryMemory, gapId, onSkip });
       } catch (error) {
         if (isAbortError(error)) throw error;
+        queryMemory?.record({ query: question, gapId, provider: search.id || '', status: 'failed', results: [] });
         results[index] = { question, sources: [], error: serializeSearchError(error) };
       } finally {
         completed += 1;

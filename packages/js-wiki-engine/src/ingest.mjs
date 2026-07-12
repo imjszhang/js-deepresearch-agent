@@ -1,4 +1,5 @@
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { escapeLiteralWikilinks, extractClaimLines, renderPage } from './markdown.mjs';
 import {
   loadManifest,
@@ -6,6 +7,8 @@ import {
   shouldRecompileSource,
   recordSourceCompile,
   recordTopicCompile,
+  shouldRecompileEntity,
+  recordEntityCompile,
 } from './manifest.mjs';
 import {
   safeObsidianFilename,
@@ -34,6 +37,18 @@ function topicPageRelativePath(topicTitle) {
 
 function claimsPageRelativePath(topicTitle) {
   return `Claims/${safeObsidianFilename(`${topicTitle} Claims`)}.md`;
+}
+
+function evidencePageRelativePath(researchId, claimId) {
+  return `Evidence/${researchFolderName(researchId)}/${safeObsidianFilename(claimId)}.md`;
+}
+
+function openQuestionsRelativePath(topicTitle) {
+  return `Open Questions/${safeObsidianFilename(topicTitle)}.md`;
+}
+
+function entityHash(value) {
+  return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
 function buildSourcePage(source, topicTitle) {
@@ -127,12 +142,14 @@ function buildTopicPage(topicTitle, sources, report = '') {
   };
 }
 
-function buildClaimsPage(topicTitle, report, sources) {
-  const claims = extractClaimLines(report);
+function buildClaimsPage(topicTitle, report, sources, claimArtifacts = [], researchId = '') {
+  const claims = claimArtifacts.length ? claimArtifacts : extractClaimLines(report);
   const lines = claims.length
     ? claims.map((claim, index) => {
-        const cite = claim.hasCitation ? ' _(has citation)_' : ' _(no citation)_';
-        return `${index + 1}. **${claim.section || 'General'}**: ${claim.text}${cite}`;
+        const verdicts = [...new Set((claim.evidence || []).map((item) => item.verdict))];
+        const cite = claimArtifacts.length ? ` _(${verdicts.join(', ') || 'unverifiable'}; ${claim.evidence?.length || 0} evidence)_` : (claim.hasCitation ? ' _(has citation)_' : ' _(no citation)_');
+        const evidenceLink = claim.id && researchId ? ` — ${wikilinkPath(evidencePageRelativePath(researchId, claim.id), 'Evidence')}` : '';
+        return `${index + 1}. **${claim.section || 'General'}**: ${claim.text}${cite}${evidenceLink}`;
       })
     : ['_No extractable claims from report._'];
 
@@ -161,6 +178,43 @@ function buildClaimsPage(topicTitle, report, sources) {
         updated: new Date().toISOString().slice(0, 10),
       },
       body,
+    }),
+  };
+}
+
+function buildEvidencePage({ researchId, claim, passages, sources }) {
+  const passageMap = new Map(passages.map((passage) => [passage.id, passage]));
+  const sourceMap = new Map(sources.map((source) => [source.id, source]));
+  const missingPassages = (claim.evidence || []).filter((entry) => !passageMap.has(entry.passageId)).length;
+  const missingSources = (claim.evidence || []).filter((entry) => !sourceMap.has(entry.sourceId)).length;
+  const blocks = (claim.evidence || []).map((entry, index) => {
+    const passage = passageMap.get(entry.passageId);
+    const source = sourceMap.get(entry.sourceId);
+    return [
+      `## Evidence ${index + 1}: ${entry.verdict}`,
+      '',
+      source ? `Source: ${wikilinkPath(sourcePageRelativePath(source), source.title || source.id)}` : `Source ID: ${entry.sourceId}`,
+      passage?.section ? `Section: ${passage.section}` : null,
+      '',
+      passage?.text ? `> ${escapeLiteralWikilinks(passage.text.slice(0, 1600))}` : '_Passage unavailable._',
+    ].filter((line) => line !== null).join('\n');
+  });
+  return {
+    relativePath: evidencePageRelativePath(researchId, claim.id),
+    content: renderPage({
+      frontmatter: { type: 'evidence', researchId, claimId: claim.id, evidenceCount: claim.evidence?.length || 0, missingPassages, missingSources, updated: new Date().toISOString().slice(0, 10) },
+      body: [`# Evidence for ${claim.id}`, '', claim.text, '', ...blocks].join('\n'),
+    }),
+  };
+}
+
+function buildOpenQuestionsPage(topicTitle, gaps = []) {
+  const open = gaps.filter((gap) => gap.status !== 'resolved');
+  return {
+    relativePath: openQuestionsRelativePath(topicTitle),
+    content: renderPage({
+      frontmatter: { type: 'open-questions', topic: topicTitle, gapCount: open.length, updated: new Date().toISOString().slice(0, 10) },
+      body: [`# ${topicTitle} Open Questions`, '', `Topic: ${wikilinkPath(topicPageRelativePath(topicTitle))}`, '', ...(open.length ? open.map((gap) => `- **${gap.priority || 'normal'}**: ${gap.question} — ${gap.reason || gap.status}`) : ['_No open questions._'])].join('\n'),
     }),
   };
 }
@@ -202,6 +256,9 @@ export function compileWiki({
   sources = [],
   report = '',
   meta = {},
+  claims = [],
+  passages = [],
+  gaps = [],
   llm = null,
   mode = 'deterministic',
   force = false,
@@ -250,9 +307,35 @@ export function compileWiki({
     writeVaultFile(path.join(root, topicPage.relativePath), topicPage.content);
     topicPages.push(topicPage.relativePath);
 
-    const claimsPage = buildClaimsPage(topicTitle, report, researchSources);
+    const researchClaims = claims.filter((claim) => !claim.researchId || claim.researchId === researchId);
+    const claimsPage = buildClaimsPage(topicTitle, report, researchSources, researchClaims, researchId);
     writeVaultFile(path.join(root, claimsPage.relativePath), claimsPage.content);
     topicPages.push(claimsPage.relativePath);
+
+    for (const claim of researchClaims.filter((item) => item.id)) {
+      const hash = entityHash(claim);
+      const page = buildEvidencePage({ researchId, claim, passages, sources: researchSources });
+      if (force || shouldRecompileEntity(manifest, 'claims', claim.id, hash)) {
+        writeVaultFile(path.join(root, page.relativePath), page.content);
+        summary.compiled += 1;
+        summary.pages.push(page.relativePath);
+      } else summary.skipped += 1;
+      recordEntityCompile(manifest, 'claims', claim.id, hash, [page.relativePath]);
+      for (const evidence of claim.evidence || []) {
+        const passage = passages.find((item) => item.id === evidence.passageId);
+        if (passage) recordEntityCompile(manifest, 'passages', passage.id, entityHash(passage), [page.relativePath]);
+      }
+      topicPages.push(page.relativePath);
+    }
+
+    const researchGaps = gaps.filter((gap) => !gap.researchId || gap.researchId === researchId);
+    if (researchGaps.length) {
+      const page = buildOpenQuestionsPage(topicTitle, researchGaps);
+      writeVaultFile(path.join(root, page.relativePath), page.content);
+      topicPages.push(page.relativePath);
+      summary.pages.push(page.relativePath);
+      for (const gap of researchGaps) recordEntityCompile(manifest, 'gaps', gap.id, entityHash(gap), [page.relativePath]);
+    }
 
     recordTopicCompile(manifest, topicTitle, topicPages);
     topicEntries.push({

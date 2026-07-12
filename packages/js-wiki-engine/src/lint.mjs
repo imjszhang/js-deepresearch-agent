@@ -85,6 +85,20 @@ export function lintWiki({ vaultDir } = {}) {
       }
     }
 
+    if (page.relativePath.startsWith('Evidence/') && fm.type === 'evidence' && Number(fm.evidenceCount || 0) === 0) {
+      issues.push({ severity: 'error', code: 'supported_claim_no_evidence', page: page.relativePath, message: 'Evidence page has no linked passages' });
+    }
+    if (page.relativePath.startsWith('Evidence/') && fm.type === 'evidence' && Number(fm.missingPassages || 0) > 0) {
+      issues.push({ severity: 'error', code: 'claim_missing_passage', page: page.relativePath, message: 'Claim references a missing passage' });
+    }
+    if (page.relativePath.startsWith('Evidence/') && fm.type === 'evidence' && Number(fm.missingSources || 0) > 0) {
+      issues.push({ severity: 'error', code: 'passage_missing_source', page: page.relativePath, message: 'Evidence references a missing source' });
+    }
+
+    if (page.relativePath.startsWith('Open Questions/') && /status:\s*resolved/i.test(content)) {
+      issues.push({ severity: 'warn', code: 'resolved_gap_in_open_questions', page: page.relativePath, message: 'Resolved gap appears on an open questions page' });
+    }
+
     const skipWikilinkLint = page.relativePath.startsWith('Lint/')
       || page.relativePath.startsWith('Templates/');
     if (!skipWikilinkLint) {
@@ -115,6 +129,15 @@ export function lintWiki({ vaultDir } = {}) {
             page: rel,
             message: `Manifest references missing page for source ${sourceId}`,
           });
+        }
+      }
+    }
+    for (const kind of ['claims', 'passages', 'gaps']) {
+      for (const [entityId, entry] of Object.entries(manifest[kind] || {})) {
+        for (const rel of entry.pages || []) {
+          if (!fs.existsSync(path.join(root, rel))) {
+            issues.push({ severity: 'error', code: 'manifest_missing_page', page: rel, message: `Manifest references missing page for ${kind} entity ${entityId}` });
+          }
         }
       }
     }
