@@ -51,7 +51,7 @@ export class ResearchRunner {
     emit({ stage: 'research_started' });
     let findings;
     try {
-      findings = await runStrategy({ strategy, query, settings, llm, search, signal, emit, budget, queryMemory, trace });
+      findings = await runStrategy({ strategy, query, settings, llm, search, signal, emit, budget, queryMemory, trace, researchProviders });
     } catch (error) {
       if (!(error instanceof BudgetExceededError)) throw error;
       findings = [];

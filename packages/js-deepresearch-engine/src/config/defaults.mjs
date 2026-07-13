@@ -92,6 +92,7 @@ export const defaultSettings = Object.freeze({
       },
     },
     adaptive: {
+      loopVersion: 'v1',
       maxSteps: 12,
       maxGapDepth: 2,
       maxOpenGaps: 8,
@@ -100,6 +101,7 @@ export const defaultSettings = Object.freeze({
       plannerParallelism: 2,
       enableCoding: false,
       gateMode: 'rules-then-llm',
+      maxEvaluationRetries: 1,
     },
   },
 });

@@ -136,6 +136,7 @@ describe('CLI utilities', () => {
       'rerank-base-url': 'https://rerank.example/v1',
       'rerank-api-key': 'one-run-key',
       'rerank-timeout-ms': '1234',
+      'adaptive-loop-version': 'v2',
     });
     assert.equal(settings.research.budget.maxRerankRequests, 3);
     assert.equal(settings.research.budget.maxRerankTokens, 900);
@@ -146,5 +147,6 @@ describe('CLI utilities', () => {
       apiKey: 'one-run-key',
       timeoutMs: 1234,
     });
+    assert.equal(settings.research.adaptive.loopVersion, 'v2');
   });
 });
