@@ -39,6 +39,7 @@ export { ReportGenerationError, validateReportOutput } from './research/report-b
 export { createResearchProviders, deterministicResearchProviders } from './research/research-providers.mjs';
 export { DisabledRerankProvider, RulesRerankProvider } from './research/providers/rules-rerank-provider.mjs';
 export { JinaRerankProvider } from './research/providers/jina-rerank-provider.mjs';
+export { HttpRerankProvider } from './research/providers/http-rerank-provider.mjs';
 export { SemanticProviderError, isAbortError } from './research/providers/semantic-provider-errors.mjs';
 export {
   QUALITY_METRICS_VERSION,

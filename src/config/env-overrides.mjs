@@ -98,12 +98,14 @@ export function settingsFromEnv(env = process.env) {
   const rerankProvider = readEnv('JDR_RERANK_PROVIDER');
   const jinaApiKey = readEnv('JINA_API_KEY');
   const rerankModel = readEnv('JDR_RERANK_MODEL');
+  const rerankBaseUrl = readEnv('JDR_RERANK_BASE_URL');
   const semanticTimeout = readEnv('JDR_SEMANTIC_TIMEOUT_MS');
-  if (rerankProvider || jinaApiKey || rerankModel || semanticTimeout) {
+  if (rerankProvider || jinaApiKey || rerankModel || rerankBaseUrl || semanticTimeout) {
     research.providers = { rerank: {
       ...(rerankProvider ? { provider: rerankProvider } : {}),
       ...(jinaApiKey ? { apiKey: jinaApiKey } : {}),
       ...(rerankModel ? { model: rerankModel } : {}),
+      ...(rerankBaseUrl ? { baseUrl: rerankBaseUrl } : {}),
       ...(semanticTimeout ? { timeoutMs: Number(semanticTimeout) } : {}),
     } };
   }

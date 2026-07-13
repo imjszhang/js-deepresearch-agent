@@ -96,6 +96,28 @@ describe('optional rerank providers', () => {
     );
   });
 
+  it('calls a local HTTP rerank endpoint without an API key', async () => {
+    globalThis.fetch = async (url, options) => {
+      assert.match(String(url), /\/rerank$/);
+      assert.equal(options.headers.authorization, undefined);
+      const body = JSON.parse(options.body);
+      return new globalThis.Response(JSON.stringify({
+        results: body.documents.map((_document, index) => ({ index, relevance_score: 0.9 - index * 0.1 })),
+        usage: { total_tokens: 0 },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    };
+    const providers = createResearchProviders({
+      rerank: { provider: 'http', baseUrl: 'http://127.0.0.1:8000', model: 'mixedbread-ai/mxbai-rerank-xsmall-v1' },
+    });
+    const result = await providers.rerank.rerank({
+      query: '中文查询',
+      documents: [{ id: 'a', text: '文档A' }, { id: 'b', text: '文档B' }],
+    });
+    assert.equal(result.provider, 'http');
+    assert.equal(result.degraded, false);
+    assert.deepEqual(result.items.map((item) => item.id), ['a', 'b']);
+  });
+
   it('enforces the external rerank request budget before each batch', async () => {
     globalThis.fetch = async (_url, options) => {
       const body = JSON.parse(options.body);

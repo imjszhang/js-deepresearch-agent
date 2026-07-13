@@ -1,4 +1,5 @@
 import { querySimilarity } from './query-memory.mjs';
+import { HttpRerankProvider } from './providers/http-rerank-provider.mjs';
 import { JinaRerankProvider } from './providers/jina-rerank-provider.mjs';
 import { DisabledRerankProvider, RulesRerankProvider } from './providers/rules-rerank-provider.mjs';
 import { isAbortError } from './providers/semantic-provider-errors.mjs';
@@ -20,6 +21,11 @@ function resolveRerank(config, { budget } = {}) {
   }
   if (config.provider === 'jina') {
     return new JinaRerankProvider(config, {
+      onRequest: () => budget?.claim('rerankRequests'),
+    });
+  }
+  if (config.provider === 'http' || config.provider === 'local') {
+    return new HttpRerankProvider({ ...config, providerName: config.provider }, {
       onRequest: () => budget?.claim('rerankRequests'),
     });
   }
