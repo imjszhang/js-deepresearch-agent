@@ -37,6 +37,9 @@ export { normalizeSourceUrl, selectDiverseSources, SourceCandidatePool, isPrimar
 export { buildEvidenceArtifacts, extractClaims, stableSourceId } from './research/evidence-chain.mjs';
 export { ReportGenerationError, validateReportOutput } from './research/report-builder.mjs';
 export { createResearchProviders, deterministicResearchProviders } from './research/research-providers.mjs';
+export { DisabledRerankProvider, RulesRerankProvider } from './research/providers/rules-rerank-provider.mjs';
+export { JinaRerankProvider } from './research/providers/jina-rerank-provider.mjs';
+export { SemanticProviderError, isAbortError } from './research/providers/semantic-provider-errors.mjs';
 export {
   QUALITY_METRICS_VERSION,
   CLAIM_EXTRACTION_VERSION,

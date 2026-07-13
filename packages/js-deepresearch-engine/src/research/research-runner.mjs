@@ -35,7 +35,13 @@ export class ResearchRunner {
       },
     });
     const sourceBased = resolveSourceBasedSettings(settings);
-    const researchProviders = createResearchProviders(settings?.research?.providers || {});
+    const researchProviders = createResearchProviders(settings?.research?.providers || {}, {
+      budget,
+      onEvent: (event) => {
+        trace.push({ step: trace.length + 1, action: 'rerank', reasonCode: `${event.operation}_${event.status}`, ...event, createdAt: new Date().toISOString() });
+        emit({ stage: event.status === 'started' ? 'rerank_started' : (event.status === 'degraded' ? 'rerank_degraded' : 'rerank_completed'), ...event });
+      },
+    });
     const queryMemory = new QueryMemory({
       ...sourceBased.queryMemory,
       similarityProvider: researchProviders.similarity,

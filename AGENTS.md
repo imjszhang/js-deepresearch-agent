@@ -123,6 +123,13 @@ npm exec --package=. -- jdr research "Explain the current state of local-first A
 | `--source-max-urls` | `research.sourceBased.maxUrlsTotal` | 单次调研最多 enrich 的 URL 数 |
 | `--source-enable-filter` | `research.sourceBased.enableRelevanceFilter` | 是否启用 LLM 来源相关性过滤 |
 | `--source-max-sources` | `research.sourceBased.maxSourcesForReport` | 过滤后保留的最大来源数 |
+| `--rerank-provider` | `research.providers.rerank.provider` | `rules`（默认、本地）\| `disabled` \| `jina`（显式启用） |
+| `--rerank-model` | `research.providers.rerank.model` | 可选 rerank 模型名 |
+| `--rerank-base-url` | `research.providers.rerank.baseUrl` | 可选 rerank API 地址 |
+| `--rerank-api-key` | `research.providers.rerank.apiKey` | 单次运行密钥；优先使用环境变量 |
+| `--rerank-timeout-ms` | `research.providers.rerank.timeoutMs` | 可选 rerank 请求超时 |
+| `--max-rerank-requests` | `research.budget.maxRerankRequests` | 外部 rerank 请求上限，`0` 不限制 |
+| `--max-rerank-tokens` | `research.budget.maxRerankTokens` | provider 可观测 rerank token 上限，`0` 不限制 |
 | `--output <file>` | — | 额外将 report 写入指定文件 |
 | `--json` | — | stdout 输出 JSON（含 `artifacts` 路径） |
 | `--no-save` | — | 不写入 SQLite 历史 |
@@ -532,6 +539,10 @@ node scripts/benchmark-research.mjs --research-id imported__source-based__2026-0
 | `JS_EYES_MAX_PAGES` | `search.jsEyesMaxPages` |
 | `JS_EYES_TIMEOUT_MS` | `search.jsEyesTimeoutMs` |
 | `WORK_DIR` | `research.workDir` |
+| `JDR_RERANK_PROVIDER` | `research.providers.rerank.provider`；只有显式设为 `jina` 才启用远程调用 |
+| `JINA_API_KEY` | `research.providers.rerank.apiKey`；单独设置不会启用 Jina |
+| `JDR_RERANK_MODEL` | `research.providers.rerank.model` |
+| `JDR_SEMANTIC_TIMEOUT_MS` | `research.providers.rerank.timeoutMs` |
 | `JDR_INTEL_STORE_DIR` | intel store 根目录（非 settings 对象；默认 `data/intel`） |
 
 ---
