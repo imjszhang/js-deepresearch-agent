@@ -507,6 +507,37 @@ node scripts/benchmark-research.mjs --research-id imported__source-based__2026-0
 
 质量指标采用 v2 口径：按 claim 而非 evidence 条目计数；事实 claim 的五种互斥结论之和必须等于 `evaluatedClaimCount`。局限与建议保留展示但不进入事实支持率，Sources/参考文献条目不算 claim，分母为 0 时 rate 为 `null`（文本显示 `n/a`）。Schema v3 的 `--no-llm` 会复用归档 verdict，旧产物才运行本地规则；输出中的 `evaluationOrigin` 用于区分 stored/runtime 与 rules/llm。
 
+### 策略对比 benchmark（`benchmark-strategies`）
+
+横向比较 **source-based**、**adaptive v1**、**adaptive v2** 的质量、耗时与成本（LLM tokens、搜索次数、source reads、rerank 次数）。支持离线对比已有 `work_dir` 会话，或对同一 query 依次跑三种策略。
+
+```bash
+# 离线对比已有会话（推荐，不重新调研）
+npm run benchmark:strategies -- \
+  --sessions work_dir/source-based/2026-07-13_051140,work_dir/adaptive/2026-07-13_051626 \
+  --no-llm --output tmp/strategy-compare.md
+
+# 从 intel store 对比
+npm run benchmark:strategies -- --research-ids <id1>,<id2> --no-llm --json
+
+# 对同一 query 依次跑三种策略（会调用 LLM + 搜索）
+npm run benchmark:strategies -- \
+  --run "Ollama vs llama.cpp for local LLM deployment" \
+  --strategies source-based,adaptive-v1,adaptive-v2 \
+  --no-llm
+```
+
+| Flag | 说明 |
+|---|---|
+| `--sessions <paths>` | 逗号分隔的 `work_dir` 会话；可用 `adaptive-v2=path` 显式标注 |
+| `--research-ids <ids>` | 从 intel store 加载 |
+| `--run <query>` | 依次执行多种策略后自动对比 |
+| `--strategies <list>` | `--run` 时指定预设，默认 `source-based,adaptive-v1,adaptive-v2` |
+| `--output <file>` | 写入 Markdown/JSON 报告 |
+| `--no-llm` | 质量评估复用 schema v3 归档 verdict |
+
+耗时取自 `--run` 墙钟时间，或从 `trace.json` 时间戳/`durationMs` 推算；成本取自 `quality.json` 的 `budget.usage`。
+
 ---
 
 ## 配置优先级
