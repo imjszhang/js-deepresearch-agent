@@ -8,11 +8,12 @@ function report() {
   return '# Research Report\n\n## Key Findings\n\nThe selected source provides evidence for the requested topic and preserves agent source choice. [1.1]\n\n## Evidence\n\nThe source was selected deliberately by the research agent and remains traceable in the findings. [1.1]';
 }
 
-function llmFor(decisions, { onEvaluation = () => report() } = {}) {
+function llmFor(decisions, { onEvaluation = () => report(), onDecompose = () => 'no json here' } = {}) {
   return {
     async complete({ purpose }) {
       if (purpose === 'agent_decision') return JSON.stringify(decisions.shift());
       if (purpose === 'answer_evaluation') return onEvaluation();
+      if (purpose === 'gap_decomposition') return onDecompose();
       return report();
     },
   };
@@ -54,12 +55,30 @@ describe('adaptive v2 agent loop', () => {
 
     assert.equal(state.candidates.get('https://dup.test/one').freq, 2);
     const snapshot = state.snapshot();
-    assert.equal(snapshot.candidates.filter((candidate) => candidate.url.startsWith('https://dup.test')).length, 2);
-    assert.equal(snapshot.candidates[0].url, 'https://dup.test/one');
+    assert.equal(snapshot.candidates.filter((candidate) => candidate.id.startsWith('https://dup.test')).length, 2);
+    assert.equal(snapshot.candidates[0].id, 'https://dup.test/one');
     assert.deepEqual(snapshot.searchedQueries, ['topic query']);
     assert.equal(snapshot.knowledge.length, 1);
     assert.equal(snapshot.knowledge[0].learned.length, 160);
     assert.equal(snapshot.stepsRemaining, 10);
+  });
+
+  it('exposes a slim top-8 candidate list plus diary instead of raw observations', () => {
+    const state = new ResearchState({ query: 'topic', maxSteps: 10 });
+    const sources = Array.from({ length: 12 }, (_, index) => ({ url: `https://host${index}.test/page`, title: `T${index}`, snippet: 'long snippet text' }));
+    state.addCandidates(sources, 'gap-1');
+    state.readSourceIds.add('https://host0.test/page');
+    state.observations.push({ type: 'search_result', query: 'topic', resultCount: 12 });
+    for (let line = 0; line < 15; line += 1) state.addDiary(`event ${line}`);
+
+    const snapshot = state.snapshot();
+    assert.equal(snapshot.candidates.length, 8);
+    assert.deepEqual(Object.keys(snapshot.candidates[0]).sort(), ['gapId', 'id', 'read', 'score', 'title']);
+    assert.equal(snapshot.candidates.find((candidate) => candidate.id === 'https://host0.test/page').read, true);
+    assert.equal(snapshot.diary.length, 12);
+    assert.ok(snapshot.diary.at(-1).includes('event 14'));
+    assert.ok(!('recentObservations' in snapshot));
+    assert.ok(!('readSourceIds' in snapshot));
   });
 
   it('fallback read prefers ranked candidates from unread hostnames over SERP order', () => {
@@ -77,7 +96,37 @@ describe('adaptive v2 agent loop', () => {
 
     const action = fallbackAdaptiveAction(state);
     assert.equal(action.action, 'read');
-    assert.deepEqual(action.sourceIds, ['https://high.test/page']);
+    assert.deepEqual(action.sourceIds, ['https://high.test/page', 'https://low.test/page']);
+  });
+
+  it('ranks boosted hostnames above penalized download portals', () => {
+    const state = new ResearchState({ query: 'topic', maxSteps: 10 });
+    state.addCandidates([
+      { url: 'https://www.techspot.com/downloads/tool.html', title: 'Download portal' },
+      { url: 'https://github.com/org/project', title: 'Official repo' },
+      { url: 'https://example.com/blog', title: 'Neutral blog' },
+    ], 'gap-1');
+    const ranked = state.rankedCandidates().map((candidate) => candidate.url);
+    assert.equal(ranked[0], 'https://github.com/org/project');
+    assert.equal(ranked[2], 'https://www.techspot.com/downloads/tool.html');
+  });
+
+  it('rotates focusGapId across open gaps and marks covered gaps', () => {
+    const state = new ResearchState({ query: 'topic', maxSteps: 10 });
+    state.addGap('sub-question two');
+    state.addGap('sub-question three');
+    const focusAtStep = [];
+    for (let step = 0; step < 3; step += 1) {
+      state.step = step;
+      focusAtStep.push(state.focusGap().id);
+    }
+    assert.deepEqual([...new Set(focusAtStep)].sort(), ['gap-1', 'gap-2', 'gap-3']);
+
+    state.findings.push({ gapId: 'gap-2', sources: [{ url: 'https://x.test', fetchStatus: 'ok' }] });
+    const snapshot = state.snapshot();
+    assert.equal(snapshot.gaps.find((gap) => gap.id === 'gap-2').covered, true);
+    assert.equal(snapshot.gaps.find((gap) => gap.id === 'gap-1').covered, false);
+    assert.ok(snapshot.focusGapId);
   });
 
   it('falls back to reflect instead of answering when every candidate is read after a search', () => {
@@ -103,7 +152,7 @@ describe('adaptive v2 agent loop', () => {
         llm: {}, search: {},
         research: {
           strategy: 'adaptive',
-          adaptive: { loopVersion: 'v2', maxSteps: 5, maxEvaluationRetries: 0 },
+          adaptive: { loopVersion: 'v2', maxSteps: 5, maxEvaluationRetries: 0, autoReadTopK: 0 },
           providers: { embedding: { provider: 'disabled' }, rerank: { provider: 'rules' } },
           sourceBased: { fetchMode: 'disabled', evidencePassages: { enabled: true, claimAlignment: true } },
           budget: { maxSearchRequests: 3, maxSourceReads: 0, maxLlmTokens: 0 },
@@ -151,7 +200,7 @@ describe('adaptive v2 agent loop', () => {
     const result = await new ResearchRunner().run({
       query: 'gated topic',
       settings: { llm: {}, search: {}, research: {
-        strategy: 'adaptive', adaptive: { loopVersion: 'v2', maxSteps: 6, maxEvaluationRetries: 0 },
+        strategy: 'adaptive', adaptive: { loopVersion: 'v2', maxSteps: 6, maxEvaluationRetries: 0, autoReadTopK: 0 },
         sourceBased: { fetchMode: 'disabled' },
       } },
       search: { async search() { return [{ title: 'G', url: 'https://gated.test', content: 'Gated topic evidence from a selected source.', fetchStatus: 'ok' }]; } },
@@ -198,7 +247,7 @@ describe('adaptive v2 agent loop', () => {
     const result = await new ResearchRunner().run({
       query: 'quality topic',
       settings: { llm: {}, search: {}, research: {
-        strategy: 'adaptive', adaptive: { loopVersion: 'v2', maxSteps: 8, maxEvaluationRetries: 1 },
+        strategy: 'adaptive', adaptive: { loopVersion: 'v2', maxSteps: 8, maxEvaluationRetries: 1, autoReadTopK: 0 },
         sourceBased: { fetchMode: 'disabled' },
       } },
       search: { async search() { return searches.shift() || []; } },
@@ -230,7 +279,7 @@ describe('adaptive v2 agent loop', () => {
     const result = await new ResearchRunner().run({
       query: 'gate topic',
       settings: { llm: {}, search: {}, research: {
-        strategy: 'adaptive', adaptive: { loopVersion: 'v2', maxSteps: 10, maxEvaluationRetries: 2 },
+        strategy: 'adaptive', adaptive: { loopVersion: 'v2', maxSteps: 10, maxEvaluationRetries: 2, autoReadTopK: 0 },
         sourceBased: { fetchMode: 'disabled' },
       } },
       search: { async search() { return searches.shift() || []; } },
@@ -240,6 +289,150 @@ describe('adaptive v2 agent loop', () => {
     assert.equal(gateEntry.missingAspect, 'What are the deployment costs?');
     assert.ok(result.trace.some((entry) => entry.action === 'read' && entry.reasonCode === 'read_gap'));
     assert.ok(result.findings.some((finding) => finding.gapId === 'gap-2'));
+  });
+
+  it('decomposes the query into sub-gaps and searches with multiple queries in one step', async () => {
+    const decisions = [
+      { action: 'search', queries: ['ollama overview', 'llama.cpp overview'], gapId: 'gap-2', reasonCode: 'multi_search' },
+      { action: 'read', sourceIds: ['https://multi.test/a'], gapId: 'gap-2', reasonCode: 'read' },
+      { action: 'answer', reasonCode: 'done' },
+    ];
+    const searchedQueries = [];
+    const result = await new ResearchRunner().run({
+      query: 'compare ollama and llama.cpp',
+      settings: { llm: {}, search: {}, research: {
+        strategy: 'adaptive', adaptive: { loopVersion: 'v2', maxSteps: 6, maxEvaluationRetries: 0, maxQueriesPerStep: 3 },
+        sourceBased: { fetchMode: 'disabled' },
+      } },
+      search: { async search(query) {
+        searchedQueries.push(query);
+        return [{ title: 'A', url: 'https://multi.test/a', snippet: 'snippet a', content: 'Multi topic evidence from a selected source.', fetchStatus: 'ok' }];
+      } },
+      llm: llmFor(decisions, {
+        onDecompose: () => JSON.stringify({ subQuestions: ['How does ollama work?', 'How does llama.cpp work?'] }),
+      }),
+    });
+
+    const decompose = result.trace.find((entry) => entry.action === 'decompose');
+    assert.equal(decompose.status, 'success');
+    assert.equal(decompose.subQuestionCount, 2);
+    assert.ok(decompose.targetGapIds.includes('gap-3'));
+    assert.deepEqual(searchedQueries, ['ollama overview', 'llama.cpp overview']);
+    const searchEntry = result.trace.find((entry) => entry.action === 'search' && entry.status === 'success');
+    assert.equal(searchEntry.queryCount, 2);
+    // Finding attaches to the agent-selected sub-gap, not the original question.
+    assert.equal(result.findings[0].question, 'How does ollama work?');
+  });
+
+  it('records SERP snippets as knowledge after a search', async () => {
+    const decisions = [
+      { action: 'search', query: 'serp topic', gapId: 'gap-1', reasonCode: 'search' },
+      { action: 'read', sourceIds: ['https://serp.test'], gapId: 'gap-1', reasonCode: 'read' },
+      { action: 'answer', reasonCode: 'done' },
+    ];
+    let observedKnowledge = null;
+    const result = await new ResearchRunner().run({
+      query: 'serp topic',
+      settings: { llm: {}, search: {}, research: {
+        strategy: 'adaptive', adaptive: { loopVersion: 'v2', maxSteps: 6, maxEvaluationRetries: 0 },
+        sourceBased: { fetchMode: 'disabled' },
+      } },
+      search: { async search() { return [{ title: 'Serp title', url: 'https://serp.test', snippet: 'useful snippet', content: 'Serp topic evidence from a selected source.', fetchStatus: 'ok' }]; } },
+      llm: { async complete({ purpose, messages }) {
+        if (purpose === 'agent_decision') {
+          const snapshot = JSON.parse(messages.at(-1).content);
+          if (snapshot.knowledge.some((entry) => entry.learned.startsWith('SERP:'))) observedKnowledge = snapshot.knowledge;
+          return JSON.stringify(decisions.shift());
+        }
+        if (purpose === 'gap_decomposition') return 'no json';
+        return report();
+      } },
+    });
+    assert.ok(result.report);
+    assert.ok(observedKnowledge, 'agent should see SERP knowledge in its snapshot');
+    assert.ok(observedKnowledge.some((entry) => entry.learned.includes('Serp title')));
+  });
+
+  it('auto-reads top ranked candidates after a search without an extra agent decision', async () => {
+    let decisionCalls = 0;
+    const decisions = [
+      { action: 'search', query: 'auto topic', gapId: 'gap-1', reasonCode: 'search' },
+      { action: 'answer', reasonCode: 'done' },
+    ];
+    const result = await new ResearchRunner().run({
+      query: 'auto topic',
+      settings: { llm: {}, search: {}, research: {
+        strategy: 'adaptive', adaptive: { loopVersion: 'v2', maxSteps: 6, maxEvaluationRetries: 0 },
+        sourceBased: { fetchMode: 'disabled' },
+      } },
+      search: { async search() { return [
+        { title: 'A', url: 'https://auto-a.test/page', content: 'Auto topic evidence from a selected source.', fetchStatus: 'ok' },
+        { title: 'B', url: 'https://auto-b.test/page', content: 'More auto topic evidence from another host.', fetchStatus: 'ok' },
+      ]; } },
+      llm: { async complete({ purpose }) {
+        if (purpose === 'agent_decision') { decisionCalls += 1; return JSON.stringify(decisions.shift()); }
+        if (purpose === 'gap_decomposition') return 'no json';
+        return report();
+      } },
+    });
+    const autoRead = result.trace.find((entry) => entry.action === 'read' && entry.reasonCode === 'auto_read_top_ranked');
+    assert.ok(autoRead, 'search should be followed by an automatic read');
+    assert.equal(autoRead.sourceIds.length, 2);
+    assert.equal(decisionCalls, 2);
+  });
+
+  it('auto-read respects the sourceReads budget without throwing', async () => {
+    const decisions = [
+      { action: 'search', query: 'budget read topic', gapId: 'gap-1', reasonCode: 'search' },
+      { action: 'answer', reasonCode: 'done' },
+    ];
+    const result = await new ResearchRunner().run({
+      query: 'budget read topic',
+      settings: { llm: {}, search: {}, research: {
+        strategy: 'adaptive', adaptive: { loopVersion: 'v2', maxSteps: 6, maxEvaluationRetries: 0 },
+        sourceBased: { fetchMode: 'disabled' },
+        budget: { maxSourceReads: 1 },
+      } },
+      search: { async search() { return [
+        { title: 'A', url: 'https://budget-a.test/page', content: 'Budget read evidence.', fetchStatus: 'ok' },
+        { title: 'B', url: 'https://budget-b.test/page', content: 'Second host evidence.', fetchStatus: 'ok' },
+      ]; } },
+      llm: llmFor(decisions),
+    });
+    const autoRead = result.trace.find((entry) => entry.reasonCode === 'auto_read_top_ranked');
+    assert.ok(autoRead);
+    assert.equal(autoRead.sourceIds.length, 1);
+    assert.ok(result.report);
+  });
+
+  it('executes multiple search queries in parallel within the search budget', async () => {
+    let active = 0;
+    let maxActive = 0;
+    const searchedQueries = [];
+    const decisions = [
+      { action: 'search', queries: ['q one', 'q two', 'q three'], gapId: 'gap-1', reasonCode: 'multi' },
+      { action: 'answer', reasonCode: 'done' },
+    ];
+    const result = await new ResearchRunner().run({
+      query: 'parallel topic',
+      settings: { llm: {}, search: {}, research: {
+        strategy: 'adaptive', adaptive: { loopVersion: 'v2', maxSteps: 6, maxEvaluationRetries: 0, maxQueriesPerStep: 3, autoReadTopK: 0 },
+        sourceBased: { fetchMode: 'disabled' },
+        budget: { maxSearchRequests: 2 },
+      } },
+      search: { async search(query) {
+        searchedQueries.push(query);
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        active -= 1;
+        return [{ title: 'P', url: `https://parallel.test/${searchedQueries.length}`, content: 'Parallel topic evidence from a selected source.', fetchStatus: 'ok' }];
+      } },
+      llm: llmFor(decisions),
+    });
+    assert.deepEqual(searchedQueries, ['q one', 'q two']);
+    assert.ok(maxActive >= 2, `queries should overlap, saw maxActive=${maxActive}`);
+    assert.equal(result.quality.budget.usage.searchRequests, 2);
   });
 
   it('forces a final answer on the last step instead of exploring past max steps', async () => {

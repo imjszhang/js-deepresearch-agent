@@ -30,8 +30,8 @@ export const defaultSettings = Object.freeze({
     },
     budget: {
       maxLlmTokens: 0,
-      maxSearchRequests: 10,
-      maxSourceReads: 12,
+      maxSearchRequests: 18,
+      maxSourceReads: 16,
       maxRerankRequests: 0,
       maxRerankTokens: 0,
       maxEstimatedCost: 0,

@@ -1,11 +1,41 @@
 const ACTIONS = new Set(['search', 'read', 'reflect', 'answer', 'stop']);
-const SNAPSHOT_CANDIDATE_LIMIT = 20;
+const RANKED_CANDIDATE_LIMIT = 20;
+const SNAPSHOT_CANDIDATE_LIMIT = 8;
 const MAX_CANDIDATES_PER_HOSTNAME = 2;
 const KNOWLEDGE_SNIPPET_CHARS = 160;
-const SNIPPET_SNAPSHOT_CHARS = 200;
+const DIARY_SNAPSHOT_LINES = 12;
+
+// Official repos and documentation hosts tend to carry primary evidence.
+const BOOST_HOSTNAME_PATTERNS = [
+  /(^|\.)github\.com$/,
+  /(^|\.)gitlab\.com$/,
+  /\.readthedocs\.io$/,
+  /^docs\./,
+  /(^|\.)wikipedia\.org$/,
+];
+// Download portals, app stores, and shopping sites rarely answer research questions.
+const PENALIZE_HOSTNAME_PATTERNS = [
+  /(^|\.)softonic\.com$/,
+  /(^|\.)cnet\.com$/,
+  /(^|\.)mcafee\.com$/,
+  /^apps\.microsoft\.com$/,
+  /^play\.google\.com$/,
+  /(^|\.)amazon\.[a-z.]+$/,
+  /(^|\.)techspot\.com$/,
+];
+const HOSTNAME_BOOST = 0.3;
+const HOSTNAME_PENALTY = -0.6;
 
 export function hostnameOf(url) {
   try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; }
+}
+
+export function hostnameWeight(url) {
+  const hostname = hostnameOf(url);
+  if (!hostname) return 0;
+  if (PENALIZE_HOSTNAME_PATTERNS.some((pattern) => pattern.test(hostname))) return HOSTNAME_PENALTY;
+  if (BOOST_HOSTNAME_PATTERNS.some((pattern) => pattern.test(hostname))) return HOSTNAME_BOOST;
+  return 0;
 }
 
 export class ResearchState {
@@ -20,7 +50,34 @@ export class ResearchState {
     this.readSourceIds = new Set();
     this.knowledge = [];
     this.observations = [];
+    this.diary = [];
     this.evaluationRetries = 0;
+  }
+
+  addDiary(line) {
+    const text = String(line || '').trim();
+    if (!text) return;
+    this.diary.push(`step ${this.step}: ${text}`);
+  }
+
+  addGap(question, priority = 'normal') {
+    const text = String(question || '').trim();
+    if (!text) return null;
+    const gap = { id: `gap-${this.gaps.length + 1}`, question: text, status: 'open', priority };
+    this.gaps.push(gap);
+    return gap;
+  }
+
+  gapCovered(gapId) {
+    return this.findings.some((finding) => finding.gapId === gapId
+      && (finding.sources || []).some((source) => source.fetchStatus === 'ok' || source.content || source.summary));
+  }
+
+  focusGap() {
+    const open = this.gaps.filter((gap) => gap.status === 'open' && !this.gapCovered(gap.id));
+    const pool = open.length ? open : this.gaps.filter((gap) => gap.status === 'open');
+    if (!pool.length) return this.gaps[0];
+    return pool[this.step % pool.length];
   }
 
   searchedQueries() {
@@ -36,11 +93,12 @@ export class ResearchState {
     this.knowledge.push({ gapId: gapId || 'gap-1', sourceId: sourceId || null, learned: text.slice(0, KNOWLEDGE_SNIPPET_CHARS) });
   }
 
+  candidateScore(candidate) {
+    return (candidate.rerank?.score || 0) + (candidate.freq || 0) * 0.1 + hostnameWeight(candidate.url);
+  }
+
   rankedCandidates() {
-    const ranked = [...this.candidates.values()].sort((a, b) => (
-      ((b.rerank?.score || 0) - (a.rerank?.score || 0))
-      || ((b.freq || 0) - (a.freq || 0))
-    ));
+    const ranked = [...this.candidates.values()].sort((a, b) => this.candidateScore(b) - this.candidateScore(a));
     const perHostname = new Map();
     const selected = [];
     for (const candidate of ranked) {
@@ -49,7 +107,7 @@ export class ResearchState {
       if (hostname && count >= MAX_CANDIDATES_PER_HOSTNAME && !this.readSourceIds.has(candidate.id)) continue;
       perHostname.set(hostname, count + 1);
       selected.push(candidate);
-      if (selected.length >= SNAPSHOT_CANDIDATE_LIMIT) break;
+      if (selected.length >= RANKED_CANDIDATE_LIMIT) break;
     }
     return selected;
   }
@@ -61,23 +119,22 @@ export class ResearchState {
       maxSteps: this.maxSteps,
       stepsRemaining: Math.max(0, this.maxSteps - this.step),
       lastAction: this.lastAction,
-      gaps: this.gaps,
-      findingsCount: this.findings.length,
-      candidates: this.rankedCandidates().map((candidate) => ({
-        id: candidate.id,
-        url: candidate.url,
-        title: candidate.title,
-        snippet: String(candidate.snippet || '').slice(0, SNIPPET_SNAPSHOT_CHARS),
-        gapId: candidate.gapId,
-        freq: candidate.freq || 1,
-        rerank: candidate.rerank || null,
-        fetchStatus: candidate.fetchStatus || null,
-        hasContent: Boolean(candidate.content || candidate.summary),
+      gaps: this.gaps.map((gap) => ({
+        ...gap,
+        covered: this.gapCovered(gap.id),
       })),
-      readSourceIds: [...this.readSourceIds],
+      focusGapId: this.focusGap()?.id || 'gap-1',
+      findingsCount: this.findings.length,
+      candidates: this.rankedCandidates().slice(0, SNAPSHOT_CANDIDATE_LIMIT).map((candidate) => ({
+        id: candidate.id,
+        title: candidate.title,
+        score: Math.round(this.candidateScore(candidate) * 1000) / 1000,
+        gapId: candidate.gapId,
+        read: this.readSourceIds.has(candidate.id),
+      })),
       searchedQueries: this.searchedQueries(),
       knowledge: this.knowledge,
-      recentObservations: this.observations.slice(-6),
+      diary: this.diary.slice(-DIARY_SNAPSHOT_LINES),
       evaluationRetries: this.evaluationRetries,
     };
   }
@@ -106,7 +163,11 @@ export class ResearchState {
       if (!emptySearchRetry) return 'repeat_action';
     }
     if (action.action === 'answer' && this.lastAction === 'search') return 'answer_after_search';
-    if (action.action === 'search' && !String(action.query || '').trim()) return 'missing_query';
+    if (action.action === 'search') {
+      const queries = Array.isArray(action.queries) ? action.queries : [];
+      const primary = String(action.query || queries[0] || '').trim();
+      if (!primary) return 'missing_query';
+    }
     if (action.action === 'read') {
       if (!action.sourceIds?.length) return 'missing_source_ids';
       if (action.sourceIds.some((id) => !this.candidates.has(id))) return 'unknown_source';

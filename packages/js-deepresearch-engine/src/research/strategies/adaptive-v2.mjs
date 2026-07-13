@@ -1,7 +1,7 @@
 import { enrichFindings } from '../source-enricher.mjs';
 import { resolveSourceBasedSettings } from '../source-based-settings.mjs';
-import { decideAdaptiveAction, fallbackAdaptiveAction, evaluateAnswerReadiness } from '../adaptive/agent-policy.mjs';
-import { ResearchState } from '../adaptive/research-state.mjs';
+import { decideAdaptiveAction, fallbackAdaptiveAction, evaluateAnswerReadiness, decomposeQuery, pickUnreadCandidates } from '../adaptive/agent-policy.mjs';
+import { ResearchState, hostnameOf } from '../adaptive/research-state.mjs';
 
 function abort(signal) {
   signal?.throwIfAborted?.();
@@ -38,6 +38,20 @@ function selectedFinding(state, sourceIds, gapId) {
   return { question: gap.question, gapId: gap.id, sources };
 }
 
+function addSerpKnowledge(state, results, gapId) {
+  const top = (results || []).slice(0, 3)
+    .map((result) => [result.title, result.snippet].filter(Boolean).join(': '))
+    .filter(Boolean);
+  if (!top.length) return;
+  state.addKnowledge({ gapId, sourceId: null, learned: `SERP: ${top.join(' | ')}` });
+}
+
+function normalizeSearchQueries(action, maxQueries) {
+  const queries = Array.isArray(action.queries) ? action.queries : [];
+  const merged = [String(action.query || '').trim(), ...queries.map((query) => String(query || '').trim())];
+  return [...new Set(merged.filter(Boolean))].slice(0, maxQueries);
+}
+
 export async function runAdaptiveV2(context) {
   const { query, llm, search, signal, emit, settings, budget, queryMemory, trace, researchProviders } = context;
   const adaptive = settings?.research?.adaptive || {};
@@ -46,6 +60,8 @@ export async function runAdaptiveV2(context) {
   const maxReads = Math.max(1, Number(adaptive.maxReadsPerStep) || 3);
   const maxRetries = Math.max(0, Number(adaptive.maxEvaluationRetries) || 0);
   const maxOpenGaps = Number(adaptive.maxOpenGaps) || 8;
+  const maxQueriesPerStep = Math.max(1, Number(adaptive.maxQueriesPerStep) || 3);
+  const autoReadTopK = Math.min(Math.max(0, Number(adaptive.autoReadTopK ?? 2)), maxReads);
   const answerGateEnabled = adaptive.answerGate !== false;
   let degraded = false;
 
@@ -53,21 +69,70 @@ export async function runAdaptiveV2(context) {
   emit({ stage: 'gap_opened', gapId: 'gap-1', question: query });
   addTrace(trace, state, 'assess', { reasonCode: 'agent_loop_v2', targetGapIds: ['gap-1'] }, budget);
 
+  async function performRead({ sourceIds, gapId, reasonCode }) {
+    emit({ stage: 'enriching_sources', total: sourceIds.length });
+    let finding = selectedFinding(state, sourceIds, gapId);
+    finding = (await enrichFindings([finding], {
+      query,
+      fetchMode: sourceBased.fetchMode,
+      maxUrlsPerIteration: maxReads,
+      maxUrlsTotal: maxReads,
+      maxContentChars: sourceBased.maxContentChars,
+      enrichConcurrency: sourceBased.enrichConcurrency,
+      llm,
+      signal,
+      settings,
+      budget,
+    }))[0];
+    state.findings.push(finding);
+    const readHostnames = [];
+    for (const source of finding.sources || []) {
+      const id = source.id || source.url;
+      state.readSourceIds.add(id);
+      const existing = state.candidates.get(id) || {};
+      state.candidates.set(id, { ...existing, ...source, id, freq: existing.freq || 1 });
+      state.addKnowledge({ gapId: finding.gapId, sourceId: id, learned: source.summary || source.content || source.snippet });
+      const hostname = hostnameOf(source.url || id);
+      if (hostname) readHostnames.push(hostname);
+    }
+    state.observations.push({ type: 'read_result', sourceIds, successful: (finding.sources || []).filter((source) => source.fetchStatus === 'ok').length });
+    state.addDiary(`read ${sourceIds.length} source(s) (${readHostnames.join(', ') || 'unknown hosts'}) for ${finding.gapId}`);
+    addTrace(trace, state, 'read', { reasonCode, targetGapIds: [finding.gapId], sourceIds, knowledgeCount: state.knowledge.length }, budget);
+  }
+
+  const subQuestions = await decomposeQuery({ llm, state, signal });
+  for (const question of subQuestions) {
+    if (state.gaps.length >= maxOpenGaps) break;
+    const gap = state.addGap(question);
+    if (gap) emit({ stage: 'gap_opened', gapId: gap.id, question: gap.question });
+  }
+  addTrace(trace, state, 'decompose', {
+    reasonCode: subQuestions.length ? 'query_decomposed' : 'decompose_skipped',
+    targetGapIds: state.gaps.map((gap) => gap.id),
+    subQuestionCount: subQuestions.length,
+  }, budget, subQuestions.length ? 'success' : 'skipped');
+
   try {
     while (state.step < state.maxSteps) {
       abort(signal);
       let action = await decideAdaptiveAction({ llm, state, signal });
       let invalid = state.validate(action);
+      let searchQueries = [];
       if (!invalid && action.action === 'search') {
-        const duplicate = await queryMemory?.findDuplicate?.(action.query, action.gapId || 'gap-1');
-        if (duplicate) invalid = 'duplicate_query';
+        for (const candidateQuery of normalizeSearchQueries(action, maxQueriesPerStep)) {
+          const duplicate = await queryMemory?.findDuplicate?.(candidateQuery, action.gapId || 'gap-1');
+          if (!duplicate) searchQueries.push(candidateQuery);
+        }
+        if (!searchQueries.length) invalid = 'duplicate_query';
       }
       if (invalid) {
         state.observations.push({ type: 'invalid_action', reason: invalid, action: action?.action || null });
+        state.addDiary(`${action?.action || 'unknown'} rejected (${invalid})`);
         addTrace(trace, state, action?.action || 'unknown', { reasonCode: invalid }, budget, 'rejected');
         action = fallbackAdaptiveAction(state);
         invalid = state.validate(action);
         if (invalid) action = { action: 'stop', reasonCode: invalid };
+        if (action.action === 'search') searchQueries = normalizeSearchQueries(action, maxQueriesPerStep);
       }
       const stepsRemaining = state.maxSteps - state.step;
       if (stepsRemaining <= 1 && !['answer', 'stop'].includes(action.action)
@@ -80,51 +145,74 @@ export async function runAdaptiveV2(context) {
       abort(signal);
 
       if (action.action === 'search') {
-        emit({ stage: 'searching', iteration: state.step, iterations: state.maxSteps, total: 1 });
-        const results = await search.search(action.query, { signal });
-        queryMemory?.record?.({ query: action.query, gapId: action.gapId || 'gap-1', status: results.length ? 'useful' : 'empty', results });
-        state.addCandidates(results, action.gapId || 'gap-1');
-        await observeRerank({ state, query: action.query, providers: researchProviders, signal });
-        state.observations.push({ type: 'search_result', query: action.query, resultCount: results.length });
-        addTrace(trace, state, 'search', { reasonCode: action.reasonCode || 'agent_search', targetGapIds: [action.gapId || 'gap-1'], resultCount: results.length }, budget);
+        const gapId = action.gapId || 'gap-1';
+        // Pre-trim the query list so parallel execution cannot overspend the search
+        // budget; the first query keeps budget-exceeded semantics (throws).
+        const allowedQueries = [];
+        for (const searchQuery of searchQueries) {
+          if (allowedQueries.length === 0 || !budget || budget.canClaim('searchRequests', allowedQueries.length + 1)) {
+            allowedQueries.push(searchQuery);
+          }
+        }
+        emit({ stage: 'searching', iteration: state.step, iterations: state.maxSteps, total: allowedQueries.length });
+        const candidatesBefore = state.candidates.size;
+        const searchResults = await Promise.all(allowedQueries.map(async (searchQuery) => {
+          abort(signal);
+          const results = await search.search(searchQuery, { signal });
+          return { searchQuery, results };
+        }));
+        let totalResults = 0;
+        for (const { searchQuery, results } of searchResults) {
+          totalResults += results.length;
+          queryMemory?.record?.({ query: searchQuery, gapId, status: results.length ? 'useful' : 'empty', results });
+          state.addCandidates(results, gapId);
+          addSerpKnowledge(state, results, gapId);
+          state.observations.push({ type: 'search_result', query: searchQuery, resultCount: results.length });
+        }
+        await observeRerank({ state, query: allowedQueries[0] || query, providers: researchProviders, signal });
+        state.addDiary(`searched ${allowedQueries.length} quer${allowedQueries.length === 1 ? 'y' : 'ies'}, +${state.candidates.size - candidatesBefore} candidates`);
+        addTrace(trace, state, 'search', { reasonCode: action.reasonCode || 'agent_search', targetGapIds: [gapId], queryCount: allowedQueries.length, resultCount: totalResults }, budget);
+
+        // Auto-read the top ranked unread candidates so the agent does not need a
+        // dedicated decision round just to pick the obvious sources. Keep at least
+        // one step free so the forced-final-answer path can still run.
+        if (autoReadTopK > 0 && state.step + 1 < state.maxSteps) {
+          let autoReadCount = autoReadTopK;
+          while (budget && autoReadCount > 0 && !budget.canClaim('sourceReads', autoReadCount)) autoReadCount -= 1;
+          const picks = autoReadCount > 0 ? pickUnreadCandidates(state, autoReadCount) : [];
+          if (picks.length) {
+            state.step += 1;
+            state.lastAction = 'read';
+            await performRead({
+              sourceIds: picks.map((candidate) => candidate.id).slice(0, autoReadCount),
+              gapId,
+              reasonCode: 'auto_read_top_ranked',
+            });
+          }
+        }
         continue;
       }
 
       if (action.action === 'read') {
-        const sourceIds = action.sourceIds.slice(0, maxReads);
-        emit({ stage: 'enriching_sources', total: sourceIds.length });
-        let finding = selectedFinding(state, sourceIds, action.gapId);
-        finding = (await enrichFindings([finding], {
-          query,
-          fetchMode: sourceBased.fetchMode,
-          maxUrlsPerIteration: maxReads,
-          maxUrlsTotal: maxReads,
-          maxContentChars: sourceBased.maxContentChars,
-          enrichConcurrency: sourceBased.enrichConcurrency,
-          llm,
-          signal,
-          settings,
-          budget,
-        }))[0];
-        state.findings.push(finding);
-        for (const source of finding.sources || []) {
-          const id = source.id || source.url;
-          state.readSourceIds.add(id);
-          const existing = state.candidates.get(id) || {};
-          state.candidates.set(id, { ...existing, ...source, id, freq: existing.freq || 1 });
-          state.addKnowledge({ gapId: finding.gapId, sourceId: id, learned: source.summary || source.content || source.snippet });
-        }
-        state.observations.push({ type: 'read_result', sourceIds, successful: (finding.sources || []).filter((source) => source.fetchStatus === 'ok').length });
-        addTrace(trace, state, 'read', { reasonCode: action.reasonCode || 'agent_read', targetGapIds: [finding.gapId], sourceIds, knowledgeCount: state.knowledge.length }, budget);
+        await performRead({
+          sourceIds: action.sourceIds.slice(0, maxReads),
+          gapId: action.gapId,
+          reasonCode: action.reasonCode || 'agent_read',
+        });
         continue;
       }
 
       if (action.action === 'reflect') {
-        if (action.gapQuestion && state.gaps.length < maxOpenGaps) {
-          const gap = { id: `gap-${state.gaps.length + 1}`, question: action.gapQuestion, status: 'open', priority: 'normal' };
-          state.gaps.push(gap);
-          emit({ stage: 'gap_opened', gapId: gap.id, question: gap.question });
+        let gapQuestion = String(action.gapQuestion || '').trim();
+        if (!gapQuestion && state.gaps.length < maxOpenGaps) {
+          const suggestions = await decomposeQuery({ llm, state, signal, maxSubQuestions: 1 });
+          gapQuestion = suggestions.find((question) => !state.gaps.some((gap) => gap.question === question)) || '';
         }
+        if (gapQuestion && state.gaps.length < maxOpenGaps) {
+          const gap = state.addGap(gapQuestion);
+          if (gap) emit({ stage: 'gap_opened', gapId: gap.id, question: gap.question });
+        }
+        state.addDiary(gapQuestion ? `reflected, opened gap "${gapQuestion.slice(0, 80)}"` : 'reflected, no new gap');
         addTrace(trace, state, 'reflect', { reasonCode: action.reasonCode || 'agent_reflect', targetGapIds: state.gaps.map((gap) => gap.id) }, budget);
         continue;
       }
@@ -135,6 +223,7 @@ export async function runAdaptiveV2(context) {
         if (!hasDirectEvidence && canRetry && state.evaluationRetries < maxRetries && budget?.canClaim('searchRequests')) {
           state.evaluationRetries += 1;
           state.observations.push({ type: 'evaluation', verdict: 'needs_more_evidence' });
+          state.addDiary('answer rejected: missing direct evidence');
           addTrace(trace, state, 'evaluate_report', { reasonCode: 'missing_direct_evidence', allowedAdditionalActions: 1 }, budget, 'retry');
           continue;
         }
@@ -143,11 +232,11 @@ export async function runAdaptiveV2(context) {
           if (evaluation && evaluation.pass === false) {
             state.evaluationRetries += 1;
             if (evaluation.missingAspect && state.gaps.length < maxOpenGaps) {
-              const gap = { id: `gap-${state.gaps.length + 1}`, question: evaluation.missingAspect, status: 'open', priority: 'normal' };
-              state.gaps.push(gap);
-              emit({ stage: 'gap_opened', gapId: gap.id, question: gap.question });
+              const gap = state.addGap(evaluation.missingAspect);
+              if (gap) emit({ stage: 'gap_opened', gapId: gap.id, question: gap.question });
             }
             state.observations.push({ type: 'evaluation', verdict: 'answer_gate_failed', missingAspect: evaluation.missingAspect || null });
+            state.addDiary(`answer gate failed${evaluation.missingAspect ? `: ${evaluation.missingAspect.slice(0, 80)}` : ''}`);
             addTrace(trace, state, 'evaluate_report', { reasonCode: 'answer_gate_failed', missingAspect: evaluation.missingAspect || null }, budget, 'retry');
             continue;
           }
