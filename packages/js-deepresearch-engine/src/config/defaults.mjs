@@ -31,7 +31,7 @@ export const defaultSettings = Object.freeze({
     budget: {
       maxLlmTokens: 0,
       maxSearchRequests: 10,
-      maxSourceReads: 8,
+      maxSourceReads: 12,
       maxRerankRequests: 0,
       maxRerankTokens: 0,
       maxEstimatedCost: 0,
@@ -93,11 +93,11 @@ export const defaultSettings = Object.freeze({
     },
     adaptive: {
       loopVersion: 'v1',
-      maxSteps: 12,
+      maxSteps: 16,
       maxGapDepth: 2,
       maxOpenGaps: 8,
       maxQueriesPerStep: 3,
-      maxReadsPerStep: 3,
+      maxReadsPerStep: 4,
       plannerParallelism: 2,
       enableCoding: false,
       gateMode: 'rules-then-llm',

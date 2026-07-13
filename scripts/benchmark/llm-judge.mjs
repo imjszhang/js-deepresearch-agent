@@ -8,7 +8,13 @@ const VALID_VERDICTS = new Set([
 function buildJudgePrompt(claim, resolvedSources) {
   const sourceBlock = resolvedSources.map((entry) => {
     const source = entry.source || {};
-    const evidence = source.summary || source.content || source.snippet || '';
+    const passage = entry.passage || {};
+    const evidence = passage.text
+      || passage.excerpt
+      || source.summary
+      || source.content
+      || source.snippet
+      || '';
     return [
       entry.key,
       `Title: ${source.title || ''}`,
@@ -49,18 +55,58 @@ function parseJudgeResponse(raw = '') {
     throw new Error('LLM judge response did not contain JSON.');
   }
 
-  const parsed = JSON.parse(jsonMatch[0]);
+  let parsed;
+  try {
+    parsed = JSON.parse(jsonMatch[0]);
+  } catch {
+    const verdict = jsonMatch[0].match(/"verdict"\s*:\s*"([^"]+)"/)?.[1];
+    const confidence = jsonMatch[0].match(/"confidence"\s*:\s*("?[\w.]+"?)/)?.[1];
+    const reason = jsonMatch[0].match(/"reason"\s*:\s*"((?:\\.|[^"\\])*)"/)?.[1];
+    if (!verdict) throw new Error('LLM judge response contained invalid JSON.');
+    parsed = { verdict, confidence, reason };
+  }
+
   const verdict = String(parsed.verdict || '').trim();
   if (!VALID_VERDICTS.has(verdict)) {
     throw new Error(`Invalid verdict from LLM judge: ${parsed.verdict}`);
   }
 
-  const confidence = Number(parsed.confidence);
+  const confidence = normalizeConfidence(parsed.confidence);
   return {
     verdict,
-    confidence: Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : 0,
+    confidence,
     reason: String(parsed.reason || '').trim(),
   };
+}
+
+function normalizeConfidence(raw) {
+  const numeric = Number(raw);
+  if (Number.isFinite(numeric)) return Math.max(0, Math.min(1, numeric));
+
+  const label = String(raw || '').trim().toLowerCase();
+  if (label === 'high') return 0.85;
+  if (label === 'medium' || label === 'med') return 0.6;
+  if (label === 'low') return 0.35;
+  return 0;
+}
+
+async function completeJudgeResponse(llm, messages) {
+  const request = {
+    messages,
+    temperature: 0,
+    maxTokens: 1024,
+  };
+
+  if (typeof llm.completeWithMetadata === 'function') {
+    const result = await llm.completeWithMetadata(request);
+    if (result.text?.trim()) return result.text;
+    if (result.metadata?.hasReasoningContent) {
+      throw new Error('LLM judge returned reasoning-only output; increase maxTokens for judge calls.');
+    }
+    throw new Error(`LLM judge returned empty content (finishReason=${result.finishReason || 'unknown'}).`);
+  }
+
+  return llm.complete({ ...request, maxTokens: 512 });
 }
 
 export async function judgeClaimWithLlm(claim, ruleResult, llm) {
@@ -82,14 +128,18 @@ export async function judgeClaimWithLlm(claim, ruleResult, llm) {
     };
   }
 
-  const raw = await llm.complete({
-    messages: buildJudgePrompt(claim, ruleResult.resolvedSources),
-    temperature: 0,
-    maxTokens: 300,
-  });
-
-  return {
-    ...parseJudgeResponse(raw),
-    skipped: false,
-  };
+  try {
+    const raw = await completeJudgeResponse(llm, buildJudgePrompt(claim, ruleResult.resolvedSources));
+    return {
+      ...parseJudgeResponse(raw),
+      skipped: false,
+    };
+  } catch (error) {
+    return {
+      verdict: 'unverifiable',
+      confidence: 0,
+      reason: `LLM judge failed: ${error.message}`,
+      skipped: false,
+    };
+  }
 }
