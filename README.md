@@ -181,6 +181,8 @@ Available research strategies are exposed through `/api/strategies` and shared b
 - `parallel`: broad research that runs generated questions with controlled concurrency.
 - `adaptive`: experimental gap-driven research with bounded steps, shared budgets, structured progress, and evidence evaluation.
 
+`adaptive` keeps its existing v1 behavior unless `--adaptive-loop-version v2` is passed. The v2 experiment is a bounded Agent Loop: the model chooses structured search/read/reflect/answer actions, while the runtime only guards legality, cancellation, budgets, and maximum steps. Optional rerank scores are observations rather than source-selection commands, and embeddings are not required.
+
 `source-based` defaults to a quality preset: `fetchMode: summary`, query memory, source clustering, passage/claim evidence, adaptive early-stop, and soft budgets (`maxSearchRequests: 10`, `maxSourceReads: 8`). Override per run with CLI flags such as `--source-fetch-mode disabled` or `config set` / Web UI settings. `preReportGate` and LLM relevance filtering remain off by default.
 
 Semantic reranking is an optional observation, not a prerequisite or automatic source selector. The default `rules` provider is local and deterministic; `--rerank-provider jina` opts into Jina for that run and requires `--rerank-api-key` (or `JINA_API_KEY`). Provider errors fall back to rules, while cancellation and budget limits remain hard stops. Embeddings are disabled by default and are not needed by any current strategy.

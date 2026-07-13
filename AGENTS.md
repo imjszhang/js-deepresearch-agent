@@ -130,6 +130,7 @@ npm exec --package=. -- jdr research "Explain the current state of local-first A
 | `--rerank-timeout-ms` | `research.providers.rerank.timeoutMs` | 可选 rerank 请求超时 |
 | `--max-rerank-requests` | `research.budget.maxRerankRequests` | 外部 rerank 请求上限，`0` 不限制 |
 | `--max-rerank-tokens` | `research.budget.maxRerankTokens` | provider 可观测 rerank token 上限，`0` 不限制 |
+| `--adaptive-loop-version` | `research.adaptive.loopVersion` | `v1`（兼容默认）\| `v2`（实验 Agent Loop） |
 | `--output <file>` | — | 额外将 report 写入指定文件 |
 | `--json` | — | stdout 输出 JSON（含 `artifacts` 路径） |
 | `--no-save` | — | 不写入 SQLite 历史 |
