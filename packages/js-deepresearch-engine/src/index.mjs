@@ -40,6 +40,7 @@ export { createResearchProviders, deterministicResearchProviders } from './resea
 export { DisabledRerankProvider, RulesRerankProvider } from './research/providers/rules-rerank-provider.mjs';
 export { JinaRerankProvider } from './research/providers/jina-rerank-provider.mjs';
 export { HttpRerankProvider } from './research/providers/http-rerank-provider.mjs';
+export { OpenAiEmbeddingProvider, cosineSimilarity } from './research/providers/openai-embedding-provider.mjs';
 export { SemanticProviderError, isAbortError } from './research/providers/semantic-provider-errors.mjs';
 export {
   QUALITY_METRICS_VERSION,

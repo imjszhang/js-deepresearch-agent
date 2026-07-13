@@ -100,14 +100,28 @@ export function settingsFromEnv(env = process.env) {
   const rerankModel = readEnv('JDR_RERANK_MODEL');
   const rerankBaseUrl = readEnv('JDR_RERANK_BASE_URL');
   const semanticTimeout = readEnv('JDR_SEMANTIC_TIMEOUT_MS');
-  if (rerankProvider || jinaApiKey || rerankModel || rerankBaseUrl || semanticTimeout) {
-    research.providers = { rerank: {
-      ...(rerankProvider ? { provider: rerankProvider } : {}),
-      ...(jinaApiKey ? { apiKey: jinaApiKey } : {}),
-      ...(rerankModel ? { model: rerankModel } : {}),
-      ...(rerankBaseUrl ? { baseUrl: rerankBaseUrl } : {}),
-      ...(semanticTimeout ? { timeoutMs: Number(semanticTimeout) } : {}),
-    } };
+  const embeddingProvider = readEnv('JDR_EMBEDDING_PROVIDER');
+  const embeddingModel = readEnv('JDR_EMBEDDING_MODEL');
+  const embeddingBaseUrl = readEnv('JDR_EMBEDDING_BASE_URL');
+  const embeddingApiKey = readEnv('JDR_EMBEDDING_API_KEY') || readEnv('OPENCLAW_GATEWAY_TOKEN');
+  if (rerankProvider || jinaApiKey || rerankModel || rerankBaseUrl || semanticTimeout
+    || embeddingProvider || embeddingModel || embeddingBaseUrl || embeddingApiKey) {
+    research.providers = {
+      ...(rerankProvider || jinaApiKey || rerankModel || rerankBaseUrl || semanticTimeout ? { rerank: {
+        ...(rerankProvider ? { provider: rerankProvider } : {}),
+        ...(jinaApiKey ? { apiKey: jinaApiKey } : {}),
+        ...(rerankModel ? { model: rerankModel } : {}),
+        ...(rerankBaseUrl ? { baseUrl: rerankBaseUrl } : {}),
+        ...(semanticTimeout ? { timeoutMs: Number(semanticTimeout) } : {}),
+      } } : {}),
+      ...(embeddingProvider || embeddingModel || embeddingBaseUrl || embeddingApiKey ? { embedding: {
+        ...(embeddingProvider ? { provider: embeddingProvider } : {}),
+        ...(embeddingModel ? { model: embeddingModel } : {}),
+        ...(embeddingBaseUrl ? { baseUrl: embeddingBaseUrl } : {}),
+        ...(embeddingApiKey ? { apiKey: embeddingApiKey } : {}),
+        ...(semanticTimeout ? { timeoutMs: Number(semanticTimeout) } : {}),
+      } } : {}),
+    };
   }
 
   return {

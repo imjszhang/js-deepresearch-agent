@@ -18,7 +18,7 @@ const DEFAULT_SOURCE_BASED = Object.freeze({
   preReportGate: Object.freeze({ enabled: false, mode: 'rules', blockUnsupportedClaims: false }),
 });
 
-const VALID_FETCH_MODES = new Set(['disabled', 'full', 'summary']);
+const VALID_FETCH_MODES = new Set(['disabled', 'full', 'summary', 'extract']);
 const VALID_FETCH_BACKENDS = new Set(['auto', 'http', 'js-eyes']);
 
 function resolveBooleanFlag(rawValue, defaultValue) {

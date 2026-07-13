@@ -268,6 +268,44 @@ describe('source enricher', () => {
     assert.equal(finding.sources[0].summary, 'Focused summary about transformers.');
     assert.match(finding.sources[0].content, /transformers/);
   });
+
+  it('extracts passages without calling the LLM in extract mode', async () => {
+    mockHtmlFetch('<html><title>Article</title><body><p>Ollama wraps llama.cpp for easy local deployment. llama.cpp is a low-level C++ engine for efficient inference.</p></body></html>');
+
+    const embedding = {
+      async embedDocuments(texts) {
+        return texts.map((text) => {
+          const value = String(text).toLowerCase();
+          if (value.includes('llama.cpp')) return [1, 0];
+          if (value.includes('ollama')) return [0.2, 0.8];
+          return [0, 0];
+        });
+      },
+    };
+
+    const [finding] = await enrichFindings([{
+      question: 'llama.cpp deployment',
+      sources: [{ title: 'Article', url: 'https://example.com/a', snippet: 'short' }],
+    }], {
+      query: 'llama.cpp deployment',
+      fetchMode: 'extract',
+      maxUrlsPerIteration: 8,
+      maxUrlsTotal: 24,
+      maxContentChars: 8000,
+      enrichConcurrency: 1,
+      embedding,
+      llm: {
+        async complete() {
+          throw new Error('should not call llm');
+        },
+      },
+    });
+
+    assert.equal(finding.sources[0].fetchStatus, 'ok');
+    assert.equal(finding.sources[0].extractionMethod, 'embedding');
+    assert.match(finding.sources[0].summary, /llama\.cpp/i);
+    assert.match(finding.sources[0].content, /Ollama wraps llama\.cpp/);
+  });
 });
 
 describe('source relevance filter', () => {

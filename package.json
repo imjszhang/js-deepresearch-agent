@@ -19,6 +19,8 @@
     "test:watch": "node --test --watch tests/*.test.mjs",
     "benchmark": "node scripts/benchmark-research.mjs",
     "benchmark:strategies": "node scripts/benchmark-strategies.mjs",
+    "benchmark:extract": "node scripts/benchmark/compare-extract-benchmark.mjs",
+    "verify:openclaw-embedding": "node scripts/verify-openclaw-embedding.mjs",
     "intel:import": "node scripts/intel/import-work-dir.mjs",
     "intel:inspect": "node scripts/intel/inspect.mjs",
     "wiki:compile": "node scripts/wiki/compile.mjs",

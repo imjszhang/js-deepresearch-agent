@@ -34,12 +34,30 @@ export function formatDurationMs(durationMs) {
   return `${minutes}m ${remainder}s`;
 }
 
+export function countLlmPurposeCalls(trace = []) {
+  const entries = Array.isArray(trace) ? trace : [];
+  const purposes = {};
+
+  for (const entry of entries) {
+    if (entry.action !== 'llm_call' || entry.status !== 'completed') continue;
+    const purpose = entry.purpose || entry.reasonCode || 'unknown';
+    purposes[purpose] = (purposes[purpose] || 0) + 1;
+  }
+
+  return {
+    purposes,
+    sourceSummaryCalls: purposes.source_summary || 0,
+    totalCompletedLlmCalls: Object.values(purposes).reduce((sum, count) => sum + count, 0),
+  };
+}
+
 export function extractRunStats(artifacts, { wallClockDurationMs = null } = {}) {
   const quality = artifacts.quality || {};
   const budget = quality.budget || {};
   const usage = budget.usage || {};
   const traceDurationMs = durationFromTrace(artifacts.trace);
   const durationMs = Number.isFinite(wallClockDurationMs) ? wallClockDurationMs : traceDurationMs;
+  const llmPurposes = countLlmPurposeCalls(artifacts.trace);
 
   return {
     workDir: artifacts.workDir,
@@ -71,5 +89,6 @@ export function extractRunStats(artifacts, { wallClockDurationMs = null } = {}) 
       traceSteps: artifacts.trace?.length || 0,
       reportChars: artifacts.report?.length || 0,
     },
+    llmPurposes,
   };
 }

@@ -149,4 +149,21 @@ describe('CLI utilities', () => {
     });
     assert.equal(settings.research.adaptive.loopVersion, 'v2');
   });
+
+  it('maps embedding and extract fetch mode flags', () => {
+    const settings = applyResearchFlags({ research: {} }, {
+      'embedding-provider': 'openai-compatible',
+      'embedding-base-url': 'http://127.0.0.1:18789',
+      'embedding-model': 'openclaw/default',
+      'embedding-api-key': 'gateway-token',
+      'source-fetch-mode': 'extract',
+    });
+    assert.deepEqual(settings.research.providers.embedding, {
+      provider: 'openai-compatible',
+      baseUrl: 'http://127.0.0.1:18789',
+      model: 'openclaw/default',
+      apiKey: 'gateway-token',
+    });
+    assert.equal(settings.research.sourceBased.fetchMode, 'extract');
+  });
 });

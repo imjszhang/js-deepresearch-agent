@@ -38,7 +38,14 @@ export const defaultSettings = Object.freeze({
       reserveReportTokens: 1200,
     },
     providers: {
-      embedding: { provider: 'disabled' },
+      embedding: {
+        provider: 'disabled',
+        model: 'openclaw/default',
+        baseUrl: 'http://127.0.0.1:18789',
+        apiKey: '',
+        batchSize: 64,
+        timeoutMs: 60000,
+      },
       rerank: {
         provider: 'rules',
         model: 'unicode-token-overlap-v1',

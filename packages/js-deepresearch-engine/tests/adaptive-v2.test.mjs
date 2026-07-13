@@ -381,6 +381,50 @@ describe('adaptive v2 agent loop', () => {
     assert.equal(decisionCalls, 2);
   });
 
+  it('uses extract mode without source_summary LLM calls when embedding is configured', async () => {
+    const { registerContentFetchHandler, resetContentFetchHandlers } = await import('../src/research/content-resolver.mjs');
+    registerContentFetchHandler(async () => ({
+      status: 'ok',
+      title: 'Extract article',
+      content: 'Ollama wraps llama.cpp for easy local deployment. llama.cpp is a low-level C++ engine for efficient inference.',
+      backend: 'test',
+    }));
+
+    const decisions = [
+      { action: 'search', query: 'extract topic', gapId: 'gap-1', reasonCode: 'search' },
+      { action: 'answer', reasonCode: 'done' },
+    ];
+    const purposes = [];
+    const result = await new ResearchRunner().run({
+      query: 'extract topic',
+      settings: { llm: {}, search: {}, research: {
+        strategy: 'adaptive',
+        adaptive: { loopVersion: 'v2', maxSteps: 6, maxEvaluationRetries: 0, autoReadTopK: 0 },
+        sourceBased: { fetchMode: 'extract', fetchBackend: 'auto' },
+        providers: {
+          embedding: {
+            async embedDocuments(texts) {
+              return texts.map((text) => (String(text).toLowerCase().includes('llama.cpp') ? [1, 0] : [0, 1]));
+            },
+          },
+        },
+      } },
+      search: { async search() { return [{ title: 'Extract', url: 'https://extract.test/page', snippet: 'snippet', content: 'Extract topic evidence from a selected source.', fetchStatus: 'ok' }]; } },
+      llm: { async complete({ purpose }) {
+        purposes.push(purpose);
+        if (purpose === 'agent_decision') return JSON.stringify(decisions.shift());
+        if (purpose === 'gap_decomposition') return 'no json';
+        if (purpose === 'source_summary') throw new Error('extract mode should not call source_summary');
+        return report();
+      } },
+    });
+
+    resetContentFetchHandlers();
+    assert.ok(result.findings.length > 0);
+    assert.equal(purposes.includes('source_summary'), false);
+    assert.ok(result.findings.some((finding) => (finding.sources || []).some((source) => source.extractionMethod === 'embedding')));
+  });
+
   it('auto-read respects the sourceReads budget without throwing', async () => {
     const decisions = [
       { action: 'search', query: 'budget read topic', gapId: 'gap-1', reasonCode: 'search' },

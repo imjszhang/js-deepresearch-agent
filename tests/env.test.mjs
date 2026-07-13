@@ -132,6 +132,23 @@ EXISTING=from-file
     assert.equal(enabled.research.providers.rerank.timeoutMs, 4567);
   });
 
+  it('maps optional embedding settings and falls back to OPENCLAW_GATEWAY_TOKEN', () => {
+    const keyed = settingsFromEnv({ OPENCLAW_GATEWAY_TOKEN: 'gateway-token' });
+    assert.equal(keyed.research.providers.embedding.apiKey, 'gateway-token');
+    assert.equal(keyed.research.providers.embedding.provider, undefined);
+
+    const enabled = settingsFromEnv({
+      JDR_EMBEDDING_PROVIDER: 'openai-compatible',
+      JDR_EMBEDDING_BASE_URL: 'http://127.0.0.1:18789',
+      JDR_EMBEDDING_MODEL: 'openclaw/default',
+      OPENCLAW_GATEWAY_TOKEN: 'gateway-token',
+    });
+    assert.equal(enabled.research.providers.embedding.provider, 'openai-compatible');
+    assert.equal(enabled.research.providers.embedding.baseUrl, 'http://127.0.0.1:18789');
+    assert.equal(enabled.research.providers.embedding.model, 'openclaw/default');
+    assert.equal(enabled.research.providers.embedding.apiKey, 'gateway-token');
+  });
+
   it('applies env overrides when reading settings from the store', () => {
     const db = migrateDb(new Database(':memory:'));
     const store = new SettingsStore(db);

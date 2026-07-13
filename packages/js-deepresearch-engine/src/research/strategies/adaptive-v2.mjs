@@ -83,6 +83,7 @@ export async function runAdaptiveV2(context) {
       signal,
       settings,
       budget,
+      embedding: researchProviders?.embedding,
     }))[0];
     state.findings.push(finding);
     const readHostnames = [];

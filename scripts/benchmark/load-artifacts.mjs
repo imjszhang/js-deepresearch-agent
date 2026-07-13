@@ -14,6 +14,17 @@ export function loadArtifactsByResearchId(researchId, options = {}) {
   return loadFromIntelStore(researchId, options);
 }
 
+function readJsonFile(filePath) {
+  const buffer = fs.readFileSync(filePath);
+  let raw;
+  if (buffer.length >= 2 && buffer[0] === 0xFF && buffer[1] === 0xFE) {
+    raw = buffer.toString('utf16le');
+  } else {
+    raw = buffer.toString('utf8');
+  }
+  return JSON.parse(raw.replace(/^\uFEFF/, ''));
+}
+
 export function loadArtifacts(workDir) {
   const resolvedDir = path.resolve(workDir);
 
@@ -26,13 +37,13 @@ export function loadArtifacts(workDir) {
     throw new Error(`Missing required artifact files: ${missing.join(', ')}`);
   }
 
-  const meta = JSON.parse(fs.readFileSync(path.join(resolvedDir, 'meta.json'), 'utf8'));
-  const findings = JSON.parse(fs.readFileSync(path.join(resolvedDir, 'findings.json'), 'utf8'));
-  const sources = JSON.parse(fs.readFileSync(path.join(resolvedDir, 'sources.json'), 'utf8'));
+  const meta = readJsonFile(path.join(resolvedDir, 'meta.json'));
+  const findings = readJsonFile(path.join(resolvedDir, 'findings.json'));
+  const sources = readJsonFile(path.join(resolvedDir, 'sources.json'));
   const report = fs.readFileSync(path.join(resolvedDir, 'report.md'), 'utf8');
   const optional = Object.fromEntries(OPTIONAL_JSON.map((name) => {
     const file = path.join(resolvedDir, `${name}.json`);
-    return [name, fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : (name === 'quality' ? null : [])];
+    return [name, fs.existsSync(file) ? readJsonFile(file) : (name === 'quality' ? null : [])];
   }));
 
   return {

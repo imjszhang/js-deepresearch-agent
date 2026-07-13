@@ -27,6 +27,7 @@ export async function runSourceBasedPipeline(context) {
     budget,
     queryMemory,
     trace = [],
+    researchProviders,
   } = context;
 
   const sourceBased = resolveSourceBasedSettings(settings);
@@ -111,6 +112,7 @@ export async function runSourceBasedPipeline(context) {
         signal,
         settings,
         budget,
+        embedding: researchProviders?.embedding,
       });
       findings.push(...enriched);
     } else {

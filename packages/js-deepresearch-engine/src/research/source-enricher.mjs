@@ -1,4 +1,5 @@
 import { resolveUrlContent } from './content-resolver.mjs';
+import { selectRelevantPassages } from './passage-selector.mjs';
 
 function isAbortError(error) {
   return error?.name === 'AbortError';
@@ -34,6 +35,7 @@ async function enrichOneSource(source, {
   maxContentChars,
   settings,
   budget,
+  embedding,
 }) {
   const url = String(source.url || '').trim();
   if (!url) {
@@ -65,6 +67,29 @@ async function enrichOneSource(source, {
       title: source.title || fetched.title,
       content: fetched.content,
       contentOrigin: 'fetched',
+      fetchStatus: 'ok',
+      relatedLinks: settings?.research?.sourceBased?.sourceSelection?.expandPageLinks
+        ? (fetched.links || []).slice(0, settings.research.sourceBased.sourceSelection.maxExpandedLinksPerPage || 5)
+        : undefined,
+    };
+  }
+
+  if (fetchMode === 'extract') {
+    const summary = await selectRelevantPassages({
+      query,
+      question,
+      content: fetched.content,
+      snippet: source.snippet,
+      embedding,
+      signal,
+    });
+    return {
+      ...source,
+      title: source.title || fetched.title,
+      content: fetched.content,
+      contentOrigin: 'fetched',
+      summary: String(summary || '').trim() || source.snippet,
+      extractionMethod: embedding ? 'embedding' : 'overlap',
       fetchStatus: 'ok',
       relatedLinks: settings?.research?.sourceBased?.sourceSelection?.expandPageLinks
         ? (fetched.links || []).slice(0, settings.research.sourceBased.sourceSelection.maxExpandedLinksPerPage || 5)
@@ -111,6 +136,7 @@ export async function enrichFindingSources(finding, options = {}) {
     signal,
     settings,
     budget,
+    embedding,
     seenUrls = new Set(),
     enrichedCount = { value: 0 },
   } = options;
@@ -165,6 +191,7 @@ export async function enrichFindingSources(finding, options = {}) {
           maxContentChars,
           settings,
           budget,
+          embedding,
         });
         enrichedByUrl.set(source.url, enriched);
         if (enriched.fetchStatus === 'ok') {

@@ -40,7 +40,7 @@ function completeTrace(entry, budget, status = 'success') {
 }
 
 export async function runAdaptiveV1(context) {
-  const { query, llm, search, signal, emit, settings, concurrency, budget, queryMemory, trace } = context;
+  const { query, llm, search, signal, emit, settings, concurrency, budget, queryMemory, trace, researchProviders } = context;
   const adaptive = settings?.research?.adaptive || {};
   const sourceBased = resolveSourceBasedSettings(settings);
   const maxSteps = Math.max(6, Number(adaptive.maxSteps) || 12);
@@ -100,6 +100,7 @@ export async function runAdaptiveV1(context) {
         signal,
         settings,
         budget,
+        embedding: researchProviders?.embedding,
       });
       completeTrace(readTrace, budget);
       steps += 1;

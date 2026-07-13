@@ -1,6 +1,7 @@
 import { querySimilarity } from './query-memory.mjs';
 import { HttpRerankProvider } from './providers/http-rerank-provider.mjs';
 import { JinaRerankProvider } from './providers/jina-rerank-provider.mjs';
+import { OpenAiEmbeddingProvider } from './providers/openai-embedding-provider.mjs';
 import { DisabledRerankProvider, RulesRerankProvider } from './providers/rules-rerank-provider.mjs';
 import { isAbortError } from './providers/semantic-provider-errors.mjs';
 
@@ -32,6 +33,15 @@ function resolveRerank(config, { budget } = {}) {
   throw new Error(`Unsupported rerank provider: ${config.provider}`);
 }
 
+function resolveEmbedding(config) {
+  if (!config || config.provider === 'disabled') return null;
+  if (['openai-compatible', 'http', 'openai', 'local'].includes(config.provider)) {
+    return new OpenAiEmbeddingProvider(config);
+  }
+  if (config.embed || config.embedDocuments) return config;
+  throw new Error(`Unsupported embedding provider: ${config.provider}`);
+}
+
 function wrapRerank(primary, fallback, { budget, onEvent } = {}) {
   return {
     provider: primary.provider,
@@ -58,10 +68,11 @@ function wrapRerank(primary, fallback, { budget, onEvent } = {}) {
 export function createResearchProviders(config = {}, runtime = {}) {
   const fallback = new RulesRerankProvider(config.rerank || {});
   const rerank = resolveRerank(config.rerank, runtime);
+  const embedding = resolveEmbedding(config.embedding);
   return {
     ...deterministicResearchProviders,
     ...config,
-    embedding: (config.embedding?.embed || config.embedding?.embedDocuments) ? config.embedding : null,
+    embedding,
     rerank: wrapRerank(rerank, fallback, runtime),
   };
 }

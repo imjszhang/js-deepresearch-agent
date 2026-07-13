@@ -31,13 +31,13 @@ export function formatStrategyCompareMarkdown(comparison) {
   lines.push(
     '## Overview',
     '',
-    '| Strategy | Duration | Sources | LLM tokens | Search | Reads | Rerank | Gate |',
-    '| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |',
+    '| Strategy | Duration | Sources | LLM tokens | LLM reqs | source_summary | Search | Reads | Rerank | Gate |',
+    '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |',
   );
 
   for (const run of comparison.runs) {
     lines.push(
-      `| ${run.strategyLabel} | ${run.durationLabel} | ${run.counts.sourceCount} | ${run.cost.llmTokens} | ${run.cost.searchRequests} | ${run.cost.sourceReads} | ${run.cost.rerankRequests} | ${run.gate || 'n/a'} |`,
+      `| ${run.strategyLabel} | ${run.durationLabel} | ${run.counts.sourceCount} | ${run.cost.llmTokens} | ${run.cost.llmRequests} | ${run.llmPurposes?.sourceSummaryCalls ?? 'n/a'} | ${run.cost.searchRequests} | ${run.cost.sourceReads} | ${run.cost.rerankRequests} | ${run.gate || 'n/a'} |`,
     );
   }
 
