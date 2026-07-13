@@ -5,6 +5,7 @@ import { resolveSourceBasedSettings } from '../source-based-settings.mjs';
 import { applySourceSelection } from '../source-candidates.mjs';
 import { evaluateEvidenceSufficiency } from '../quality-gates.mjs';
 import { resolveStrategyConcurrency } from '../strategy-utils.mjs';
+import { runAdaptiveV2 } from './adaptive-v2.mjs';
 
 export const adaptiveStrategyDefinition = {
   id: 'adaptive',
@@ -38,7 +39,7 @@ function completeTrace(entry, budget, status = 'success') {
   entry.status = status;
 }
 
-export async function runAdaptive(context) {
+export async function runAdaptiveV1(context) {
   const { query, llm, search, signal, emit, settings, concurrency, budget, queryMemory, trace } = context;
   const adaptive = settings?.research?.adaptive || {};
   const sourceBased = resolveSourceBasedSettings(settings);
@@ -128,4 +129,9 @@ export async function runAdaptive(context) {
   }
   emit({ stage: 'research_stopped', reason: steps >= maxSteps ? 'max_steps' : 'sufficient' });
   return findings;
+}
+
+export async function runAdaptive(context) {
+  if (context.settings?.research?.adaptive?.loopVersion === 'v2') return runAdaptiveV2(context);
+  return runAdaptiveV1(context);
 }

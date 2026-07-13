@@ -124,6 +124,7 @@ export function applyResearchFlags(settings, flags) {
     'rerank-base-url': 'research.providers.rerank.baseUrl',
     'rerank-api-key': 'research.providers.rerank.apiKey',
     'rerank-timeout-ms': 'research.providers.rerank.timeoutMs',
+    'adaptive-loop-version': 'research.adaptive.loopVersion',
   };
 
   for (const [flag, key] of Object.entries(mappings)) {

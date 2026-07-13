@@ -133,6 +133,8 @@ The engine does not read `.env` files or persist settings. Callers are responsib
 - `parallel` — broad coverage with controlled concurrency
 - `adaptive` — experimental, budgeted gap-driven state machine with structured trace output
 
+Adaptive v1 remains the compatibility default. Set `research.adaptive.loopVersion: 'v2'` to opt into the bounded Agent Loop experiment. In v2 the LLM chooses one structured `search`, `read`, `reflect`, `answer`, or `stop` action per step. Runtime rules enforce only action preconditions, cancellation, budgets, and step limits. Rerank scores—when enabled—are included as candidate observations, but the agent may select any candidate. The loop works with rerank disabled and without embeddings.
+
 ## Research Controls and Schema v3
 
 `source-based` defaults to a quality-oriented preset: `fetchMode: summary`, enabled `queryMemory`, `sourceSelection`, `evidencePassages` (with `claimAlignment`), and `adaptiveControl`, plus soft budgets (`maxSearchRequests: 10`, `maxSourceReads: 8`). Set `fetchMode: disabled` or turn individual controls off when embedding the engine in latency-sensitive paths. `preReportGate` and LLM relevance filtering stay disabled by default.
