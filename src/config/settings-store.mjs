@@ -51,12 +51,25 @@ export class SettingsStore {
 
   withEnvOverrides(stored = {}) {
     const envOverrides = settingsFromEnv();
+    const storedResearch = stored.research || {};
+    const envResearch = envOverrides.research || {};
+    const storedProviders = storedResearch.providers || {};
+    const envProviders = envResearch.providers || {};
 
     return {
       ...stored,
       llm: { ...(stored.llm || {}), ...(envOverrides.llm || {}) },
       search: { ...(stored.search || {}), ...(envOverrides.search || {}) },
-      research: { ...(stored.research || {}), ...(envOverrides.research || {}) },
+      research: {
+        ...storedResearch,
+        ...envResearch,
+        providers: {
+          ...storedProviders,
+          ...envProviders,
+          embedding: { ...(storedProviders.embedding || {}), ...(envProviders.embedding || {}) },
+          rerank: { ...(storedProviders.rerank || {}), ...(envProviders.rerank || {}) },
+        },
+      },
     };
   }
 }

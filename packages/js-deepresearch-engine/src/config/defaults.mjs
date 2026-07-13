@@ -32,8 +32,21 @@ export const defaultSettings = Object.freeze({
       maxLlmTokens: 0,
       maxSearchRequests: 10,
       maxSourceReads: 8,
+      maxRerankRequests: 0,
+      maxRerankTokens: 0,
       maxEstimatedCost: 0,
       reserveReportTokens: 1200,
+    },
+    providers: {
+      embedding: { provider: 'disabled' },
+      rerank: {
+        provider: 'rules',
+        model: 'unicode-token-overlap-v1',
+        baseUrl: 'https://api.jina.ai/v1',
+        apiKey: '',
+        batchSize: 100,
+        timeoutMs: 30000,
+      },
     },
     sourceBased: {
       fetchMode: 'summary',
@@ -111,6 +124,18 @@ export function mergeSettings(overrides = {}) {
       reportValidation: {
         ...defaultSettings.research.reportValidation,
         ...(overrides.research?.reportValidation || {}),
+      },
+      providers: {
+        ...defaultSettings.research.providers,
+        ...(overrides.research?.providers || {}),
+        embedding: {
+          ...defaultSettings.research.providers.embedding,
+          ...(overrides.research?.providers?.embedding || {}),
+        },
+        rerank: {
+          ...defaultSettings.research.providers.rerank,
+          ...(overrides.research?.providers?.rerank || {}),
+        },
       },
       sourceBased: {
         ...defaultSettings.research.sourceBased,

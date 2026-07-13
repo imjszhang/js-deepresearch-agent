@@ -379,7 +379,8 @@ js-deepresearch-agent
 
 Commands:
   research "query" [--search js-eyes|searxng] [--search-skills skillA,skillB] [--search-server-url ws://localhost:18080] [--strategy source-based|rapid|parallel|adaptive] [--iterations 2] [--questions 3] [--concurrency 2] [--max-search-requests 0] [--max-source-reads 0] [--source-adaptive-control true|false] [--source-query-memory true|false] [--source-evidence-passages true|false] [--source-claim-alignment true|false] [--source-pre-report-gate true|false] [--work-dir work_dir] [--output report.md] [--json] [--no-save] [--no-work-dir]
-    Budgets: --max-llm-tokens 0 --max-search-requests 0 --max-source-reads 0 --reserve-report-tokens 1200
+    Budgets: --max-llm-tokens 0 --max-search-requests 0 --max-source-reads 0 --max-rerank-requests 0 --max-rerank-tokens 0 --reserve-report-tokens 1200
+    Optional rerank: --rerank-provider rules|disabled|jina --rerank-model <name> --rerank-base-url <url> --rerank-api-key <key> --rerank-timeout-ms 30000
     Source controls: --source-cluster-results true|false --source-max-per-hostname 2
     Press Ctrl+C once to cancel gracefully; press again to force exit.
   config get [key]

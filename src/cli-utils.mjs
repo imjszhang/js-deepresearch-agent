@@ -109,6 +109,8 @@ export function applyResearchFlags(settings, flags) {
     'max-llm-tokens': 'research.budget.maxLlmTokens',
     'max-search-requests': 'research.budget.maxSearchRequests',
     'max-source-reads': 'research.budget.maxSourceReads',
+    'max-rerank-requests': 'research.budget.maxRerankRequests',
+    'max-rerank-tokens': 'research.budget.maxRerankTokens',
     'reserve-report-tokens': 'research.budget.reserveReportTokens',
     'source-adaptive-control': 'research.sourceBased.adaptiveControl.enabled',
     'source-query-memory': 'research.sourceBased.queryMemory.enabled',
@@ -117,6 +119,11 @@ export function applyResearchFlags(settings, flags) {
     'source-evidence-passages': 'research.sourceBased.evidencePassages.enabled',
     'source-claim-alignment': 'research.sourceBased.evidencePassages.claimAlignment',
     'source-pre-report-gate': 'research.sourceBased.preReportGate.enabled',
+    'rerank-provider': 'research.providers.rerank.provider',
+    'rerank-model': 'research.providers.rerank.model',
+    'rerank-base-url': 'research.providers.rerank.baseUrl',
+    'rerank-api-key': 'research.providers.rerank.apiKey',
+    'rerank-timeout-ms': 'research.providers.rerank.timeoutMs',
   };
 
   for (const [flag, key] of Object.entries(mappings)) {

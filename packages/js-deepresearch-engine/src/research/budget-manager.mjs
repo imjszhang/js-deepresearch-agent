@@ -18,13 +18,15 @@ export class BudgetManager {
       llmTokens: limit(budget.maxLlmTokens),
       searchRequests: limit(budget.maxSearchRequests),
       sourceReads: limit(budget.maxSourceReads),
+      rerankRequests: limit(budget.maxRerankRequests),
+      rerankTokens: limit(budget.maxRerankTokens),
       estimatedCost: limit(budget.maxEstimatedCost),
     };
     this.reserveReportTokens = limit(budget.reserveReportTokens) || 1200;
     if (this.limits.llmTokens > 0) this.reserveReportTokens = Math.min(this.reserveReportTokens, this.limits.llmTokens);
     this.defaultLlmMaxTokens = limit(settings?.llm?.maxTokens) || 4000;
-    this.usage = { llmRequests: 0, llmTokens: 0, searchRequests: 0, sourceReads: 0, estimatedCost: 0 };
-    this.unknown = { llmTokens: false, estimatedCost: false };
+    this.usage = { llmRequests: 0, llmTokens: 0, searchRequests: 0, sourceReads: 0, rerankRequests: 0, rerankTokens: 0, estimatedCost: 0 };
+    this.unknown = { llmTokens: false, rerankTokens: false, estimatedCost: false };
     this.stopReason = null;
     this.exhaustedKinds = new Set();
     this.emit = emit;
@@ -62,6 +64,16 @@ export class BudgetManager {
       }
     }
     else this.unknown.estimatedCost = true;
+  }
+
+  recordRerankUsage(usage) {
+    const tokens = Number(usage?.tokens ?? usage?.totalTokens ?? usage?.total_tokens);
+    if (Number.isFinite(tokens)) {
+      this.usage.rerankTokens += tokens;
+      if (this.limits.rerankTokens > 0 && this.usage.rerankTokens >= this.limits.rerankTokens) this.markExhausted('rerankTokens');
+    } else {
+      this.unknown.rerankTokens = true;
+    }
   }
 
   canClaim(kind, amount = 1, options) {

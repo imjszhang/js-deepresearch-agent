@@ -117,6 +117,21 @@ EXISTING=from-file
     assert.equal(overrides.research.workDir, '/tmp/custom-work');
   });
 
+  it('maps optional rerank settings without enabling Jina from its key alone', () => {
+    const keyed = settingsFromEnv({ JINA_API_KEY: 'test-key' });
+    assert.equal(keyed.research.providers.rerank.apiKey, 'test-key');
+    assert.equal(keyed.research.providers.rerank.provider, undefined);
+
+    const enabled = settingsFromEnv({
+      JDR_RERANK_PROVIDER: 'jina',
+      JDR_RERANK_MODEL: 'rerank-model',
+      JDR_SEMANTIC_TIMEOUT_MS: '4567',
+    });
+    assert.equal(enabled.research.providers.rerank.provider, 'jina');
+    assert.equal(enabled.research.providers.rerank.model, 'rerank-model');
+    assert.equal(enabled.research.providers.rerank.timeoutMs, 4567);
+  });
+
   it('applies env overrides when reading settings from the store', () => {
     const db = migrateDb(new Database(':memory:'));
     const store = new SettingsStore(db);

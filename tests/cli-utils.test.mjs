@@ -126,4 +126,25 @@ describe('CLI utilities', () => {
     assert.equal(settings.research.sourceBased.evidencePassages.claimAlignment, true);
     assert.equal(settings.research.sourceBased.preReportGate.enabled, true);
   });
+
+  it('maps optional rerank flags without persisting them', () => {
+    const settings = applyResearchFlags({ research: {} }, {
+      'max-rerank-requests': '3',
+      'max-rerank-tokens': '900',
+      'rerank-provider': 'jina',
+      'rerank-model': 'custom-reranker',
+      'rerank-base-url': 'https://rerank.example/v1',
+      'rerank-api-key': 'one-run-key',
+      'rerank-timeout-ms': '1234',
+    });
+    assert.equal(settings.research.budget.maxRerankRequests, 3);
+    assert.equal(settings.research.budget.maxRerankTokens, 900);
+    assert.deepEqual(settings.research.providers.rerank, {
+      provider: 'jina',
+      model: 'custom-reranker',
+      baseUrl: 'https://rerank.example/v1',
+      apiKey: 'one-run-key',
+      timeoutMs: 1234,
+    });
+  });
 });

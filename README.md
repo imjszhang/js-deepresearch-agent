@@ -183,6 +183,8 @@ Available research strategies are exposed through `/api/strategies` and shared b
 
 `source-based` defaults to a quality preset: `fetchMode: summary`, query memory, source clustering, passage/claim evidence, adaptive early-stop, and soft budgets (`maxSearchRequests: 10`, `maxSourceReads: 8`). Override per run with CLI flags such as `--source-fetch-mode disabled` or `config set` / Web UI settings. `preReportGate` and LLM relevance filtering remain off by default.
 
+Semantic reranking is an optional observation, not a prerequisite or automatic source selector. The default `rules` provider is local and deterministic; `--rerank-provider jina` opts into Jina for that run and requires `--rerank-api-key` (or `JINA_API_KEY`). Provider errors fall back to rules, while cancellation and budget limits remain hard stops. Embeddings are disabled by default and are not needed by any current strategy.
+
 Completed work sessions use artifact schema v3. The original `report.md`, `findings.json`, `sources.json`, and `meta.json` remain compatible; optional `gaps.json`, `passages.json`, `claims.json`, `quality.json`, and `trace.json` preserve evidence links, quality state, budgets, and structured actions. Intel Store v2 runs remain readable and can be upgraded idempotently with `intel import --upgrade-existing`.
 
 Use the web UI, `.env`, or `jdr config set <key> <value>` to update them.

@@ -95,6 +95,18 @@ export function settingsFromEnv(env = process.env) {
   if (workDir) {
     research.workDir = workDir;
   }
+  const rerankProvider = readEnv('JDR_RERANK_PROVIDER');
+  const jinaApiKey = readEnv('JINA_API_KEY');
+  const rerankModel = readEnv('JDR_RERANK_MODEL');
+  const semanticTimeout = readEnv('JDR_SEMANTIC_TIMEOUT_MS');
+  if (rerankProvider || jinaApiKey || rerankModel || semanticTimeout) {
+    research.providers = { rerank: {
+      ...(rerankProvider ? { provider: rerankProvider } : {}),
+      ...(jinaApiKey ? { apiKey: jinaApiKey } : {}),
+      ...(rerankModel ? { model: rerankModel } : {}),
+      ...(semanticTimeout ? { timeoutMs: Number(semanticTimeout) } : {}),
+    } };
+  }
 
   return {
     ...(Object.keys(llm).length ? { llm } : {}),

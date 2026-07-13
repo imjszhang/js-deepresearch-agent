@@ -26,4 +26,13 @@ describe('settings defaults', () => {
     assert.equal(settings.research.sourceBased.evidencePassages.claimAlignment, true);
     assert.equal(defaultSettings.research.sourceBased.queryMemory.enabled, true);
   });
+
+  it('keeps semantic providers optional and deeply merges rerank overrides', () => {
+    const settings = mergeSettings({ research: { providers: { rerank: { provider: 'jina', apiKey: 'key' } } } });
+    assert.equal(defaultSettings.research.providers.embedding.provider, 'disabled');
+    assert.equal(defaultSettings.research.providers.rerank.provider, 'rules');
+    assert.equal(settings.research.providers.rerank.provider, 'jina');
+    assert.equal(settings.research.providers.rerank.apiKey, 'key');
+    assert.equal(settings.research.providers.rerank.timeoutMs, 30000);
+  });
 });

@@ -139,6 +139,17 @@ The engine does not read `.env` files or persist settings. Callers are responsib
 
 Schema v3 results retain `report`, `findings`, and `sources` and add `gaps`, `passages`, `claims`, `quality`, and a structured `trace`. Passage and claim generation run when `evidencePassages` is enabled (default for `source-based`). Semantic helpers use pluggable research providers and deterministic local fallbacks.
 
+Reranking is optional. `research.providers.rerank.provider` defaults to `rules`, which performs deterministic Unicode token-overlap scoring without network access. Set it to `jina` and provide an API key to opt into Jina reranking; failures degrade to rules, while cancellation and budget exhaustion continue to propagate. Embeddings are not required and no remote embedding provider is enabled by default.
+
+```javascript
+const settings = mergeSettings({
+  research: {
+    providers: { rerank: { provider: 'jina', apiKey: process.env.JINA_API_KEY } },
+    budget: { maxRerankRequests: 4, maxRerankTokens: 8000 },
+  },
+});
+```
+
 Quality metrics v2 classify report statements as fact claims, caveats, recommendations, source entries, or metadata. Only key/supporting fact claims enter support-rate denominators. Every fact claim receives one aggregate verdict, including `conflicting` for contradictory evidence; zero-denominator rates are `null`. Artifacts record the metrics, extraction, and evaluation versions so benchmarks can distinguish stored evaluation from a new runtime judgment.
 
 Report synthesis validates non-empty Markdown output with `research.reportValidation.minChars` (default `200`) and `maxAttempts` (default `2`). Invalid output is retried with a final-answer-only prompt, then raises `ReportGenerationError` instead of returning a completed run. Structured LLM telemetry records only safe operational metadata. Source-based runs also emit gaps and rule-based limitations, focus follow-up searches on missing primary evidence, and only build direct passages from source bodies whose fetch completed successfully.
@@ -201,6 +212,7 @@ const artifacts = saveResearchToWorkDir({
 | `defaultSettings`, `mergeSettings` | Settings schema |
 | `saveResearchToWorkDir`, `saveResearchArtifacts`, `createWorkSessionDir` | Artifact writers |
 | `normalizeSearchConfig`, `resolveSearchConcurrency` | Generic search config helpers |
+| `createResearchProviders`, `RulesRerankProvider`, `JinaRerankProvider` | Optional semantic provider composition and rerank adapters |
 
 ## Requirements
 

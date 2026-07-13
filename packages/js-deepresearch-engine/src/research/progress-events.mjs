@@ -98,6 +98,9 @@ export function mapStructuredProgressEvent(event) {
       progress: null,
       level: event.status === 'failed' ? 'error' : level,
     };
+    case 'rerank_started': return { message: `Reranking ${event.inputCount || 0} candidate sources`, progress: null, level };
+    case 'rerank_completed': return { message: `Rerank completed (${event.provider}, ${event.durationMs ?? 0}ms)`, progress: null, level };
+    case 'rerank_degraded': return { message: `Rerank provider degraded to local rules (${event.errorCode})`, progress: null, level: 'warn' };
     case 'research_stopped': return { message: `Research stopped: ${event.reason || 'complete'}`, progress: 78, level };
     case 'budget_exhausted': return { message: `Research budget exhausted: ${event.kind}`, progress: 78, level };
     default:
