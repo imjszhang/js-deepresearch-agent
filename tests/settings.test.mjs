@@ -20,7 +20,7 @@ describe('settings defaults', () => {
     assert.equal(settings.research.questionsPerIteration, 2);
     assert.equal(settings.research.concurrency, 1);
     assert.equal(settings.research.budget.maxSearchRequests, 10);
-    assert.equal(settings.research.budget.maxSourceReads, 8);
+    assert.equal(settings.research.budget.maxSourceReads, 12);
     assert.equal(settings.research.sourceBased.fetchMode, 'summary');
     assert.equal(settings.research.sourceBased.evidencePassages.enabled, true);
     assert.equal(settings.research.sourceBased.evidencePassages.claimAlignment, true);

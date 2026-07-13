@@ -102,6 +102,7 @@ export const defaultSettings = Object.freeze({
       enableCoding: false,
       gateMode: 'rules-then-llm',
       maxEvaluationRetries: 1,
+      answerGate: true,
     },
   },
 });

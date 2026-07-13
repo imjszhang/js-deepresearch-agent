@@ -24,7 +24,7 @@ export function parseStrategyList(raw) {
 }
 
 export function applyStrategyPreset(baseSettings, preset) {
-  const settings = structuredClone(baseSettings);
+  const settings = JSON.parse(JSON.stringify(baseSettings || {}));
   settings.research ||= {};
   settings.research.strategy = preset.strategy;
   if (preset.loopVersion) {

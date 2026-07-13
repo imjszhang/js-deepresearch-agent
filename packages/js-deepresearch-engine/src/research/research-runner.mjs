@@ -65,7 +65,14 @@ export class ResearchRunner {
     const budgetLimitation = budgetBeforeReport.stopReason
       ? `The ${budgetBeforeReport.stopReason} budget was exhausted; remaining research actions were not scheduled.`
       : null;
-    const reportLimitations = [...preReport.limitations, ...(budgetLimitation ? [budgetLimitation] : [])];
+    const degradedLimitation = findings.some((finding) => finding?.degraded)
+      ? 'Evidence gathering was cut short before completion; treat the collected evidence as incomplete and state remaining uncertainty explicitly.'
+      : null;
+    const reportLimitations = [
+      ...preReport.limitations,
+      ...(budgetLimitation ? [budgetLimitation] : []),
+      ...(degradedLimitation ? [degradedLimitation] : []),
+    ];
     if (sourceBased.preReportGate.blockUnsupportedClaims && preReport.gate === 'fail') {
       const error = new Error(`Research quality gate failed: ${preReport.flags.join(', ')}`);
       error.name = 'ResearchQualityError';
