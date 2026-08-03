@@ -1,6 +1,7 @@
 export class OllamaProvider {
   constructor(config) {
     this.config = config;
+    this.fetch = typeof config.fetch === 'function' ? config.fetch : globalThis.fetch;
   }
 
   async complete(args) {
@@ -10,7 +11,7 @@ export class OllamaProvider {
 
   async completeWithMetadata({ messages, signal, temperature }) {
     const baseUrl = (this.config.baseUrl || 'http://127.0.0.1:11434').replace(/\/$/, '');
-    const response = await fetch(`${baseUrl}/api/chat`, {
+    const response = await this.fetch(`${baseUrl}/api/chat`, {
       method: 'POST',
       signal,
       headers: {

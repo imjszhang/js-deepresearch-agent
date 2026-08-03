@@ -14,7 +14,15 @@ export const deterministicResearchProviders = Object.freeze({
   freshnessResolver: { async resolve(source) { return source?.publishedAt || source?.date || null; } },
 });
 
-function resolveRerank(config, { budget } = {}) {
+function withFetch(config, fetch) {
+  if (!config || typeof fetch !== 'function') {
+    return config;
+  }
+  return { ...config, fetch };
+}
+
+function resolveRerank(config, { budget, fetch } = {}) {
+  config = withFetch(config, fetch);
   if (config?.rerank) return config;
   if (config?.provider === 'disabled') return new DisabledRerankProvider();
   if (!config || config.provider === 'rules' || !config.provider) {
@@ -33,7 +41,8 @@ function resolveRerank(config, { budget } = {}) {
   throw new Error(`Unsupported rerank provider: ${config.provider}`);
 }
 
-function resolveEmbedding(config) {
+function resolveEmbedding(config, { fetch } = {}) {
+  config = withFetch(config, fetch);
   if (!config || config.provider === 'disabled') return null;
   if (['openai-compatible', 'http', 'openai', 'local'].includes(config.provider)) {
     return new OpenAiEmbeddingProvider(config);
@@ -66,9 +75,10 @@ function wrapRerank(primary, fallback, { budget, onEvent } = {}) {
 }
 
 export function createResearchProviders(config = {}, runtime = {}) {
+  const fetch = runtime.fetch;
   const fallback = new RulesRerankProvider(config.rerank || {});
-  const rerank = resolveRerank(config.rerank, runtime);
-  const embedding = resolveEmbedding(config.embedding);
+  const rerank = resolveRerank(config.rerank, { budget: runtime.budget, fetch });
+  const embedding = resolveEmbedding(config.embedding, { fetch });
   return {
     ...deterministicResearchProviders,
     ...config,

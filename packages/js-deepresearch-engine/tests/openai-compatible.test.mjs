@@ -38,4 +38,31 @@ describe('OpenAI-compatible provider', () => {
     assert.equal(detailed.metadata.hasReasoningContent, true);
     assert.equal(JSON.stringify(detailed).includes('private reasoning text'), false);
   });
+
+  it('uses injected fetch instead of global fetch', async () => {
+    let injectedCalled = false;
+    const injectedFetch = async () => {
+      injectedCalled = true;
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { role: 'assistant', content: 'via proxy' }, finish_reason: 'stop' }],
+        }),
+      };
+    };
+
+    globalThis.fetch = async () => {
+      throw new Error('global fetch should not be used');
+    };
+
+    const provider = new OpenAICompatibleProvider({
+      model: 'test',
+      apiKey: 'test',
+      baseUrl: 'https://llm.test/v1',
+      fetch: injectedFetch,
+    });
+    const detailed = await provider.completeWithMetadata({ messages: [{ role: 'user', content: 'hi' }] });
+    assert.equal(injectedCalled, true);
+    assert.equal(detailed.text, 'via proxy');
+  });
 });

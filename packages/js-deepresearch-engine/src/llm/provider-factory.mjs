@@ -1,5 +1,6 @@
 import { OllamaProvider } from './providers/ollama.mjs';
 import { OpenAICompatibleProvider } from './providers/openai-compatible.mjs';
+import { createHttpFetch } from '../http/create-http-fetch.mjs';
 
 const llmProviders = new Map();
 
@@ -97,7 +98,8 @@ export function createLlmProvider(settings) {
   if (!entry?.create) {
     throw new Error(`Unsupported LLM provider for MVP: ${provider}`);
   }
-  return entry.create(settings.llm);
+  const fetch = createHttpFetch(settings?.http?.proxy);
+  return entry.create({ ...settings.llm, fetch });
 }
 
 registerBuiltins();

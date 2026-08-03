@@ -9,6 +9,7 @@ export class HttpRerankProvider {
     this.batchSize = Math.max(1, Number(config.batchSize) || 100);
     this.timeoutMs = Math.max(1, Number(config.timeoutMs) || 30000);
     this.onRequest = onRequest;
+    this.fetch = typeof config.fetch === 'function' ? config.fetch : globalThis.fetch;
   }
 
   async rerank({ query, documents = [], topK, signal }) {
@@ -26,7 +27,7 @@ export class HttpRerankProvider {
         requests += 1;
         const headers = { 'content-type': 'application/json' };
         if (this.apiKey) headers.authorization = `Bearer ${this.apiKey}`;
-        const response = await fetch(`${this.baseUrl}/rerank`, {
+        const response = await this.fetch(`${this.baseUrl}/rerank`, {
           method: 'POST',
           signal: timed.signal,
           headers,

@@ -95,6 +95,13 @@ export function settingsFromEnv(env = process.env) {
   if (workDir) {
     research.workDir = workDir;
   }
+
+  const http = {};
+  const httpProxy = readEnv('JDR_HTTP_PROXY');
+  if (httpProxy) {
+    http.proxy = httpProxy;
+  }
+
   const rerankProvider = readEnv('JDR_RERANK_PROVIDER');
   const jinaApiKey = readEnv('JINA_API_KEY');
   const rerankModel = readEnv('JDR_RERANK_MODEL');
@@ -125,6 +132,7 @@ export function settingsFromEnv(env = process.env) {
   }
 
   return {
+    ...(Object.keys(http).length ? { http } : {}),
     ...(Object.keys(llm).length ? { llm } : {}),
     ...(Object.keys(search).length ? { search: normalizeAppSearchConfig(search) } : {}),
     ...(Object.keys(research).length ? { research } : {}),

@@ -166,4 +166,11 @@ describe('CLI utilities', () => {
     });
     assert.equal(settings.research.sourceBased.fetchMode, 'extract');
   });
+
+  it('maps http-proxy flag without persisting it', () => {
+    const settings = applyResearchFlags({}, {
+      'http-proxy': 'socks5://127.0.0.1:1080',
+    });
+    assert.equal(settings.http.proxy, 'socks5://127.0.0.1:1080');
+  });
 });

@@ -1,6 +1,7 @@
 export class OpenAICompatibleProvider {
   constructor(config) {
     this.config = config;
+    this.fetch = typeof config.fetch === 'function' ? config.fetch : globalThis.fetch;
   }
 
   async complete(args) {
@@ -14,7 +15,7 @@ export class OpenAICompatibleProvider {
     }
 
     const baseUrl = (this.config.baseUrl || 'https://api.openai.com/v1').replace(/\/$/, '');
-    const response = await fetch(`${baseUrl}/chat/completions`, {
+    const response = await this.fetch(`${baseUrl}/chat/completions`, {
       method: 'POST',
       signal,
       headers: {

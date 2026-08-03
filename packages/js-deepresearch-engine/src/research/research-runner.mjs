@@ -1,5 +1,6 @@
 import { createLlmProvider } from '../llm/provider-factory.mjs';
 import { createSearchEngine } from '../search/search-factory.mjs';
+import { createHttpFetch } from '../http/create-http-fetch.mjs';
 import { createProgressEmitter } from './progress-events.mjs';
 import { buildReport } from './report-builder.mjs';
 import { runStrategy } from './strategies.mjs';
@@ -13,6 +14,7 @@ import { calculateQualityMetrics, qualityGateFromClaims } from './claim-quality.
 
 export class ResearchRunner {
   async run({ query, settings, signal, onProgress = () => {}, llm: providedLlm, search: providedSearch }) {
+    const proxiedFetch = createHttpFetch(settings?.http?.proxy);
     const rawLlm = providedLlm || createLlmProvider(settings);
     const rawSearch = providedSearch || createSearchEngine(settings);
     const strategy = settings.research.strategy || 'source-based';
@@ -37,6 +39,7 @@ export class ResearchRunner {
     const sourceBased = resolveSourceBasedSettings(settings);
     const researchProviders = createResearchProviders(settings?.research?.providers || {}, {
       budget,
+      fetch: proxiedFetch,
       onEvent: (event) => {
         trace.push({ step: trace.length + 1, action: 'rerank', reasonCode: `${event.operation}_${event.status}`, ...event, createdAt: new Date().toISOString() });
         emit({ stage: event.status === 'started' ? 'rerank_started' : (event.status === 'degraded' ? 'rerank_degraded' : 'rerank_completed'), ...event });

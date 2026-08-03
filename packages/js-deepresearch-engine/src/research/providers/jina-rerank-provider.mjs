@@ -9,6 +9,7 @@ export class JinaRerankProvider {
     this.batchSize = Math.max(1, Number(config.batchSize) || 100);
     this.timeoutMs = Math.max(1, Number(config.timeoutMs) || 30000);
     this.onRequest = onRequest;
+    this.fetch = typeof config.fetch === 'function' ? config.fetch : globalThis.fetch;
   }
 
   async rerank({ query, documents = [], topK, signal }) {
@@ -24,7 +25,7 @@ export class JinaRerankProvider {
       try {
         this.onRequest?.({ operation: 'rerank', inputCount: batch.length });
         requests += 1;
-        const response = await fetch(`${this.baseUrl}/rerank`, {
+        const response = await this.fetch(`${this.baseUrl}/rerank`, {
           method: 'POST',
           signal: timed.signal,
           headers: { 'content-type': 'application/json', authorization: `Bearer ${this.apiKey}` },

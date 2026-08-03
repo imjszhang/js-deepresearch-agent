@@ -1,6 +1,9 @@
 import { normalizeSearchConfig } from '../search/normalize-search-config.mjs';
 
 export const defaultSettings = Object.freeze({
+  http: {
+    proxy: '',
+  },
   llm: {
     provider: 'openai-compatible',
     model: 'gpt-4o-mini',
@@ -122,6 +125,7 @@ export function mergeSettings(overrides = {}) {
   delete searchOverrides.searxngUrl;
 
   const merged = {
+    http: { ...defaultSettings.http, ...(overrides.http || {}) },
     llm: { ...defaultSettings.llm, ...(overrides.llm || {}) },
     search: { ...defaultSettings.search, ...searchOverrides },
     research: {

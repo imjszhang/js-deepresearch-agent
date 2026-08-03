@@ -39,6 +39,7 @@ export class SettingsStore {
     return mergeAppSettings({
       ...current,
       ...overrides,
+      http: { ...current.http, ...(overrides.http || {}) },
       llm: { ...current.llm, ...(overrides.llm || {}) },
       search: { ...current.search, ...(overrides.search || {}) },
       research: { ...current.research, ...(overrides.research || {}) },
@@ -58,6 +59,7 @@ export class SettingsStore {
 
     return {
       ...stored,
+      http: { ...(stored.http || {}), ...(envOverrides.http || {}) },
       llm: { ...(stored.llm || {}), ...(envOverrides.llm || {}) },
       search: { ...(stored.search || {}), ...(envOverrides.search || {}) },
       research: {

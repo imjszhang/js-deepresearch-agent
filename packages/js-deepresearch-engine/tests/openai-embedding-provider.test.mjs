@@ -73,4 +73,44 @@ describe('OpenAI-compatible embedding provider', () => {
     const providers = createResearchProviders({});
     assert.equal(providers.embedding, null);
   });
+
+  it('uses injected fetch instead of global fetch', async () => {
+    let injectedCalled = false;
+    const injectedFetch = async () => {
+      injectedCalled = true;
+      return new globalThis.Response(JSON.stringify({
+        data: [{ index: 0, embedding: [0.5] }],
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    };
+
+    globalThis.fetch = async () => {
+      throw new Error('global fetch should not be used');
+    };
+
+    const provider = new OpenAiEmbeddingProvider({ fetch: injectedFetch });
+    const vector = await provider.embed('hello');
+    assert.equal(injectedCalled, true);
+    assert.deepEqual(vector, [0.5]);
+  });
+
+  it('passes runtime fetch into createResearchProviders embedding config', async () => {
+    let injectedCalled = false;
+    const injectedFetch = async () => {
+      injectedCalled = true;
+      return new globalThis.Response(JSON.stringify({
+        data: [{ index: 0, embedding: [0.7] }],
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    };
+
+    globalThis.fetch = async () => {
+      throw new Error('global fetch should not be used');
+    };
+
+    const providers = createResearchProviders({
+      embedding: { provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:18789' },
+    }, { fetch: injectedFetch });
+    const vector = await providers.embedding.embed('hello');
+    assert.equal(injectedCalled, true);
+    assert.deepEqual(vector, [0.7]);
+  });
 });

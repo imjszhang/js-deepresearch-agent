@@ -25,6 +25,7 @@ export class OpenAiEmbeddingProvider {
     this.batchSize = Math.min(128, Math.max(1, Number(config.batchSize) || 64));
     this.timeoutMs = Math.max(1, Number(config.timeoutMs) || 60000);
     this.onRequest = onRequest;
+    this.fetch = typeof config.fetch === 'function' ? config.fetch : globalThis.fetch;
   }
 
   async embedDocuments(texts = [], { signal } = {}) {
@@ -63,7 +64,7 @@ export class OpenAiEmbeddingProvider {
       this.onRequest?.({ operation: 'embed', inputCount: inputs.length });
       const headers = { 'content-type': 'application/json' };
       if (this.apiKey) headers.authorization = `Bearer ${this.apiKey}`;
-      const response = await fetch(`${this.baseUrl}/v1/embeddings`, {
+      const response = await this.fetch(`${this.baseUrl}/v1/embeddings`, {
         method: 'POST',
         signal: timed.signal,
         headers,

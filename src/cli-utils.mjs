@@ -128,6 +128,7 @@ export function applyResearchFlags(settings, flags) {
     'embedding-model': 'research.providers.embedding.model',
     'embedding-base-url': 'research.providers.embedding.baseUrl',
     'embedding-api-key': 'research.providers.embedding.apiKey',
+    'http-proxy': 'http.proxy',
     'adaptive-loop-version': 'research.adaptive.loopVersion',
     'adaptive-max-steps': 'research.adaptive.maxSteps',
     'adaptive-max-reads-per-step': 'research.adaptive.maxReadsPerStep',

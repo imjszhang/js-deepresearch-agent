@@ -22,6 +22,7 @@ export {
   resetSearchEngines,
 } from './search/search-factory.mjs';
 export { defaultSettings, mergeSettings } from './config/defaults.mjs';
+export { createHttpFetch, resetHttpFetchCache } from './http/create-http-fetch.mjs';
 export {
   createWorkSessionDir,
   formatSessionTimestamp,

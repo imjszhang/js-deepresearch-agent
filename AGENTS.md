@@ -128,6 +128,7 @@ npm exec --package=. -- jdr research "Explain the current state of local-first A
 | `--rerank-base-url` | `research.providers.rerank.baseUrl` | 可选 rerank API 地址 |
 | `--rerank-api-key` | `research.providers.rerank.apiKey` | 单次运行密钥；优先使用环境变量 |
 | `--rerank-timeout-ms` | `research.providers.rerank.timeoutMs` | 可选 rerank 请求超时 |
+| `--http-proxy` | `http.proxy` | SOCKS5/HTTP 代理 URL；仅 LLM / embedding / rerank 走代理，搜索与正文抓取直连 |
 | `--max-rerank-requests` | `research.budget.maxRerankRequests` | 外部 rerank 请求上限，`0` 不限制 |
 | `--max-rerank-tokens` | `research.budget.maxRerankTokens` | provider 可观测 rerank token 上限，`0` 不限制 |
 | `--adaptive-loop-version` | `research.adaptive.loopVersion` | `v1`（兼容默认）\| `v2`（实验 Agent Loop） |
@@ -571,6 +572,7 @@ npm run benchmark:strategies -- \
 | `JS_EYES_MAX_PAGES` | `search.jsEyesMaxPages` |
 | `JS_EYES_TIMEOUT_MS` | `search.jsEyesTimeoutMs` |
 | `WORK_DIR` | `research.workDir` |
+| `JDR_HTTP_PROXY` | `http.proxy`；SOCKS5/HTTP 代理 URL（如 `socks5://127.0.0.1:1080`）；仅 LLM / embedding / rerank 使用，不代理 SearXNG 与 URL 正文抓取 |
 | `JDR_RERANK_PROVIDER` | `research.providers.rerank.provider`；只有显式设为 `jina` 才启用远程调用 |
 | `JINA_API_KEY` | `research.providers.rerank.apiKey`；单独设置不会启用 Jina |
 | `JDR_RERANK_MODEL` | `research.providers.rerank.model` |

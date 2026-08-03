@@ -117,6 +117,31 @@ EXISTING=from-file
     assert.equal(overrides.research.workDir, '/tmp/custom-work');
   });
 
+  it('maps HTTP proxy env vars to settings overrides', () => {
+    const overrides = settingsFromEnv({
+      JDR_HTTP_PROXY: 'socks5://127.0.0.1:1080',
+    });
+
+    assert.equal(overrides.http.proxy, 'socks5://127.0.0.1:1080');
+  });
+
+  it('applies HTTP proxy env overrides when reading settings from the store', () => {
+    const db = migrateDb(new Database(':memory:'));
+    const store = new SettingsStore(db);
+
+    store.save({ llm: { model: 'gpt-4o-mini' } });
+
+    process.env.JDR_HTTP_PROXY = 'socks5://127.0.0.1:1080';
+    try {
+      const settings = store.get();
+      assert.equal(settings.http.proxy, 'socks5://127.0.0.1:1080');
+    } finally {
+      delete process.env.JDR_HTTP_PROXY;
+    }
+
+    db.close();
+  });
+
   it('maps optional rerank settings without enabling Jina from its key alone', () => {
     const keyed = settingsFromEnv({ JINA_API_KEY: 'test-key' });
     assert.equal(keyed.research.providers.rerank.apiKey, 'test-key');
