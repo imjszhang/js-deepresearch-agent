@@ -147,7 +147,9 @@ export function applyResearchFlags(settings, flags) {
     'http-proxy': 'http.proxy',
     'exploratory-max-steps': 'research.exploratory.maxSteps',
     'exploratory-max-reads-per-step': 'research.exploratory.maxReadsPerStep',
-    'exploratory-target-llm-tokens': 'research.exploratory.targetLlmTokens',
+    'exploratory-min-llm-tokens': 'research.exploratory.minLlmTokens',
+    'exploratory-max-llm-tokens': 'research.exploratory.maxLlmTokens',
+    'exploratory-target-llm-tokens': 'research.exploratory.minLlmTokens',
     'adaptive-max-steps': 'research.exploratory.maxSteps',
     'adaptive-max-reads-per-step': 'research.exploratory.maxReadsPerStep',
   };
@@ -170,6 +172,9 @@ export function applyResearchFlags(settings, flags) {
     if (flags[flag] !== undefined) {
       setDeepValue(settings, key, flags[flag]);
     }
+  }
+  if (flags['exploratory-min-llm-tokens'] !== undefined || flags['exploratory-target-llm-tokens'] !== undefined) {
+    setDeepValue(settings, 'research.exploratory.targetLlmTokens', settings.research?.exploratory?.minLlmTokens);
   }
   if (
     flags['focused-cluster-results'] !== undefined

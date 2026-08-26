@@ -73,7 +73,8 @@ export function extractRunStats(artifacts, { wallClockDurationMs = null } = {}) 
     gate: quality.gate || null,
     qualityFlags: Array.isArray(quality.flags) ? quality.flags : [],
     stopReason: quality.stopReason || budget.controllerStopReason || budget.stopReason || null,
-    targetLlmTokens: budget.targetLlmTokens || null,
+    minLlmTokens: budget.minLlmTokens || budget.targetLlmTokens || null,
+    targetLlmTokens: budget.minLlmTokens || budget.targetLlmTokens || null,
     actualLlmTokens: usage.llmTokens ?? 0,
     unusedBudgetTokens: budget.unusedBudgetTokens
       ?? (budget.targetLlmTokens > 0 && Number.isFinite(usage.llmTokens)

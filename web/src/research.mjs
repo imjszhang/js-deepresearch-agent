@@ -117,8 +117,12 @@ async function main() {
             <input id="exploratoryMaxReads" type="number" min="1" max="8" value="${exploratory.maxReadsPerStep ?? 4}" />
           </div>
           <div>
-            <label for="exploratoryTargetTokens">Target LLM tokens (0 = no soft target)</label>
-            <input id="exploratoryTargetTokens" type="number" min="0" value="${exploratory.targetLlmTokens ?? 20000}" />
+            <label for="exploratoryMinTokens">Min LLM tokens (keep exploring until this)</label>
+            <input id="exploratoryMinTokens" type="number" min="0" value="${exploratory.minLlmTokens ?? exploratory.targetLlmTokens ?? 20000}" />
+          </div>
+          <div>
+            <label for="exploratoryMaxTokens">Max LLM tokens (0 = unlimited)</label>
+            <input id="exploratoryMaxTokens" type="number" min="0" value="${exploratory.maxLlmTokens ?? 80000}" />
           </div>
           <div>
             <label><input id="answerGate" type="checkbox" ${exploratory.answerGate !== false ? 'checked' : ''} /> Answer gate</label>
@@ -205,7 +209,9 @@ function collectSettings() {
         ...(loadedSettings?.research?.exploratory || {}),
         maxSteps: Number(value('#exploratoryMaxSteps') || 16),
         maxReadsPerStep: Number(value('#exploratoryMaxReads') || 4),
-        targetLlmTokens: Number(value('#exploratoryTargetTokens') || 0),
+        minLlmTokens: Number(value('#exploratoryMinTokens') || 0),
+        maxLlmTokens: Number(value('#exploratoryMaxTokens') || 0),
+        targetLlmTokens: Number(value('#exploratoryMinTokens') || 0),
         answerGate: checked('#answerGate'),
       },
     },

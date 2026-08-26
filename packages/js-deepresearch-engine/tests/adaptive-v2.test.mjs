@@ -151,7 +151,7 @@ describe('exploratory agent loop', () => {
         llm: {}, search: {},
         research: {
           strategy: 'exploratory',
-          exploratory: { maxSteps: 5, maxEvaluationRetries: 0, autoReadTopK: 0 },
+          exploratory: { minLlmTokens: 0, maxLlmTokens: 0, maxSteps: 5, maxEvaluationRetries: 0, autoReadTopK: 0 },
           providers: { embedding: { provider: 'disabled' }, rerank: { provider: 'rules' } },
           focused: { fetchMode: 'disabled', evidencePassages: { enabled: true, claimAlignment: true } },
           budget: { maxSearchRequests: 3, maxSourceReads: 0, maxLlmTokens: 0 },
@@ -180,7 +180,7 @@ describe('exploratory agent loop', () => {
       query: 'fallback topic',
       settings: { llm: {}, search: {}, research: {
         strategy: 'exploratory',
-        exploratory: { maxSteps: 5, maxEvaluationRetries: 0 },
+        exploratory: { minLlmTokens: 0, maxLlmTokens: 0, maxSteps: 5, maxEvaluationRetries: 0 },
         focused: { fetchMode: 'disabled' },
       } },
       search: { async search() { return [{ title: 'S', url: 'https://source.test', content: 'Fallback topic evidence from a selected source.', fetchStatus: 'ok' }]; } },
@@ -199,7 +199,7 @@ describe('exploratory agent loop', () => {
     const result = await new ResearchRunner().run({
       query: 'gated topic',
       settings: { llm: {}, search: {}, research: {
-        strategy: 'exploratory', exploratory: { maxSteps: 6, maxEvaluationRetries: 0, autoReadTopK: 0 },
+        strategy: 'exploratory', exploratory: { minLlmTokens: 0, maxLlmTokens: 0, maxSteps: 6, maxEvaluationRetries: 0, autoReadTopK: 0 },
         focused: { fetchMode: 'disabled' },
       } },
       search: { async search() { return [{ title: 'G', url: 'https://gated.test', content: 'Gated topic evidence from a selected source.', fetchStatus: 'ok' }]; } },
@@ -220,7 +220,7 @@ describe('exploratory agent loop', () => {
     const result = await new ResearchRunner().run({
       query: 'duplicate query topic',
       settings: { llm: {}, search: {}, research: {
-        strategy: 'exploratory', exploratory: { maxSteps: 8, maxEvaluationRetries: 0, autoReadTopK: 0, targetLlmTokens: 0 },
+        strategy: 'exploratory', exploratory: { minLlmTokens: 0, maxLlmTokens: 0, maxSteps: 8, maxEvaluationRetries: 0, autoReadTopK: 0, targetLlmTokens: 0 },
         focused: { fetchMode: 'disabled' },
       } },
       search: { async search() { return [{ title: 'D', url: 'https://dupquery.test', content: 'Duplicate query topic evidence from a selected source.', fetchStatus: 'ok' }]; } },
@@ -246,7 +246,7 @@ describe('exploratory agent loop', () => {
     const result = await new ResearchRunner().run({
       query: 'quality topic',
       settings: { llm: {}, search: {}, research: {
-        strategy: 'exploratory', exploratory: { maxSteps: 8, maxEvaluationRetries: 1, autoReadTopK: 0 },
+        strategy: 'exploratory', exploratory: { minLlmTokens: 0, maxLlmTokens: 0, maxSteps: 8, maxEvaluationRetries: 1, autoReadTopK: 0 },
         focused: { fetchMode: 'disabled' },
       } },
       search: { async search() { return searches.shift() || []; } },
@@ -278,7 +278,7 @@ describe('exploratory agent loop', () => {
     const result = await new ResearchRunner().run({
       query: 'gate topic',
       settings: { llm: {}, search: {}, research: {
-        strategy: 'exploratory', exploratory: { maxSteps: 10, maxEvaluationRetries: 2, autoReadTopK: 0 },
+        strategy: 'exploratory', exploratory: { minLlmTokens: 0, maxLlmTokens: 0, maxSteps: 10, maxEvaluationRetries: 2, autoReadTopK: 0 },
         focused: { fetchMode: 'disabled' },
       } },
       search: { async search() { return searches.shift() || []; } },
@@ -300,7 +300,7 @@ describe('exploratory agent loop', () => {
     const result = await new ResearchRunner().run({
       query: 'compare ollama and llama.cpp',
       settings: { llm: {}, search: {}, research: {
-        strategy: 'exploratory', exploratory: { maxSteps: 6, maxEvaluationRetries: 0, maxQueriesPerStep: 3 },
+        strategy: 'exploratory', exploratory: { minLlmTokens: 0, maxLlmTokens: 0, maxSteps: 6, maxEvaluationRetries: 0, maxQueriesPerStep: 3 },
         focused: { fetchMode: 'disabled' },
       } },
       search: { async search(query) {
@@ -333,7 +333,7 @@ describe('exploratory agent loop', () => {
     const result = await new ResearchRunner().run({
       query: 'serp topic',
       settings: { llm: {}, search: {}, research: {
-        strategy: 'exploratory', exploratory: { maxSteps: 6, maxEvaluationRetries: 0 },
+        strategy: 'exploratory', exploratory: { minLlmTokens: 0, maxLlmTokens: 0, maxSteps: 6, maxEvaluationRetries: 0 },
         focused: { fetchMode: 'disabled' },
       } },
       search: { async search() { return [{ title: 'Serp title', url: 'https://serp.test', snippet: 'useful snippet', content: 'Serp topic evidence from a selected source.', fetchStatus: 'ok' }]; } },
@@ -361,7 +361,7 @@ describe('exploratory agent loop', () => {
     const result = await new ResearchRunner().run({
       query: 'auto topic',
       settings: { llm: {}, search: {}, research: {
-        strategy: 'exploratory', exploratory: { maxSteps: 6, maxEvaluationRetries: 0 },
+        strategy: 'exploratory', exploratory: { minLlmTokens: 0, maxLlmTokens: 0, maxSteps: 6, maxEvaluationRetries: 0 },
         focused: { fetchMode: 'disabled' },
       } },
       search: { async search() { return [
@@ -399,7 +399,7 @@ describe('exploratory agent loop', () => {
       query: 'extract topic',
       settings: { llm: {}, search: {}, research: {
         strategy: 'exploratory',
-        exploratory: { maxSteps: 6, maxEvaluationRetries: 0, autoReadTopK: 0 },
+        exploratory: { minLlmTokens: 0, maxLlmTokens: 0, maxSteps: 6, maxEvaluationRetries: 0, autoReadTopK: 0 },
         focused: { fetchMode: 'extract', fetchBackend: 'auto' },
         providers: {
           embedding: {
@@ -433,7 +433,7 @@ describe('exploratory agent loop', () => {
     const result = await new ResearchRunner().run({
       query: 'budget read topic',
       settings: { llm: {}, search: {}, research: {
-        strategy: 'exploratory', exploratory: { maxSteps: 6, maxEvaluationRetries: 0 },
+        strategy: 'exploratory', exploratory: { minLlmTokens: 0, maxLlmTokens: 0, maxSteps: 6, maxEvaluationRetries: 0 },
         focused: { fetchMode: 'disabled' },
         budget: { maxSourceReads: 1 },
       } },
@@ -460,7 +460,7 @@ describe('exploratory agent loop', () => {
     const result = await new ResearchRunner().run({
       query: 'parallel topic',
       settings: { llm: {}, search: {}, research: {
-        strategy: 'exploratory', exploratory: { maxSteps: 6, maxEvaluationRetries: 0, maxQueriesPerStep: 3, autoReadTopK: 0 },
+        strategy: 'exploratory', exploratory: { minLlmTokens: 0, maxLlmTokens: 0, maxSteps: 6, maxEvaluationRetries: 0, maxQueriesPerStep: 3, autoReadTopK: 0 },
         focused: { fetchMode: 'disabled' },
         budget: { maxSearchRequests: 2 },
       } },
@@ -487,7 +487,7 @@ describe('exploratory agent loop', () => {
     const result = await new ResearchRunner().run({
       query: 'forced topic',
       settings: { llm: {}, search: {}, research: {
-        strategy: 'exploratory', exploratory: { maxSteps: 2, maxEvaluationRetries: 1 },
+        strategy: 'exploratory', exploratory: { minLlmTokens: 0, maxLlmTokens: 0, maxSteps: 2, maxEvaluationRetries: 1 },
         focused: { fetchMode: 'disabled' },
       } },
       search: { async search() { return [{ title: 'F', url: 'https://forced.test', content: 'Forced topic evidence from a selected source.', fetchStatus: 'ok' }]; } },
@@ -506,7 +506,7 @@ describe('exploratory agent loop', () => {
     const result = await new ResearchRunner().run({
       query: 'budget topic',
       settings: { llm: {}, search: {}, research: {
-        strategy: 'exploratory', exploratory: { maxSteps: 6, maxEvaluationRetries: 0 },
+        strategy: 'exploratory', exploratory: { minLlmTokens: 0, maxLlmTokens: 0, maxSteps: 6, maxEvaluationRetries: 0 },
         focused: { fetchMode: 'disabled' }, budget: { maxSearchRequests: 1 },
       } },
       search: { async search() { return [{ title: 'First', url: 'https://first.test', snippet: 'gathered evidence' }]; } },
@@ -531,7 +531,7 @@ describe('exploratory agent loop', () => {
       query: 'Compare Ollama and llama.cpp',
       settings: { llm: {}, search: {}, research: {
         strategy: 'exploratory',
-        exploratory: { maxSteps: 8, maxEvaluationRetries: 0, autoReadTopK: 2, targetLlmTokens: 0 },
+        exploratory: { minLlmTokens: 0, maxLlmTokens: 0, maxSteps: 8, maxEvaluationRetries: 0, autoReadTopK: 2, targetLlmTokens: 0 },
         focused: { fetchMode: 'disabled' },
       } },
       search: { async search() { return searches.shift() || []; } },
@@ -550,7 +550,7 @@ describe('exploratory agent loop', () => {
       query: 'What is Ollama?',
       settings: { llm: {}, search: {}, research: {
         strategy: 'exploratory',
-        exploratory: { maxSteps: 8, maxEvaluationRetries: 0, targetLlmTokens: 20000 },
+        exploratory: { minLlmTokens: 0, maxLlmTokens: 0, maxSteps: 8, maxEvaluationRetries: 0 },
         focused: { fetchMode: 'disabled' },
       } },
       onProgress: (event) => events.push(event.message),
@@ -578,6 +578,42 @@ describe('exploratory agent loop', () => {
     assert.ok(!events.some((message) => /Research stopped: max_steps/.test(message)));
   });
 
+  it('keeps exploring below the token floor even when evidence already looks sufficient', async () => {
+    const decisions = [
+      { action: 'search', query: 'What is Ollama?', gapId: 'gap-1', reasonCode: 'find_sources' },
+      { action: 'answer', reasonCode: 'should_not_stop_below_min' },
+      { action: 'answer', reasonCode: 'should_not_stop_below_min' },
+    ];
+    const result = await new ResearchRunner().run({
+      query: 'What is Ollama?',
+      settings: { llm: {}, search: {}, research: {
+        strategy: 'exploratory',
+        exploratory: {
+          minLlmTokens: 50000,
+          maxLlmTokens: 80000,
+          maxSteps: 5,
+          maxEvaluationRetries: 0,
+          autoReadTopK: 1,
+        },
+        focused: { fetchMode: 'disabled' },
+      } },
+      search: { async search() {
+        return [
+          { title: 'Ollama', url: 'https://ollama.com', content: 'Ollama is a tool for running large language models locally.', fetchStatus: 'ok' },
+          { title: 'GitHub', url: 'https://github.com/ollama/ollama', content: 'Ollama repository and install docs.', fetchStatus: 'ok' },
+        ];
+      } },
+      llm: llmFor(decisions),
+    });
+    assert.notEqual(result.quality.stopReason, 'evidence_sufficient');
+    assert.ok(result.trace.some((entry) => (
+      entry.reasonCode === 'fallback_read_evidence' || entry.reasonCode === 'fallback_explore_below_min'
+    )));
+    assert.ok(!result.trace.some((entry) => (
+      entry.action === 'answer' && entry.reasonCode === 'should_not_stop_below_min'
+    )));
+  });
+
   it('auto-read does not consume a decision step or block a later read of other sources', async () => {
     const decisions = [
       { action: 'search', query: 'harvest extra sources', gapId: 'gap-1', reasonCode: 'search' },
@@ -588,7 +624,7 @@ describe('exploratory agent loop', () => {
       query: 'harvest extra sources',
       settings: { llm: {}, search: {}, research: {
         strategy: 'exploratory',
-        exploratory: { maxSteps: 8, maxEvaluationRetries: 0, autoReadTopK: 1, targetLlmTokens: 0 },
+        exploratory: { minLlmTokens: 0, maxLlmTokens: 0, maxSteps: 8, maxEvaluationRetries: 0, autoReadTopK: 1, targetLlmTokens: 0 },
         focused: { fetchMode: 'disabled' },
       } },
       search: { async search() {
@@ -620,7 +656,7 @@ describe('exploratory agent loop', () => {
       query: 'stop reason topic',
       settings: { llm: {}, search: {}, research: {
         strategy: 'exploratory',
-        exploratory: { maxSteps: 2, maxEvaluationRetries: 0, autoReadTopK: 1, targetLlmTokens: 0 },
+        exploratory: { minLlmTokens: 0, maxLlmTokens: 0, maxSteps: 2, maxEvaluationRetries: 0, autoReadTopK: 1, targetLlmTokens: 0 },
         focused: { fetchMode: 'disabled' },
       } },
       onProgress: (event) => events.push(event.message),
@@ -648,7 +684,7 @@ describe('exploratory agent loop', () => {
       query: 'budget exhaustion topic',
       settings: { llm: {}, search: {}, research: {
         strategy: 'exploratory',
-        exploratory: { maxSteps: 12, maxEvaluationRetries: 0, targetLlmTokens: 0, autoReadTopK: 2 },
+        exploratory: { minLlmTokens: 0, maxLlmTokens: 0, maxSteps: 12, maxEvaluationRetries: 0, targetLlmTokens: 0, autoReadTopK: 2 },
         focused: { fetchMode: 'disabled' },
         budget: { maxLlmTokens: 2500, reserveReportTokens: 800, maxSearchRequests: 8, maxSourceReads: 8 },
       } },
@@ -678,7 +714,7 @@ describe('exploratory agent loop', () => {
       query: 'open topic space',
       settings: { llm: {}, search: {}, research: {
         strategy: 'exploratory',
-        exploratory: { maxSteps: 10, maxEvaluationRetries: 0, autoReadTopK: 0, targetLlmTokens: 0 },
+        exploratory: { minLlmTokens: 0, maxLlmTokens: 0, maxSteps: 10, maxEvaluationRetries: 0, autoReadTopK: 0, targetLlmTokens: 0 },
         focused: { fetchMode: 'disabled' },
       } },
       search: { async search() {

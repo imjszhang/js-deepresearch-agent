@@ -5,6 +5,7 @@ import { ResearchState } from '../src/research/adaptive/research-state.mjs';
 import { fallbackAdaptiveAction } from '../src/research/adaptive/agent-policy.mjs';
 import { evaluateExploratorySufficiency, classifyResearchQuery, similarQuestions } from '../src/research/adaptive/exploratory-sufficiency.mjs';
 import { buildBudgetView, estimateReportPromptTokens } from '../src/research/adaptive/budget-view.mjs';
+import { resolveExploratorySettings } from '../src/research/exploratory-settings.mjs';
 import { mapStructuredProgressEvent } from '../src/research/progress-events.mjs';
 
 describe('exploratory budget snapshot and sufficiency', () => {
@@ -12,24 +13,28 @@ describe('exploratory budget snapshot and sufficiency', () => {
     const budget = new BudgetManager({
       research: {
         budget: { maxLlmTokens: 8000, reserveReportTokens: 1200 },
-        exploratory: { targetLlmTokens: 6000 },
+        exploratory: { minLlmTokens: 6000, maxLlmTokens: 8000 },
       },
     });
     budget.usage.llmTokens = 2000;
-    const state = new ResearchState({ query: 'What is Ollama?', maxSteps: 8, targetLlmTokens: 6000, budget });
+    const state = new ResearchState({ query: 'What is Ollama?', maxSteps: 8, minLlmTokens: 6000, budget });
     state.findings.push({
       gapId: 'gap-1',
       question: 'What is Ollama?',
       sources: [{ title: 'Docs', url: 'https://ollama.com', summary: 'Ollama runs local models', fetchStatus: 'ok' }],
     });
-    const view = state.refreshBudgetView({ budget, targetLlmTokens: 6000 });
+    const view = state.refreshBudgetView({ budget, minLlmTokens: 6000 });
     const snapshot = state.snapshot();
 
     assert.equal(snapshot.budget.usedLlmTokens, 2000);
     assert.equal(snapshot.budget.hardCapLlmTokens, 8000);
+    assert.equal(snapshot.budget.minLlmTokens, 6000);
     assert.equal(snapshot.budget.targetLlmTokens, 6000);
     assert.equal(snapshot.budget.remainingVsHardCap, 6000);
+    assert.equal(snapshot.budget.remainingVsMin, 4000);
     assert.equal(snapshot.budget.remainingVsTarget, 4000);
+    assert.equal(snapshot.budget.belowMin, true);
+    assert.equal(snapshot.budget.minReached, false);
     assert.ok(snapshot.budget.reservedReportTokens > 0);
     assert.ok(snapshot.budget.reservedReportOutputTokens <= 1200);
     assert.ok(snapshot.budget.actionCostEstimates.read.estimatedTokens > 0);
@@ -105,6 +110,44 @@ describe('exploratory budget snapshot and sufficiency', () => {
     const fallback = fallbackAdaptiveAction(state);
     assert.notEqual(fallback.action, 'reflect');
     assert.equal(fallback.action, 'answer');
+  });
+
+  it('treats the token floor as a keep-exploring bound instead of a stop target', () => {
+    const resolved = resolveExploratorySettings({
+      research: { exploratory: { minLlmTokens: 20000, maxLlmTokens: 80000 } },
+    });
+    assert.equal(resolved.minLlmTokens, 20000);
+    assert.equal(resolved.maxLlmTokens, 80000);
+    assert.equal(resolved.targetLlmTokens, 20000);
+
+    const view = buildBudgetView({
+      budget: { usage: { llmTokens: 4000 }, limits: { llmTokens: 80000 }, reservedReportTotalTokens: 1600 },
+      minLlmTokens: 20000,
+    });
+    assert.equal(view.belowMin, true);
+    assert.equal(view.minReached, false);
+    assert.equal(view.remainingVsMin, 16000);
+    assert.equal(view.nearTarget, false);
+
+    const state = new ResearchState({ query: 'What is Ollama?', maxSteps: 8, minLlmTokens: 20000 });
+    state.addCandidates([
+      { url: 'https://ollama.com', title: 'Docs' },
+      { url: 'https://github.com/ollama/ollama', title: 'Repo' },
+    ], 'gap-1');
+    state.readSourceIds.add('https://ollama.com');
+    state.findings.push({
+      gapId: 'gap-1',
+      sources: [{ url: 'https://ollama.com', content: 'Ollama runs local models.', fetchStatus: 'ok' }],
+    });
+    state.sufficiency = evaluateExploratorySufficiency({
+      query: state.query,
+      findings: state.findings,
+      gaps: state.gaps,
+      state,
+    });
+    const keepGoing = fallbackAdaptiveAction(state, { belowMin: true, sufficiency: state.sufficiency });
+    assert.equal(keepGoing.action, 'read');
+    assert.deepEqual(keepGoing.sourceIds, ['https://github.com/ollama/ollama']);
   });
 
   it('keeps a dynamic report reserve inside the hard cap', () => {

@@ -13,7 +13,7 @@ function extractJson(text) {
 
 export async function decideAdaptiveAction({ llm, state, signal }) {
   const snapshot = state.snapshot();
-  const nearTarget = Boolean(snapshot.budget?.nearTarget || snapshot.budget?.targetReached);
+  const belowMin = Boolean(snapshot.budget?.belowMin);
   const response = await llm.complete({
     purpose: 'agent_decision',
     signal,
@@ -21,8 +21,11 @@ export async function decideAdaptiveAction({ llm, state, signal }) {
     maxTokens: 600,
     messages: [{ role: 'system', content: [
       'You are a budget-aware research agent. Choose exactly one next action.',
-      'LLM token budget is a ceiling, not a spend target. Prefer high evidence-per-token actions.',
-      'Do not spend tokens just to approach the soft target. If evidence is sufficient, choose answer immediately.',
+      'Token budget has a floor and a ceiling. The floor is a minimum explore spend, not a stop target.',
+      'While budget.belowMin is true, keep exploring: search or read missing subjects and open gaps. Do not answer yet.',
+      'After budget.minReached, answer when sufficiency.sufficient is true or body evidence covers every critical gap.',
+      'budget.hardCapLlmTokens / remainingVsHardCap is the hard ceiling. Reserve report tokens and do not exceed it.',
+      'Prefer high evidence-per-token actions. Do not pad tokens after the floor if evidence is already sufficient.',
       'Candidate "score" values are optional observations, never mandatory source choices.',
       'Top-ranked sources are harvested automatically after each search; that harvest is not a decision step.',
       'Use read only to pick additional unread sources the auto-harvest skipped. Consecutive reads of different unread sources are allowed.',
@@ -35,10 +38,8 @@ export async function decideAdaptiveAction({ llm, state, signal }) {
       'Never repeat or closely paraphrase a query listed in searchedQueries; propose a genuinely different query instead.',
       'If the research question compares multiple subjects, ensure searches and reads cover each subject; check knowledge for subjects with no dedicated evidence yet.',
       'Use knowledge, gap coverage, and sufficiency to judge whether collected evidence already answers the open gaps.',
-      'When sufficiency.sufficient is true, or body evidence already covers every critical gap, choose answer.',
-      'When budget.nearTarget or budget.targetReached is true, stop exploring: only close a critical gap or answer.',
-      nearTarget ? 'You are near the soft token target. Do not open low-value gaps. Answer unless a critical gap still lacks body evidence.' : '',
-      'Budget fields: usedLlmTokens, remainingVsHardCap, remainingVsTarget, reservedReportTokens (prompt+completion reserved for the final report), and actionCostEstimates.',
+      belowMin ? 'You are still below the token floor. Do not answer. Explore another unread source or uncovered subject.' : '',
+      'Budget fields: usedLlmTokens, minLlmTokens, remainingVsMin, remainingVsHardCap, reservedReportTokens (prompt+completion reserved for the final report), and actionCostEstimates.',
       `Return JSON only: ${ACTION_SCHEMA}`,
     ].filter(Boolean).join('\n') }, { role: 'user', content: JSON.stringify(snapshot) }],
   });
@@ -98,21 +99,9 @@ export function pickUnreadCandidates(state, count = 2) {
 
 export function fallbackAdaptiveAction(state, options = {}) {
   const sufficiency = options.sufficiency || state.sufficiency;
-  if (sufficiency?.sufficient) {
+  const belowMin = Boolean(options.belowMin);
+  if (sufficiency?.sufficient && !belowMin) {
     return { action: 'answer', reasonCode: 'fallback_evidence_sufficient' };
-  }
-  if (options.nearTarget) {
-    const criticalOpen = (state.gaps || []).some((gap) => gap.priority === 'critical' && gap.status === 'open' && !state.gapCovered(gap.id));
-    const criticalPicks = criticalOpen ? pickUnreadCandidates(state, 2) : [];
-    if (criticalPicks.length) {
-      return {
-        action: 'read',
-        sourceIds: criticalPicks.map((candidate) => candidate.id),
-        gapId: criticalPicks[0].gapId,
-        reasonCode: 'fallback_read_evidence',
-      };
-    }
-    return { action: 'answer', reasonCode: 'target_budget_reached' };
   }
   const picks = pickUnreadCandidates(state, 2);
   if (picks.length) {
@@ -126,6 +115,20 @@ export function fallbackAdaptiveAction(state, options = {}) {
   const searchedOriginal = state.searchedQueries().includes(state.query);
   if ((state.candidates.size === 0 || !searchedOriginal) && state.lastAction !== 'search') {
     return { action: 'search', query: state.query, gapId: 'gap-1', reasonCode: 'fallback_initial_search' };
+  }
+  if (belowMin) {
+    const uncovered = (state.gaps || []).find((gap) => (
+      !state.gapCovered(gap.id) && !state.searchedQueries().includes(gap.question)
+    ));
+    if (uncovered) {
+      return {
+        action: 'search',
+        query: uncovered.question,
+        gapId: uncovered.id,
+        reasonCode: 'fallback_explore_below_min',
+      };
+    }
+    return { action: 'answer', reasonCode: 'fallback_exploration_exhausted' };
   }
   return { action: 'answer', reasonCode: 'fallback_evidence_available' };
 }

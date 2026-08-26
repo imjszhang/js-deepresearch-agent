@@ -205,7 +205,7 @@ describe('extract run stats', () => {
       }],
       deltas: [],
     });
-    assert.match(markdown, /target tokens: 20000/);
+    assert.match(markdown, /min tokens: 20000/);
     assert.match(markdown, /actual tokens: 12000/);
     assert.match(markdown, /unused budget: 8000/);
     assert.match(markdown, /stop reason: evidence_sufficient/);

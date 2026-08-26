@@ -29,8 +29,20 @@ describe('settings defaults', () => {
     assert.equal(defaultSettings.research.focused.queryMemory.enabled, true);
     assert.equal(settings.research.sourceBased, undefined);
     assert.equal(settings.research.adaptive, undefined);
+    assert.equal(settings.research.exploratory.minLlmTokens, 20000);
+    assert.equal(settings.research.exploratory.maxLlmTokens, 80000);
+    assert.equal(settings.research.exploratory.minLlmTokens, 20000);
+    assert.equal(settings.research.exploratory.maxLlmTokens, 80000);
     assert.equal(settings.research.exploratory.targetLlmTokens, 20000);
     assert.equal(settings.research.exploratory.maxSteps, 16);
+  });
+
+  it('treats a persisted target of 0 as an explicit disabled token floor', () => {
+    const settings = mergeSettings({
+      research: { exploratory: { targetLlmTokens: 0 } },
+    });
+    assert.equal(settings.research.exploratory.minLlmTokens, 0);
+    assert.equal(settings.research.exploratory.targetLlmTokens, 0);
   });
 
   it('migrates persisted source-based and adaptive settings to live keys', () => {

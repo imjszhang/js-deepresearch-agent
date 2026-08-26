@@ -1,6 +1,6 @@
 import { enrichFindings } from '../source-enricher.mjs';
 import { resolveFocusedSettings } from '../focused-settings.mjs';
-import { resolveExploratorySettings } from '../exploratory-settings.mjs';
+import { applyExploratoryTokenBudget, resolveExploratorySettings } from '../exploratory-settings.mjs';
 import { decideAdaptiveAction, fallbackAdaptiveAction, evaluateAnswerReadiness, decomposeQuery, pickUnreadCandidates } from '../adaptive/agent-policy.mjs';
 import { ResearchState, hostnameOf } from '../adaptive/research-state.mjs';
 import { classifyResearchQuery } from '../adaptive/exploratory-sufficiency.mjs';
@@ -83,14 +83,15 @@ export async function runAdaptiveV2(context) {
   const exploratory = resolveExploratorySettings(settings);
   const focused = resolveFocusedSettings(settings);
   const queryShape = classifyResearchQuery(query);
+  applyExploratoryTokenBudget(budget, exploratory);
   const state = new ResearchState({
     query,
     maxSteps: exploratory.maxSteps,
     maxGapDepth: exploratory.maxGapDepth,
-    targetLlmTokens: exploratory.targetLlmTokens,
+    minLlmTokens: exploratory.minLlmTokens,
+    targetLlmTokens: exploratory.minLlmTokens,
     budget,
   });
-  if (budget) budget.targetLlmTokens = exploratory.targetLlmTokens;
   const maxReads = Math.max(1, Number(exploratory.maxReadsPerStep) || 3);
   const maxRetries = Math.max(0, Number(exploratory.maxEvaluationRetries) || 0);
   const maxOpenGaps = Number(exploratory.maxOpenGaps) || 8;
@@ -109,7 +110,7 @@ export async function runAdaptiveV2(context) {
   function refreshState() {
     state.refreshBudgetView({
       budget,
-      targetLlmTokens: exploratory.targetLlmTokens,
+      minLlmTokens: exploratory.minLlmTokens,
       actionCosts: state.actionCosts,
     });
   }
@@ -194,21 +195,20 @@ export async function runAdaptiveV2(context) {
         break;
       }
 
+      const belowMin = Boolean(state.budgetView?.belowMin);
       let action;
-      if (state.sufficiency?.sufficient && state.hasBodyEvidence()) {
-        action = { action: 'answer', reasonCode: 'evidence_sufficient' };
-      } else if (state.budgetView?.hardCapReached) {
+      if (state.budgetView?.hardCapReached) {
         stopReason = STOP_REASONS.maxBudgetExhausted;
         addTrace(trace, state, 'stop', { reasonCode: STOP_REASONS.maxBudgetExhausted }, budget, 'budget_exhausted');
         break;
-      } else if (state.budgetView?.nearTarget && !(state.gaps || []).some((gap) => gap.priority === 'critical' && gap.status === 'open' && !state.gapCovered(gap.id))) {
-        action = { action: 'answer', reasonCode: 'target_budget_reached' };
+      } else if (state.sufficiency?.sufficient && state.hasBodyEvidence() && !belowMin) {
+        action = { action: 'answer', reasonCode: 'evidence_sufficient' };
       } else {
         const tokensBefore = budget?.usage?.llmTokens || 0;
         action = await decideAdaptiveAction({ llm, state, signal });
         state.actionCosts.record('decide', (budget?.usage?.llmTokens || 0) - tokensBefore);
-        if (state.budgetView?.nearTarget && action && !['answer', 'stop', 'read'].includes(action.action)) {
-          action = fallbackAdaptiveAction(state, { nearTarget: true, sufficiency: state.sufficiency });
+        if (belowMin && action && ['answer', 'stop'].includes(action.action)) {
+          action = fallbackAdaptiveAction(state, { belowMin: true, sufficiency: state.sufficiency });
         }
       }
 
@@ -227,7 +227,7 @@ export async function runAdaptiveV2(context) {
         addTrace(trace, state, action?.action || 'unknown', { reasonCode: invalid }, budget, 'rejected');
         action = fallbackAdaptiveAction(state, {
           sufficiency: state.sufficiency,
-          nearTarget: Boolean(state.budgetView?.nearTarget),
+          belowMin,
         });
         invalid = state.validate(action);
         if (invalid) action = { action: 'stop', reasonCode: invalid };
@@ -324,7 +324,6 @@ export async function runAdaptiveV2(context) {
         refreshState();
         const canContinue = state.step < state.maxSteps
           && loopCanAfford(budget, state.actionCosts.estimate('search'))
-          && !state.budgetView?.targetReached
           && !state.budgetView?.hardCapReached;
         const hasDirectEvidence = state.hasBodyEvidence();
         if (!hasDirectEvidence && canContinue && state.evaluationRetries < maxRetries && budget?.canClaim('searchRequests')) {

@@ -31,7 +31,10 @@ export class BudgetManager {
       this.reserveReportTokens = this.maxReportOutputTokens;
       this.reservedReportTotalTokens = Math.min(this.reservedReportTotalTokens, this.limits.llmTokens);
     }
-    this.targetLlmTokens = limit(settings?.research?.exploratory?.targetLlmTokens);
+    this.minLlmTokens = limit(
+      settings?.research?.exploratory?.minLlmTokens ?? settings?.research?.exploratory?.targetLlmTokens,
+    );
+    this.targetLlmTokens = this.minLlmTokens;
     this.controllerStopReason = null;
     this.defaultLlmMaxTokens = limit(settings?.llm?.maxTokens) || 4000;
     this.usage = { llmRequests: 0, llmTokens: 0, searchRequests: 0, sourceReads: 0, rerankRequests: 0, rerankTokens: 0, estimatedCost: 0 };
@@ -72,15 +75,18 @@ export class BudgetManager {
     return Math.max(0, this.limits.llmTokens - (this.usage.llmTokens || 0));
   }
 
+  remainingVsMin() {
+    if (!this.minLlmTokens) return null;
+    return Math.max(0, this.minLlmTokens - (this.usage.llmTokens || 0));
+  }
+
   remainingVsTarget() {
-    if (!this.targetLlmTokens) return null;
-    return Math.max(0, this.targetLlmTokens - (this.usage.llmTokens || 0));
+    return this.remainingVsMin();
   }
 
   unusedBudgetTokens() {
-    if (this.targetLlmTokens > 0) return this.remainingVsTarget();
     if (this.limits.llmTokens > 0) return this.remainingVsHardCap();
-    return null;
+    return this.remainingVsMin();
   }
 
   claim(kind, amount = 1, { report = false } = {}) {
@@ -141,9 +147,11 @@ export class BudgetManager {
       maxReportOutputTokens: this.maxReportOutputTokens,
       estimatedReportPromptTokens: this.estimatedReportPromptTokens,
       reservedReportTotalTokens: this.reservedReportTotalTokens,
-      targetLlmTokens: this.targetLlmTokens || 0,
+      minLlmTokens: this.minLlmTokens || 0,
+      targetLlmTokens: this.minLlmTokens || this.targetLlmTokens || 0,
       unusedBudgetTokens: this.unusedBudgetTokens(),
-      unusedTargetTokens: this.remainingVsTarget(),
+      unusedMinTokens: this.remainingVsMin(),
+      unusedTargetTokens: this.remainingVsMin(),
       unusedHardCapTokens: this.remainingVsHardCap(),
       controllerStopReason: this.controllerStopReason,
       usage: { ...this.usage },

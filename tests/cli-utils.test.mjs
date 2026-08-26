@@ -164,7 +164,8 @@ describe('CLI utilities', () => {
       'rerank-api-key': 'one-run-key',
       'rerank-timeout-ms': '1234',
       'exploratory-max-steps': '12',
-      'exploratory-target-llm-tokens': '18000',
+      'exploratory-min-llm-tokens': '18000',
+      'exploratory-max-llm-tokens': '72000',
     });
     assert.equal(settings.research.budget.maxRerankRequests, 3);
     assert.equal(settings.research.budget.maxRerankTokens, 900);
@@ -176,7 +177,17 @@ describe('CLI utilities', () => {
       timeoutMs: 1234,
     });
     assert.equal(settings.research.exploratory.maxSteps, 12);
+    assert.equal(settings.research.exploratory.minLlmTokens, 18000);
+    assert.equal(settings.research.exploratory.maxLlmTokens, 72000);
     assert.equal(settings.research.exploratory.targetLlmTokens, 18000);
+  });
+
+  it('maps legacy exploratory-target-llm-tokens onto the min floor', () => {
+    const settings = applyResearchFlags({ research: {} }, {
+      'exploratory-target-llm-tokens': '15000',
+    });
+    assert.equal(settings.research.exploratory.minLlmTokens, 15000);
+    assert.equal(settings.research.exploratory.targetLlmTokens, 15000);
   });
 
   it('maps embedding and extract fetch mode flags', () => {

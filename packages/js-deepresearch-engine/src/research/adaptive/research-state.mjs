@@ -46,11 +46,12 @@ export function hostnameWeight(url) {
 }
 
 export class ResearchState {
-  constructor({ query, maxSteps = 12, maxGapDepth = 2, targetLlmTokens = 0, budget = null } = {}) {
+  constructor({ query, maxSteps = 12, maxGapDepth = 2, minLlmTokens = 0, targetLlmTokens = 0, budget = null } = {}) {
     this.query = query;
     this.maxSteps = Math.max(1, Number(maxSteps) || 12);
     this.maxGapDepth = Math.max(0, Number(maxGapDepth) || 0);
-    this.targetLlmTokens = Number(targetLlmTokens) || 0;
+    this.minLlmTokens = Number(minLlmTokens || targetLlmTokens) || 0;
+    this.targetLlmTokens = this.minLlmTokens;
     this.budgetManager = budget;
     this.actionCosts = new ActionCostTracker();
     this.budgetView = null;
@@ -102,20 +103,24 @@ export class ResearchState {
     }
   }
 
-  refreshBudgetView({ budget, targetLlmTokens, actionCosts } = {}) {
+  refreshBudgetView({ budget, minLlmTokens, targetLlmTokens, actionCosts } = {}) {
     const manager = budget || this.budgetManager;
     if (manager) {
-      if (targetLlmTokens !== undefined) {
-        manager.targetLlmTokens = Number(targetLlmTokens) || 0;
-        this.targetLlmTokens = manager.targetLlmTokens;
-      } else if (this.targetLlmTokens && !manager.targetLlmTokens) {
-        manager.targetLlmTokens = this.targetLlmTokens;
+      const nextMin = minLlmTokens !== undefined ? minLlmTokens : targetLlmTokens;
+      if (nextMin !== undefined) {
+        manager.minLlmTokens = Number(nextMin) || 0;
+        manager.targetLlmTokens = manager.minLlmTokens;
+        this.minLlmTokens = manager.minLlmTokens;
+        this.targetLlmTokens = manager.minLlmTokens;
+      } else if (this.minLlmTokens && !manager.minLlmTokens) {
+        manager.minLlmTokens = this.minLlmTokens;
+        manager.targetLlmTokens = this.minLlmTokens;
       }
       manager.updateReportReserve(estimateReportPromptTokens({ query: this.query, findings: this.findings }));
       this.budgetView = buildBudgetView({
         budget: manager,
         actionCosts: actionCosts || this.actionCosts,
-        targetLlmTokens: manager.targetLlmTokens,
+        minLlmTokens: manager.minLlmTokens,
       });
     }
     this.syncGapCoverage();

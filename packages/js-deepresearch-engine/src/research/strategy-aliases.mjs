@@ -111,6 +111,12 @@ function migrateFocusedBlock(raw = {}) {
 function migrateExploratoryBlock(raw = {}) {
   const next = { ...raw };
   delete next.loopVersion;
+  if (next.minLlmTokens === undefined && next.targetLlmTokens !== undefined) {
+    next.minLlmTokens = next.targetLlmTokens;
+  }
+  if (next.targetLlmTokens === undefined && next.minLlmTokens !== undefined) {
+    next.targetLlmTokens = next.minLlmTokens;
+  }
   return next;
 }
 

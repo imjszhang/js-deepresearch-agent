@@ -55,35 +55,35 @@ export class ActionCostTracker {
   }
 }
 
-export function buildBudgetView({ budget, actionCosts, targetLlmTokens } = {}) {
+export function buildBudgetView({ budget, actionCosts, minLlmTokens, targetLlmTokens } = {}) {
   const used = Number(budget?.usage?.llmTokens) || 0;
   const hardCap = Number(budget?.limits?.llmTokens) || 0;
-  const target = Number(targetLlmTokens ?? budget?.targetLlmTokens) || 0;
+  const min = Number(minLlmTokens ?? targetLlmTokens ?? budget?.minLlmTokens ?? budget?.targetLlmTokens) || 0;
   const reservedTotal = Number(budget?.reservedReportTotalTokens ?? budget?.reserveReportTokens) || 0;
   const reservedOutput = Number(budget?.maxReportOutputTokens ?? budget?.reserveReportTokens) || 0;
   const estimatedPrompt = Number(budget?.estimatedReportPromptTokens) || 0;
   const remainingVsHardCap = hardCap > 0 ? Math.max(0, hardCap - used) : null;
-  const remainingVsTarget = target > 0 ? Math.max(0, target - used) : null;
-  const exploreCost = (actionCosts?.estimate('search') || ACTION_PRIORS.search)
-    + (actionCosts?.estimate('read') || ACTION_PRIORS.read);
-  const nearTarget = target > 0 && (used >= target * 0.85 || remainingVsTarget <= exploreCost);
-  const targetReached = target > 0 && used >= target;
+  const remainingVsMin = min > 0 ? Math.max(0, min - used) : null;
+  const belowMin = min > 0 && used < min;
+  const minReached = min === 0 || used >= min;
   const hardCapReached = hardCap > 0 && remainingVsHardCap !== null && remainingVsHardCap <= reservedTotal;
-  const unusedBudgetTokens = target > 0
-    ? remainingVsTarget
-    : (hardCap > 0 ? remainingVsHardCap : null);
+  const unusedBudgetTokens = hardCap > 0 ? remainingVsHardCap : remainingVsMin;
 
   return {
     usedLlmTokens: used,
     hardCapLlmTokens: hardCap || null,
-    targetLlmTokens: target || null,
+    minLlmTokens: min || null,
+    targetLlmTokens: min || null,
     remainingVsHardCap,
-    remainingVsTarget,
+    remainingVsMin,
+    remainingVsTarget: remainingVsMin,
     reservedReportTokens: reservedTotal,
     reservedReportOutputTokens: reservedOutput,
     estimatedReportPromptTokens: estimatedPrompt,
-    nearTarget,
-    targetReached,
+    belowMin,
+    minReached,
+    nearTarget: false,
+    targetReached: false,
     hardCapReached,
     unusedBudgetTokens,
     actionCostEstimates: actionCosts?.snapshot?.() || {

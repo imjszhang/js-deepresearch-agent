@@ -82,8 +82,8 @@ export function formatStrategyCompareMarkdown(comparison) {
     if (run.stopReason) {
       lines.push(`  - stop reason: ${run.stopReason}`);
     }
-    if (run.targetLlmTokens) {
-      lines.push(`  - target tokens: ${run.targetLlmTokens}`);
+    if (run.minLlmTokens || run.targetLlmTokens) {
+      lines.push(`  - min tokens: ${run.minLlmTokens || run.targetLlmTokens}`);
     }
     if (run.actualLlmTokens != null || run.cost?.llmTokens != null) {
       lines.push(`  - actual tokens: ${run.actualLlmTokens ?? run.cost.llmTokens}`);
