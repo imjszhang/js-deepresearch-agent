@@ -50,6 +50,11 @@ export function aggregateBenchmark({
     llmEnabled,
     evaluation: {
       metricsVersion: quality.metricsVersion,
+      claimExtractionVersion: quality.claimExtractionVersion,
+      claimEvaluationVersion: quality.claimEvaluationVersion,
+      storedEvaluationVersions: [...new Set(claimResults
+        .map((result) => result.effectiveEvaluation?.evaluationVersion)
+        .filter((value) => Number.isFinite(value)))],
       llmInvoked,
       usedStoredRule: claimResults.some((result) => result.effectiveEvaluation?.origin === 'stored_rule'),
       usedStoredLlm: claimResults.some((result) => result.effectiveEvaluation?.origin === 'stored_llm'),

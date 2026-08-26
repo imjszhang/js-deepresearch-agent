@@ -45,7 +45,7 @@ describe('research control infrastructure', () => {
     const result = buildEvidenceArtifacts({
       query: 'What is local-first AI?',
       findings: [{ question: 'What is local-first AI?', sources: [{ title: 'Primary', url: 'https://example.com/a', content: 'Local-first AI keeps user data on devices and synchronizes selectively. This architecture improves privacy and offline access.', fetchStatus: 'ok', contentOrigin: 'fetched' }] }],
-      report: '# Key Findings\n\nLocal-first AI keeps user data on devices and improves privacy and offline access through selective synchronization.',
+      report: '# Key Findings\n\nLocal-first AI keeps user data on devices and improves privacy and offline access through selective synchronization. [1.1]',
       options: { maxPassagesPerSource: 5, maxPassageChars: 1200, claimAlignment: true },
     });
     assert.equal(result.passages.length, 1);

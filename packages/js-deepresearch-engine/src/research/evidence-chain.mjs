@@ -1,6 +1,8 @@
 import crypto from 'node:crypto';
 import { normalizeSourceUrl } from './source-candidates.mjs';
 import { buildClaimEvaluation, extractQualityClaims } from './claim-quality.mjs';
+import { buildCitationMap, parseCitations, resolveCitedSourceIds } from './citations.mjs';
+import { sourceHasFetchedBody } from './focused-settings.mjs';
 
 function hash(prefix, value) {
   return `${prefix}-${crypto.createHash('sha256').update(value).digest('hex').slice(0, 16)}`;
@@ -55,6 +57,86 @@ function splitContent(content, maxChars) {
   return chunks;
 }
 
+export function listSnippetOnlyCitationKeys(findings = []) {
+  const keys = [];
+  findings.forEach((finding, findingIndex) => {
+    (finding.sources || []).forEach((source, sourceIndex) => {
+      if (sourceHasFetchedBody(source)) return;
+      keys.push(`${findingIndex + 1}.${sourceIndex + 1}`);
+    });
+  });
+  return keys;
+}
+
+function requiresDirectEvidence(options = {}) {
+  if (options.strictDirectEvidence !== undefined) return options.strictDirectEvidence === true;
+  const strategy = options.strategy || 'focused';
+  return strategy === 'focused' || strategy === 'exploratory';
+}
+
+export function alignClaimToCitedPassages(claim, {
+  passages = [],
+  citationMap,
+  strategy,
+  strictDirectEvidence,
+} = {}) {
+  const citationKeys = claim.citationKeys?.length ? claim.citationKeys : parseCitations(claim.text);
+  const { citedSourceIds, unresolvedCitationKeys } = resolveCitedSourceIds(citationKeys, citationMap);
+  const flags = [];
+  const citedPassages = passages.filter((passage) => citedSourceIds.includes(passage.sourceId));
+  const citedSourcesWithPassages = new Set(citedPassages.map((passage) => passage.sourceId));
+  const missingBodySourceIds = citedSourceIds.filter((sourceId) => !citedSourcesWithPassages.has(sourceId));
+  const keyFact = claim.kind === 'key_claim' || claim.importance === 'key';
+  const enforceDirectEvidence = requiresDirectEvidence({ strategy, strictDirectEvidence });
+
+  if (citationKeys.length === 0) flags.push('uncited');
+  if (unresolvedCitationKeys.length > 0) flags.push('unresolved_citation');
+  if (citationKeys.length > 0 && missingBodySourceIds.length > 0) flags.push('missing_direct_evidence');
+  if (
+    enforceDirectEvidence
+    && keyFact
+    && citedSourceIds.length > 0
+    && citedPassages.length === 0
+    && unresolvedCitationKeys.length === 0
+  ) {
+    flags.push('snippet_only');
+  }
+
+  const canUsePassages = citationKeys.length > 0
+    && unresolvedCitationKeys.length === 0
+    && citedPassages.length > 0;
+
+  const candidates = canUsePassages
+    ? citedPassages
+      .map((passage) => ({ passage, score: overlap(claim.text, passage.text) }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 3)
+    : [];
+
+  const evidence = candidates
+    .filter((item) => item.score > 0)
+    .map(({ passage, score }) => ({
+      sourceId: passage.sourceId,
+      passageId: passage.id,
+      verdict: score >= 0.45 ? 'supported' : (score >= 0.2 ? 'partially_supported' : 'unverifiable'),
+      score,
+      method: 'rules',
+    }));
+
+  const aligned = {
+    ...claim,
+    citationKeys,
+    citedSourceIds,
+    unresolvedCitationKeys,
+    flags,
+    evidenceConstraint: citationKeys.length ? 'cited_sources' : 'uncited',
+    findingIds: [...new Set(evidence.flatMap((item) => passages.find((passage) => passage.id === item.passageId)?.findingIds || []))],
+    evidence,
+  };
+  aligned.evaluation = buildClaimEvaluation(aligned);
+  return aligned;
+}
+
 export function buildEvidenceArtifacts({ query, findings = [], report = '', options = {} }) {
   const passageEnabled = options.enabled !== false;
   const maxPassages = Number(options.maxPassagesPerSource) || 5;
@@ -70,8 +152,7 @@ export function buildEvidenceArtifacts({ query, findings = [], report = '', opti
       source.id = source.id || sourceId;
       sourceIds.push(sourceId);
       sourceMap.set(sourceId, mergeSourceRecord(sourceMap.get(sourceId), source));
-      const hasFetchedContent = source.content
-        && (source.fetchStatus === 'ok' || source.contentOrigin === 'fetched');
+      const hasFetchedContent = sourceHasFetchedBody(source);
       if (!passageEnabled || !hasFetchedContent) continue;
       const ranked = splitContent(source.content, maxChars)
         .map((passage) => ({ ...passage, retrievalScore: overlap(`${query} ${finding.question}`, passage.text) }))
@@ -87,21 +168,22 @@ export function buildEvidenceArtifacts({ query, findings = [], report = '', opti
     return { ...finding, id, gapId: finding.gapId || null, sourceIds, passageIds, evidenceStatus: passageIds.length ? 'direct_evidence' : ((finding.sources || []).length ? 'search_snippet' : 'missing') };
   });
 
+  const citationMap = buildCitationMap(normalizedFindings, { sourceIdFor: stableSourceId });
   const claims = options.claimAlignment ? extractQualityClaims(report).map((claim, index) => {
-    const candidates = passages.map((passage) => ({ passage, score: overlap(claim.text, passage.text) })).sort((a, b) => b.score - a.score).slice(0, 3);
-    const evidence = candidates.filter((item) => item.score > 0).map(({ passage, score }) => ({ sourceId: passage.sourceId, passageId: passage.id, verdict: score >= 0.45 ? 'supported' : (score >= 0.2 ? 'partially_supported' : 'unverifiable'), score, method: 'rules' }));
-    const normalized = {
-      id: hash('claim', `${index}:${claim.text}`),
-      ...claim,
-      ...(claim.parentClaimText ? { parentClaimId: hash('claim-parent', claim.parentClaimText) } : {}),
-      findingIds: [...new Set(evidence.flatMap((item) => passages.find((passage) => passage.id === item.passageId)?.findingIds || []))],
-      evidence,
+    const aligned = alignClaimToCitedPassages(claim, {
+      passages,
+      citationMap,
+      strategy: options.strategy,
+      strictDirectEvidence: options.strictDirectEvidence,
+    });
+    return {
+      id: hash('claim', `${index}:${aligned.text}`),
+      ...aligned,
+      ...(aligned.parentClaimText ? { parentClaimId: hash('claim-parent', aligned.parentClaimText) } : {}),
     };
-    normalized.evaluation = buildClaimEvaluation(normalized);
-    return normalized;
   }) : [];
 
-  return { findings: normalizedFindings, sources: [...sourceMap.values()], passages, claims };
+  return { findings: normalizedFindings, sources: [...sourceMap.values()], passages, claims, citationMap };
 }
 
 export function extractClaims(report = '') {

@@ -10,6 +10,14 @@ export function formatMarkdownSummary(result) {
     `- Query: ${result.query || '(unknown)'}`,
     `- Strategy: ${result.strategy || '(unknown)'}`,
     `- LLM judge invoked: ${result.evaluation?.llmInvoked ? 'yes' : 'no'}`,
+    `- Evaluation origin: ${[
+      result.evaluation?.usedStoredRule ? 'stored_rule' : null,
+      result.evaluation?.usedStoredLlm ? 'stored_llm' : null,
+      result.evaluation?.usedRuntimeRule ? 'runtime_rule' : null,
+      result.evaluation?.usedRuntimeLlm ? 'runtime_llm' : null,
+    ].filter(Boolean).join(', ') || 'n/a'}`,
+    `- Engine evaluation version: ${result.evaluation?.claimEvaluationVersion ?? 'n/a'}`,
+    `- Stored evaluation versions: ${(result.evaluation?.storedEvaluationVersions || []).join(', ') || 'n/a'}`,
     '',
     '## Metrics',
     '',
@@ -90,6 +98,7 @@ export function formatJsonSummary(result) {
       llmVerdict: entry.llmVerdict,
       effectiveVerdict: entry.effectiveVerdict,
       evaluationOrigin: entry.evaluationOrigin,
+      evaluationVersion: entry.evaluationVersion || entry.effectiveEvaluation?.evaluationVersion || null,
       llm: entry.llm || null,
     })),
   }, null, 2);

@@ -1,4 +1,4 @@
-import { getSourceEvidence } from './focused-settings.mjs';
+import { getSourceEvidence, getSourceEvidenceClass } from './focused-settings.mjs';
 
 export function questionPrompt({ query, count, mode = 'initial', context = '' }) {
   const modeInstructions = {
@@ -33,22 +33,40 @@ export function questionPrompt({ query, count, mode = 'initial', context = '' })
   ];
 }
 
-export function reportPrompt({ query, findings, limitations = [] }) {
+function sourceEvidenceClassLabel(source) {
+  const evidenceClass = getSourceEvidenceClass(source);
+  if (evidenceClass === 'source_body') return 'source body';
+  if (evidenceClass === 'source_summary') return 'source summary';
+  if (evidenceClass === 'snippet_only') return 'search snippet only';
+  return 'missing evidence';
+}
+
+export function reportPrompt({ query, findings, limitations = [], strategy = 'focused' }) {
   const sourceBlock = findings.map((finding, index) => {
     const sources = finding.sources.map((source, sourceIndex) => (
-      `[${index + 1}.${sourceIndex + 1}] ${source.title}\n${source.url}\nEvidence: ${getSourceEvidence(source)}`
+      `[${index + 1}.${sourceIndex + 1}] ${source.title}\n${source.url}\nEvidence class: ${sourceEvidenceClassLabel(source)}\nEvidence: ${getSourceEvidence(source)}`
     )).join('\n\n');
     return `Question: ${finding.question}\nSources:\n${sources}`;
   }).join('\n\n---\n\n');
+
+  const snippetPolicy = strategy === 'quick'
+    ? 'This is a quick snippet-only scan; you may cite search snippets, but do not invent body-level evidence.'
+    : [
+      'Search snippets are only for discovery and limitations.',
+      'Do not treat a snippet-only source as sufficient support for a Summary or Key Findings fact.',
+      'If a fact is only backed by a search snippet, omit it from Summary/Key Findings or mark it Unverified and list it under Caveats.',
+    ].join(' ');
 
   return [
     {
       role: 'system',
       content: [
         'You write concise deep research reports in Markdown.',
-        'Use citations like [1.1] when referencing sources.',
+        'Use citations like [1.1] or [1.2, 2.3] when referencing sources.',
+        'Write one verifiable fact per sentence or bullet. Do not pack independent facts into one sentence.',
         'Include: Summary, Key Findings, Evidence, Caveats, Sources.',
         'Only use facts supported by the Evidence blocks.',
+        snippetPolicy,
         'If evidence is insufficient, say so in Caveats instead of inventing details.',
       ].join(' '),
     },
@@ -63,8 +81,8 @@ export function reportPrompt({ query, findings, limitations = [] }) {
   ];
 }
 
-export function reportRetryPrompt({ query, findings, limitations = [] }) {
-  const messages = reportPrompt({ query, findings, limitations });
+export function reportRetryPrompt({ query, findings, limitations = [], strategy = 'focused' }) {
+  const messages = reportPrompt({ query, findings, limitations, strategy });
   return [
     ...messages,
     {

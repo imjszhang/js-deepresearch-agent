@@ -1,6 +1,8 @@
+import { parseCitations } from './citations.mjs';
+
 export const QUALITY_METRICS_VERSION = 2;
-export const CLAIM_EXTRACTION_VERSION = 2;
-export const CLAIM_EVALUATION_VERSION = 2;
+export const CLAIM_EXTRACTION_VERSION = 3;
+export const CLAIM_EVALUATION_VERSION = 3;
 
 export const FACT_CLAIM_KINDS = new Set(['key_claim', 'supporting_claim']);
 export const CLAIM_VERDICTS = Object.freeze([
@@ -25,6 +27,8 @@ const SECTION_ALIASES = Object.freeze({
   ],
   metadata: ['contents', 'table of contents', '目录', 'metadata', '元数据'],
 });
+
+const ABBREVIATION_PATTERN = /\b(?:e\.g|i\.e|etc|mr|mrs|ms|dr|prof|sr|jr|inc|ltd|vs|u\.s|u\.k|a\.m|p\.m|fig|eq|al|no|vol|pp)\./gi;
 
 function normalizeHeading(value = '') {
   return String(value).normalize('NFKC').trim().toLowerCase()
@@ -67,10 +71,81 @@ function isSourceEntryText(text = '') {
     || /^\[[^\]]+\]\(https?:\/\//i.test(value);
 }
 
-function splitCompoundClaim(text = '') {
-  const pieces = String(text).split(/[;；]\s*/).map((item) => item.trim()).filter(Boolean);
-  if (pieces.length < 2 || pieces.some((item) => item.length < 30)) return [String(text).trim()];
+function withProtectedSpans(text, fn) {
+  const spans = [];
+  let value = String(text);
+  const protect = (pattern) => {
+    value = value.replace(pattern, (match) => {
+      const token = `\uE000${spans.length}\uE001`;
+      spans.push(match);
+      return token;
+    });
+  };
+  protect(/https?:\/\/[^\s\]]+/gi);
+  protect(/\[[0-9]+(?:\.[0-9]+)?(?:\s*[-,，]\s*[0-9]+(?:\.[0-9]+)?)*\]/g);
+  protect(/\b[vV]?\d+\.\d+(?:\.\d+)+\b/g);
+  protect(/\b\d+\.\d+(?:\s*(?:tokens\/sec|tok\/s|ms|s|kb|mb|gb|%))?\b/gi);
+  protect(ABBREVIATION_PATTERN);
+  const restore = (part) => String(part).replace(/\uE000(\d+)\uE001/g, (_, index) => spans[Number(index)]);
+  const result = fn(value);
+  return Array.isArray(result) ? result.map((part) => restore(part).trim()).filter(Boolean) : restore(result);
+}
+
+function splitOnDelimiters(text, pattern) {
+  return withProtectedSpans(text, (value) => value.split(pattern).map((item) => item.trim()).filter(Boolean));
+}
+
+function splitSentences(text = '') {
+  return splitOnDelimiters(text, /(?<=[.?!。！？])\s+/);
+}
+
+function splitOnSemicolons(text = '') {
+  const pieces = splitOnDelimiters(text, /[;；]\s*/);
+  if (pieces.length < 2 || pieces.some((item) => item.length < 30)) return [String(text).trim()].filter(Boolean);
   return pieces;
+}
+
+function splitIndependentClauses(text = '') {
+  if (String(text).length < 80) return [String(text).trim()].filter(Boolean);
+  const pieces = splitOnDelimiters(text, /,\s+(?:and|but|while)\s+|，(?:且|并|同时)/);
+  if (pieces.length < 2 || pieces.some((item) => item.length < 40)) return [String(text).trim()].filter(Boolean);
+  return pieces;
+}
+
+const CITATION_ONLY_PATTERN = /^(?:\[[0-9]+(?:\.[0-9]+)?(?:\s*[-,，]\s*[0-9]+(?:\.[0-9]+)?)*\]\s*)+$/;
+
+function mergeTrailingCitationAtoms(atoms = []) {
+  const merged = [];
+  for (const atom of atoms) {
+    if (CITATION_ONLY_PATTERN.test(atom.text) && merged.length) {
+      const previous = merged[merged.length - 1];
+      previous.text = `${previous.text} ${atom.text}`.trim();
+      previous.citationKeys = [...new Set([...(previous.citationKeys || []), ...(atom.citationKeys || [])])];
+      continue;
+    }
+    merged.push({ ...atom, citationKeys: [...(atom.citationKeys || [])] });
+  }
+  return merged;
+}
+
+export function splitAtomicClaimTexts(text = '') {
+  const cleaned = String(text).trim();
+  if (!cleaned) return [];
+  const atoms = [];
+  for (const sentence of splitSentences(cleaned)) {
+    for (const chunk of splitOnSemicolons(sentence)) {
+      const inherited = parseCitations(chunk);
+      for (const clause of splitIndependentClauses(chunk)) {
+        const own = parseCitations(clause);
+        atoms.push({
+          text: clause,
+          citationKeys: own.length ? own : inherited,
+        });
+      }
+    }
+  }
+  const merged = mergeTrailingCitationAtoms(atoms);
+  return merged.length ? merged : [{ text: cleaned, citationKeys: parseCitations(cleaned) }];
 }
 
 function isSkippableLine(line = '') {
@@ -83,8 +158,9 @@ function isSkippableLine(line = '') {
 }
 
 /**
- * Deterministically extracts and classifies reusable report statements.
- * Source entries and metadata are deliberately omitted from the returned list.
+ * Deterministically extracts atomic, classified report statements.
+ * Source entries and metadata are omitted. Compound Summary / Findings /
+ * Evidence lines are split into independently verifiable atoms.
  */
 export function extractQualityClaims(report = '') {
   const lines = String(report).split(/\r?\n/);
@@ -96,17 +172,19 @@ export function extractQualityClaims(report = '') {
   function push(text, lineStart) {
     const cleaned = stripMarkdownDecorators(text);
     if (cleaned.length < 8 || isSourceEntryText(cleaned)) return;
-    for (const piece of splitCompoundClaim(cleaned)) {
-      const key = normalizedClaimKey(piece);
-      if (!key || seen.has(key)) continue;
+    const atoms = splitAtomicClaimTexts(cleaned);
+    for (const atom of atoms) {
+      const key = normalizedClaimKey(atom.text);
+      if (!key || atom.text.length < 8 || seen.has(key)) continue;
       seen.add(key);
       claims.push({
         section,
-        text: piece,
+        text: atom.text,
         lineStart,
         kind,
         importance: kind === 'key_claim' ? 'key' : 'supporting',
-        ...(piece !== cleaned ? { parentClaimText: cleaned } : {}),
+        citationKeys: atom.citationKeys,
+        ...(atom.text !== cleaned ? { parentClaimText: cleaned } : {}),
       });
     }
   }
@@ -163,25 +241,47 @@ export function aggregateEvidenceVerdict(evidence = []) {
   };
 }
 
+function constrainVerdict(verdict, flags = []) {
+  if (flags.includes('uncited') || flags.includes('unresolved_citation')) return 'unverifiable';
+  if (flags.includes('missing_direct_evidence') && ['supported', 'partially_supported'].includes(verdict)) {
+    return 'unverifiable';
+  }
+  return verdict;
+}
+
 export function buildClaimEvaluation(claim, {
   method = 'rules',
   origin = 'runtime_rule',
   evaluatedAt = new Date().toISOString(),
 } = {}) {
+  const flags = [...new Set([...(claim?.flags || [])])];
+  const hasCitedBodySupport = (claim?.evidence || []).some((item) => (
+    item?.passageId
+    && ['supported', 'partially_supported'].includes(item.verdict)
+    && (!claim.citedSourceIds?.length || claim.citedSourceIds.includes(item.sourceId))
+  ));
   const aggregated = aggregateEvidenceVerdict(claim?.evidence || []);
+  const blockedByMissingBody = flags.includes('missing_direct_evidence') && !hasCitedBodySupport;
+  const verdict = constrainVerdict(
+    aggregated.verdict,
+    blockedByMissingBody ? flags : flags.filter((flag) => flag !== 'missing_direct_evidence'),
+  );
   return {
     ...aggregated,
+    verdict,
+    confidence: verdict === aggregated.verdict ? aggregated.confidence : 0,
     method,
     origin,
     evaluatedAt,
     evaluationVersion: CLAIM_EVALUATION_VERSION,
+    flags,
   };
 }
 
 export function normalizeClaim(claim = {}, options = {}) {
   const kind = claim.kind
     || (claim.importance === 'key' ? 'key_claim' : classifyClaimSection(claim.section));
-  const evaluation = claim.evaluation?.evaluationVersion === CLAIM_EVALUATION_VERSION
+  const evaluation = claim.evaluation && options.recalculateEvaluation !== true
     ? claim.evaluation
     : buildClaimEvaluation(claim, options);
   return {
@@ -197,9 +297,21 @@ function rate(numerator, denominator) {
   return Number((numerator / denominator).toFixed(4));
 }
 
+export function isCompoundParentClaim(claim = {}, claims = []) {
+  if (claim.role === 'parent' || claim.excludeFromRates === true) return true;
+  const key = normalizedClaimKey(claim.text);
+  if (!key) return false;
+  return claims.some((other) => other !== claim && other.parentClaimText && normalizedClaimKey(other.parentClaimText) === key);
+}
+
+export function selectCountableClaims(claims = []) {
+  return claims.filter((claim) => !isCompoundParentClaim(claim, claims));
+}
+
 export function calculateQualityMetrics(claims = []) {
   const normalized = claims.map((claim) => normalizeClaim(claim));
-  const facts = normalized.filter((claim) => FACT_CLAIM_KINDS.has(claim.kind));
+  const countable = selectCountableClaims(normalized);
+  const facts = countable.filter((claim) => FACT_CLAIM_KINDS.has(claim.kind));
   const keyClaims = facts.filter((claim) => claim.kind === 'key_claim');
   const supportingClaims = facts.filter((claim) => claim.kind === 'supporting_claim');
   const verdicts = Object.fromEntries(CLAIM_VERDICTS.map((verdict) => [verdict, 0]));
@@ -213,12 +325,12 @@ export function calculateQualityMetrics(claims = []) {
     metricsVersion: QUALITY_METRICS_VERSION,
     claimExtractionVersion: CLAIM_EXTRACTION_VERSION,
     claimEvaluationVersion: CLAIM_EVALUATION_VERSION,
-    claimCount: normalized.length,
+    claimCount: countable.length,
     evaluatedClaimCount: facts.length,
     keyClaimCount: keyClaims.length,
     supportingClaimCount: supportingClaims.length,
-    caveatCount: normalized.filter((claim) => claim.kind === 'caveat').length,
-    recommendationCount: normalized.filter((claim) => claim.kind === 'recommendation').length,
+    caveatCount: countable.filter((claim) => claim.kind === 'caveat').length,
+    recommendationCount: countable.filter((claim) => claim.kind === 'recommendation').length,
     claims: {
       supported: verdicts.supported,
       partiallySupported: verdicts.partially_supported,
@@ -240,7 +352,7 @@ export function calculateQualityMetrics(claims = []) {
 }
 
 export function qualityGateFromClaims(claims = []) {
-  const normalized = claims.map((claim) => normalizeClaim(claim));
+  const normalized = selectCountableClaims(claims.map((claim) => normalizeClaim(claim)));
   const keyClaims = normalized.filter((claim) => claim.kind === 'key_claim');
   const facts = normalized.filter((claim) => FACT_CLAIM_KINDS.has(claim.kind));
   if (facts.length === 0) return 'fail';
