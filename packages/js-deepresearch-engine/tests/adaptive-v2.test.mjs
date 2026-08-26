@@ -433,9 +433,8 @@ describe('exploratory agent loop', () => {
     const result = await new ResearchRunner().run({
       query: 'budget read topic',
       settings: { llm: {}, search: {}, research: {
-        strategy: 'exploratory', exploratory: { minLlmTokens: 0, maxLlmTokens: 0, maxSteps: 6, maxEvaluationRetries: 0 },
+        strategy: 'exploratory', exploratory: { minLlmTokens: 0, maxLlmTokens: 0, maxSteps: 6, maxEvaluationRetries: 0, maxSourceReads: 1 },
         focused: { fetchMode: 'disabled' },
-        budget: { maxSourceReads: 1 },
       } },
       search: { async search() { return [
         { title: 'A', url: 'https://budget-a.test/page', content: 'Budget read evidence.', fetchStatus: 'ok' },
@@ -460,9 +459,8 @@ describe('exploratory agent loop', () => {
     const result = await new ResearchRunner().run({
       query: 'parallel topic',
       settings: { llm: {}, search: {}, research: {
-        strategy: 'exploratory', exploratory: { minLlmTokens: 0, maxLlmTokens: 0, maxSteps: 6, maxEvaluationRetries: 0, maxQueriesPerStep: 3, autoReadTopK: 0 },
+        strategy: 'exploratory', exploratory: { minLlmTokens: 0, maxLlmTokens: 0, maxSteps: 6, maxEvaluationRetries: 0, maxQueriesPerStep: 3, autoReadTopK: 0, maxSearchRequests: 2 },
         focused: { fetchMode: 'disabled' },
-        budget: { maxSearchRequests: 2 },
       } },
       search: { async search(query) {
         searchedQueries.push(query);
@@ -497,24 +495,69 @@ describe('exploratory agent loop', () => {
     assert.ok(result.trace.some((entry) => entry.action === 'answer' && entry.reasonCode === 'forced_final_answer'));
   });
 
+  it('does not treat the old 16-step default as a cap when maxSteps is unlimited', async () => {
+    const decisions = Array.from({ length: 18 }, (_, index) => ({
+      action: 'search',
+      query: `unique-host-${index}.example/path`,
+      gapId: 'gap-1',
+      reasonCode: `s${index}`,
+    }));
+    decisions.push({ action: 'answer', reasonCode: 'done' });
+    const result = await new ResearchRunner().run({
+      query: 'open topic space',
+      settings: { llm: {}, search: {}, research: {
+        strategy: 'exploratory',
+        exploratory: {
+          minLlmTokens: 0,
+          maxLlmTokens: 80000,
+          maxSteps: 0,
+          maxEvaluationRetries: 0,
+          autoReadTopK: 0,
+        },
+        focused: { fetchMode: 'disabled' },
+      } },
+      search: { async search() {
+        return [];
+      } },
+      llm: llmFor(decisions, { onDecompose: () => 'no json' }),
+    });
+    assert.ok(!result.trace.some((entry) => entry.reasonCode === 'forced_final_answer'));
+    assert.notEqual(result.quality.stopReason, 'max_steps_safety');
+    assert.ok(result.quality.budget.usage.searchRequests >= 18);
+  });
+
   it('keeps gathered candidates and marks findings degraded when the budget is exhausted', async () => {
+    let decisionCalls = 0;
     const decisions = [
       { action: 'search', query: 'first', gapId: 'gap-1' },
-      { action: 'read', sourceIds: ['https://first.test'], gapId: 'gap-1', reasonCode: 'read' },
+      { action: 'read', sourceIds: ['https://first.test'], gapId: 'gap-1', reasonCode: 'should_not_decide_after_cap' },
       { action: 'search', query: 'second unrelated query', gapId: 'gap-1' },
     ];
     const result = await new ResearchRunner().run({
       query: 'budget topic',
       settings: { llm: {}, search: {}, research: {
-        strategy: 'exploratory', exploratory: { minLlmTokens: 0, maxLlmTokens: 0, maxSteps: 6, maxEvaluationRetries: 0 },
-        focused: { fetchMode: 'disabled' }, budget: { maxSearchRequests: 1 },
+        strategy: 'exploratory',
+        exploratory: { minLlmTokens: 0, maxLlmTokens: 0, maxSteps: 6, maxEvaluationRetries: 0, maxSearchRequests: 1 },
+        focused: { fetchMode: 'disabled' },
       } },
       search: { async search() { return [{ title: 'First', url: 'https://first.test', snippet: 'gathered evidence' }]; } },
-      llm: llmFor(decisions),
+      llm: {
+        async complete({ purpose }) {
+          if (purpose === 'agent_decision') {
+            decisionCalls += 1;
+            return JSON.stringify(decisions.shift());
+          }
+          if (purpose === 'answer_evaluation') return report();
+          if (purpose === 'gap_decomposition') return 'no json here';
+          return report();
+        },
+      },
     });
     assert.equal(result.findings[0].sources[0].url, 'https://first.test');
     assert.equal(result.findings[0].degraded, true);
     assert.ok(result.trace.some((entry) => entry.reasonCode === 'max_budget_exhausted'));
+    assert.equal(decisionCalls, 1);
+    assert.ok(!result.trace.some((entry) => entry.reasonCode === 'should_not_decide_after_cap'));
   });
 
   it('keeps a comparison query open until each subject has body evidence', async () => {
@@ -542,6 +585,27 @@ describe('exploratory agent loop', () => {
     const texts = result.findings.flatMap((finding) => (finding.sources || []).map((source) => `${source.title} ${source.content}`)).join(' ');
     assert.match(texts, /Ollama/);
     assert.match(texts, /llama\.cpp/);
+  });
+
+  it('maps a model sufficient_evidence reason onto evidence_sufficient', async () => {
+    const decisions = [
+      { action: 'search', query: 'ollama overview', gapId: 'gap-1', reasonCode: 'search_ollama' },
+      { action: 'answer', reasonCode: 'sufficient_evidence' },
+    ];
+    const result = await new ResearchRunner().run({
+      query: 'Compare Ollama and llama.cpp',
+      settings: { llm: {}, search: {}, research: {
+        strategy: 'exploratory',
+        exploratory: { minLlmTokens: 0, maxLlmTokens: 0, maxSteps: 6, maxEvaluationRetries: 0, autoReadTopK: 1, targetLlmTokens: 0 },
+        focused: { fetchMode: 'disabled' },
+      } },
+      search: { async search() {
+        return [{ title: 'Ollama', url: 'https://ollama.com', content: 'Ollama is a local model runner.', fetchStatus: 'ok' }];
+      } },
+      llm: llmFor(decisions, { onDecompose: () => JSON.stringify({ subQuestions: ['How does Ollama work?', 'How does llama.cpp work?'] }) }),
+    });
+    assert.equal(result.quality.stopReason, 'evidence_sufficient');
+    assert.equal(result.quality.budget.controllerStopReason, 'evidence_sufficient');
   });
 
   it('stops a definitional query on evidence_sufficient without opening paraphrased gaps', async () => {
@@ -700,6 +764,115 @@ describe('exploratory agent loop', () => {
     assert.ok(result.report);
     assert.ok(events.every((message) => !/undefined\/undefined/.test(message)));
     assert.ok(!events.some((message) => /Research stopped: max_steps/.test(message)));
+  });
+
+  it('ignores a persisted global sourceReads cap when exploratory counts are unlimited', async () => {
+    const { registerContentFetchHandler, resetContentFetchHandlers } = await import('../src/research/content-resolver.mjs');
+    registerContentFetchHandler(async (_url, context) => ({
+      status: 'ok',
+      title: context.source?.title || 'Source',
+      content: context.source?.content || 'Body evidence.',
+      backend: 'test',
+    }));
+    let searchIndex = 0;
+    const decisions = [
+      { action: 'search', query: 'alpha docs', gapId: 'gap-1', reasonCode: 's1' },
+      { action: 'search', query: 'beta docs', gapId: 'gap-1', reasonCode: 's2' },
+      { action: 'search', query: 'gamma docs', gapId: 'gap-1', reasonCode: 's3' },
+      { action: 'search', query: 'delta docs', gapId: 'gap-1', reasonCode: 's4' },
+      { action: 'answer', reasonCode: 'done' },
+    ];
+    try {
+      const result = await new ResearchRunner().run({
+        query: 'Compare alpha, beta, gamma, and delta',
+        settings: { llm: {}, search: {}, research: {
+          strategy: 'exploratory',
+          exploratory: {
+            minLlmTokens: 0,
+            maxLlmTokens: 0,
+            maxSteps: 10,
+            maxEvaluationRetries: 0,
+            autoReadTopK: 3,
+            maxReadsPerStep: 4,
+            maxSearchRequests: 0,
+            maxSourceReads: 0,
+          },
+          focused: { fetchMode: 'full', fetchBackend: 'auto' },
+          budget: { maxSourceReads: 8, maxSearchRequests: 8 },
+        } },
+        search: { async search() {
+          searchIndex += 1;
+          const subject = ['alpha', 'beta', 'gamma', 'delta'][searchIndex - 1] || 'other';
+          return [1, 2, 3].map((n) => ({
+            title: `${subject} ${n}`,
+            url: `https://${subject}-${n}.example/page`,
+            content: `${subject} official docs item ${n}.`,
+            fetchStatus: 'ok',
+          }));
+        } },
+        llm: llmFor(decisions, { onDecompose: () => 'no json' }),
+      });
+      assert.ok(result.quality.budget.usage.sourceReads > 8);
+      assert.equal(result.quality.budget.limits.sourceReads, 0);
+    } finally {
+      resetContentFetchHandlers();
+    }
+  });
+
+  it('answers immediately when an explicit exploratory sourceReads cap is exhausted', async () => {
+    const { registerContentFetchHandler, resetContentFetchHandlers } = await import('../src/research/content-resolver.mjs');
+    registerContentFetchHandler(async (_url, context) => ({
+      status: 'ok',
+      title: context.source?.title || 'Source',
+      content: context.source?.content || 'Body evidence.',
+      backend: 'test',
+    }));
+    let decisionCalls = 0;
+    const decisions = [
+      { action: 'search', query: 'cap topic', gapId: 'gap-1', reasonCode: 'search' },
+      { action: 'read', sourceIds: ['https://cap-b.test'], gapId: 'gap-1', reasonCode: 'should_not_run' },
+      { action: 'search', query: 'more after cap', gapId: 'gap-1', reasonCode: 'should_not_run' },
+    ];
+    try {
+      const result = await new ResearchRunner().run({
+        query: 'cap topic',
+        settings: { llm: {}, search: {}, research: {
+          strategy: 'exploratory',
+          exploratory: {
+            minLlmTokens: 0,
+            maxLlmTokens: 0,
+            maxSteps: 8,
+            maxEvaluationRetries: 0,
+            autoReadTopK: 1,
+            maxSourceReads: 1,
+          },
+          focused: { fetchMode: 'full', fetchBackend: 'auto' },
+        } },
+        search: { async search() {
+          return [
+            { title: 'A', url: 'https://cap-a.test', content: 'Cap topic evidence from host A.', fetchStatus: 'ok' },
+            { title: 'B', url: 'https://cap-b.test', content: 'Cap topic evidence from host B.', fetchStatus: 'ok' },
+          ];
+        } },
+        llm: {
+          async complete({ purpose }) {
+            if (purpose === 'agent_decision') {
+              decisionCalls += 1;
+              return JSON.stringify(decisions.shift());
+            }
+            if (purpose === 'answer_evaluation') return report();
+            if (purpose === 'gap_decomposition') return 'no json here';
+            return report();
+          },
+        },
+      });
+      assert.equal(decisionCalls, 1);
+      assert.equal(result.quality.stopReason, 'max_budget_exhausted');
+      assert.ok(result.trace.some((entry) => entry.reasonCode === 'max_budget_exhausted'));
+      assert.ok(!result.trace.some((entry) => entry.reasonCode === 'should_not_run'));
+    } finally {
+      resetContentFetchHandlers();
+    }
   });
 
   it('rejects a consecutive read of the same sources and falls back without reflect', async () => {

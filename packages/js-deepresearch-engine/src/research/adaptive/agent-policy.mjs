@@ -38,6 +38,7 @@ export async function decideAdaptiveAction({ llm, state, signal }) {
       'Never repeat or closely paraphrase a query listed in searchedQueries; propose a genuinely different query instead.',
       'If the research question compares multiple subjects, ensure searches and reads cover each subject; check knowledge for subjects with no dedicated evidence yet.',
       'Use knowledge, gap coverage, and sufficiency to judge whether collected evidence already answers the open gaps.',
+      'When answering because the evidence is enough, set reasonCode to evidence_sufficient.',
       belowMin ? 'You are still below the token floor. Do not answer. Explore another unread source or uncovered subject.' : '',
       'Budget fields: usedLlmTokens, minLlmTokens, remainingVsMin, remainingVsHardCap, reservedReportTokens (prompt+completion reserved for the final report), and actionCostEstimates.',
       `Return JSON only: ${ACTION_SCHEMA}`,

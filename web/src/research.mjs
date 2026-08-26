@@ -109,8 +109,8 @@ async function main() {
 
         <div id="exploratoryFields" class="grid strategy-panel">
           <div>
-            <label for="exploratoryMaxSteps">Max steps</label>
-            <input id="exploratoryMaxSteps" type="number" min="2" max="32" value="${exploratory.maxSteps ?? 16}" />
+            <label for="exploratoryMaxSteps">Max steps (0 = unlimited)</label>
+            <input id="exploratoryMaxSteps" type="number" min="0" value="${exploratory.maxSteps ?? 0}" />
           </div>
           <div>
             <label for="exploratoryMaxReads">Reads per step</label>
@@ -126,6 +126,14 @@ async function main() {
           </div>
           <div>
             <label><input id="answerGate" type="checkbox" ${exploratory.answerGate !== false ? 'checked' : ''} /> Answer gate</label>
+          </div>
+          <div>
+            <label for="exploratoryMaxSearchRequests">Max search requests (0 = unlimited)</label>
+            <input id="exploratoryMaxSearchRequests" type="number" min="0" value="${exploratory.maxSearchRequests ?? 0}" />
+          </div>
+          <div>
+            <label for="exploratoryMaxSourceReads">Max source reads (0 = unlimited)</label>
+            <input id="exploratoryMaxSourceReads" type="number" min="0" value="${exploratory.maxSourceReads ?? 0}" />
           </div>
         </div>
 
@@ -166,6 +174,7 @@ async function submitResearch(event) {
 }
 
 function collectSettings() {
+  const strategy = value('#strategy');
   return {
     llm: {
       ...(loadedSettings?.llm || {}),
@@ -181,38 +190,46 @@ function collectSettings() {
     },
     research: {
       ...(loadedSettings?.research || {}),
-      strategy: value('#strategy'),
+      strategy,
       questionsPerIteration: Number(value('#questions') || 2),
       iterations: Number(value('#iterations') || 1),
       concurrency: Number(value('#concurrency') || 1),
       budget: {
         ...currentResearchBudget(),
         ...(loadedSettings?.research?.budget || {}),
-        maxSearchRequests: Number(value('#maxSearchRequests') || 0),
-        maxSourceReads: Number(value('#maxSourceReads') || 0),
+        ...(strategy === 'focused' ? {
+          maxSearchRequests: Number(value('#maxSearchRequests') || 0),
+          maxSourceReads: Number(value('#maxSourceReads') || 0),
+        } : {}),
       },
       focused: {
         ...(loadedSettings?.research?.focused || {}),
-        fetchMode: value('#focusedFetchMode') || 'summary',
-        maxUrlsTotal: Number(value('#focusedMaxUrls') || 12),
-        iterationControl: {
-          ...(loadedSettings?.research?.focused?.iterationControl || {}),
-          enabled: checked('#iterationControl'),
-        },
-        evidencePassages: {
-          ...(loadedSettings?.research?.focused?.evidencePassages || {}),
-          enabled: checked('#evidencePassages'),
-          claimAlignment: checked('#evidencePassages'),
-        },
+        ...(strategy === 'focused' ? {
+          fetchMode: value('#focusedFetchMode') || 'summary',
+          maxUrlsTotal: Number(value('#focusedMaxUrls') || 12),
+          iterationControl: {
+            ...(loadedSettings?.research?.focused?.iterationControl || {}),
+            enabled: checked('#iterationControl'),
+          },
+          evidencePassages: {
+            ...(loadedSettings?.research?.focused?.evidencePassages || {}),
+            enabled: checked('#evidencePassages'),
+            claimAlignment: checked('#evidencePassages'),
+          },
+        } : {}),
       },
       exploratory: {
         ...(loadedSettings?.research?.exploratory || {}),
-        maxSteps: Number(value('#exploratoryMaxSteps') || 16),
-        maxReadsPerStep: Number(value('#exploratoryMaxReads') || 4),
-        minLlmTokens: Number(value('#exploratoryMinTokens') || 0),
-        maxLlmTokens: Number(value('#exploratoryMaxTokens') || 0),
-        targetLlmTokens: Number(value('#exploratoryMinTokens') || 0),
-        answerGate: checked('#answerGate'),
+        ...(strategy === 'exploratory' ? {
+          maxSteps: Number(value('#exploratoryMaxSteps') || 0),
+          maxReadsPerStep: Number(value('#exploratoryMaxReads') || 4),
+          minLlmTokens: Number(value('#exploratoryMinTokens') || 0),
+          maxLlmTokens: Number(value('#exploratoryMaxTokens') || 0),
+          targetLlmTokens: Number(value('#exploratoryMinTokens') || 0),
+          maxSearchRequests: Number(value('#exploratoryMaxSearchRequests') || 0),
+          maxSourceReads: Number(value('#exploratoryMaxSourceReads') || 0),
+          answerGate: checked('#answerGate'),
+        } : {}),
       },
     },
   };
@@ -229,7 +246,7 @@ function syncStrategyPanels() {
   togglePanel('#quickFields', strategy === 'quick');
   togglePanel('#focusedFields', strategy === 'focused');
   togglePanel('#exploratoryFields', strategy === 'exploratory');
-  togglePanel('#budgetFields', strategy === 'focused' || strategy === 'exploratory');
+  togglePanel('#budgetFields', strategy === 'focused');
 }
 
 function togglePanel(selector, visible) {

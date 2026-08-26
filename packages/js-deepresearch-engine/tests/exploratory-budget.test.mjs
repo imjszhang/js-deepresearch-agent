@@ -5,7 +5,7 @@ import { ResearchState } from '../src/research/adaptive/research-state.mjs';
 import { fallbackAdaptiveAction } from '../src/research/adaptive/agent-policy.mjs';
 import { evaluateExploratorySufficiency, classifyResearchQuery, similarQuestions } from '../src/research/adaptive/exploratory-sufficiency.mjs';
 import { buildBudgetView, estimateReportPromptTokens } from '../src/research/adaptive/budget-view.mjs';
-import { resolveExploratorySettings } from '../src/research/exploratory-settings.mjs';
+import { applyExploratoryBudget, effectiveExploratoryMaxSteps, EXPLORATORY_SAFETY_MAX_STEPS, resolveExploratorySettings } from '../src/research/exploratory-settings.mjs';
 import { mapStructuredProgressEvent } from '../src/research/progress-events.mjs';
 
 describe('exploratory budget snapshot and sufficiency', () => {
@@ -112,6 +112,56 @@ describe('exploratory budget snapshot and sufficiency', () => {
     assert.equal(fallback.action, 'answer');
   });
 
+  it('defaults exploratory count caps to unlimited and does not inherit global budget counts', () => {
+    const resolved = resolveExploratorySettings({
+      research: { budget: { maxSearchRequests: 18, maxSourceReads: 16 } },
+    });
+    assert.equal(resolved.maxSearchRequests, 0);
+    assert.equal(resolved.maxSourceReads, 0);
+    assert.equal(resolved.maxSteps, 0);
+  });
+
+  it('keeps maxSteps unlimited when a token ceiling is set and uses a safety valve only when both are off', () => {
+    assert.equal(effectiveExploratoryMaxSteps({ maxSteps: 0, maxLlmTokens: 80000 }), 0);
+    assert.equal(effectiveExploratoryMaxSteps({ maxSteps: 12, maxLlmTokens: 80000 }), 12);
+    assert.equal(effectiveExploratoryMaxSteps({ maxSteps: 0, maxLlmTokens: 0 }), EXPLORATORY_SAFETY_MAX_STEPS);
+    assert.equal(effectiveExploratoryMaxSteps({ maxSteps: 0, maxLlmTokens: 0 }, 3000), 0);
+    const unlimitedState = new ResearchState({ query: 'topic', maxSteps: 0 });
+    unlimitedState.step = 20;
+    assert.equal(unlimitedState.validate({ action: 'search', query: 'next' }), null);
+    assert.equal(unlimitedState.snapshot().stepsRemaining, null);
+    const defaultState = new ResearchState({ query: 'topic' });
+    assert.equal(defaultState.maxSteps, 0);
+    assert.equal(defaultState.snapshot().stepsRemaining, null);
+  });
+
+  it('overrides global search and read count limits with exploratory values', () => {
+    const unlimited = new BudgetManager({
+      research: { budget: { maxSearchRequests: 18, maxSourceReads: 16, maxLlmTokens: 80000 } },
+    });
+    applyExploratoryBudget(unlimited, {
+      minLlmTokens: 20000,
+      maxLlmTokens: 80000,
+      maxSearchRequests: 0,
+      maxSourceReads: 0,
+    });
+    assert.equal(unlimited.limits.searchRequests, 0);
+    assert.equal(unlimited.limits.sourceReads, 0);
+    assert.equal(unlimited.canClaim('sourceReads', 20), true);
+
+    const explicit = new BudgetManager({
+      research: { budget: { maxSearchRequests: 10, maxSourceReads: 8 } },
+    });
+    applyExploratoryBudget(explicit, {
+      minLlmTokens: 0,
+      maxLlmTokens: 0,
+      maxSearchRequests: 20,
+      maxSourceReads: 30,
+    });
+    assert.equal(explicit.limits.searchRequests, 20);
+    assert.equal(explicit.limits.sourceReads, 30);
+  });
+
   it('treats the token floor as a keep-exploring bound instead of a stop target', () => {
     const resolved = resolveExploratorySettings({
       research: { exploratory: { minLlmTokens: 20000, maxLlmTokens: 80000 } },
@@ -181,6 +231,15 @@ describe('exploratory budget snapshot and sufficiency', () => {
     });
     assert.equal(missingLoop.message, 'Enriching sources');
     assert.ok(!/undefined\/undefined/.test(missingLoop.message));
+
+    const unlimitedSteps = mapStructuredProgressEvent({
+      stage: 'enriching_sources',
+      step: 20,
+      maxSteps: 0,
+      total: 2,
+    });
+    assert.equal(unlimitedSteps.message, 'Enriching sources');
+    assert.ok(!/20\/0/.test(unlimitedSteps.message));
   });
 
   it('persists covered gap status so snapshots stay truthful', () => {

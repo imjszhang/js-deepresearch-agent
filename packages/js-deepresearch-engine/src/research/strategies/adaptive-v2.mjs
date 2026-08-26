@@ -1,6 +1,6 @@
 import { enrichFindings } from '../source-enricher.mjs';
 import { resolveFocusedSettings } from '../focused-settings.mjs';
-import { applyExploratoryTokenBudget, resolveExploratorySettings } from '../exploratory-settings.mjs';
+import { applyExploratoryBudget, effectiveExploratoryMaxSteps, resolveExploratorySettings } from '../exploratory-settings.mjs';
 import { decideAdaptiveAction, fallbackAdaptiveAction, evaluateAnswerReadiness, decomposeQuery, pickUnreadCandidates } from '../adaptive/agent-policy.mjs';
 import { ResearchState, hostnameOf } from '../adaptive/research-state.mjs';
 import { classifyResearchQuery } from '../adaptive/exploratory-sufficiency.mjs';
@@ -34,10 +34,37 @@ function loopCanAfford(budget, tokens) {
   return budget.canClaim('llmTokens', Math.max(1, Number(tokens) || 1));
 }
 
+function hasStepCap(maxSteps) {
+  return Number(maxSteps) > 0;
+}
+
+function countCapsExhausted(budget) {
+  if (!budget) return false;
+  const searchLimit = Number(budget.limits?.searchRequests) || 0;
+  const readLimit = Number(budget.limits?.sourceReads) || 0;
+  if (searchLimit > 0 && !budget.canClaim('searchRequests')) return true;
+  if (readLimit > 0 && !budget.canClaim('sourceReads')) return true;
+  return Boolean(
+    budget.exhaustedKinds?.has?.('searchRequests')
+    || budget.exhaustedKinds?.has?.('sourceReads')
+    || budget.stopReason === 'searchRequests'
+    || budget.stopReason === 'sourceReads',
+  );
+}
+
+const EVIDENCE_SUFFICIENT_REASON_CODES = new Set([
+  'evidence_sufficient',
+  'fallback_evidence_sufficient',
+  'agent_evidence_sufficient',
+  'sufficient_evidence',
+  'enough_evidence',
+  'evidence_enough',
+]);
+
 function mapAnswerStopReason(action, pendingStopReason) {
   if (pendingStopReason) return pendingStopReason;
-  const code = action?.reasonCode || '';
-  if (code === 'evidence_sufficient' || code === 'fallback_evidence_sufficient' || code === 'agent_evidence_sufficient') {
+  const code = String(action?.reasonCode || '').trim();
+  if (EVIDENCE_SUFFICIENT_REASON_CODES.has(code)) {
     return STOP_REASONS.evidenceSufficient;
   }
   if (code === 'target_budget_reached') return STOP_REASONS.targetBudgetReached;
@@ -83,10 +110,11 @@ export async function runAdaptiveV2(context) {
   const exploratory = resolveExploratorySettings(settings);
   const focused = resolveFocusedSettings(settings);
   const queryShape = classifyResearchQuery(query);
-  applyExploratoryTokenBudget(budget, exploratory);
+  applyExploratoryBudget(budget, exploratory);
+  const maxSteps = effectiveExploratoryMaxSteps(exploratory, budget?.limits?.llmTokens);
   const state = new ResearchState({
     query,
-    maxSteps: exploratory.maxSteps,
+    maxSteps,
     maxGapDepth: exploratory.maxGapDepth,
     minLlmTokens: exploratory.minLlmTokens,
     targetLlmTokens: exploratory.minLlmTokens,
@@ -185,7 +213,7 @@ export async function runAdaptiveV2(context) {
   }
 
   try {
-    while (state.step < state.maxSteps) {
+    while (!hasStepCap(state.maxSteps) || state.step < state.maxSteps) {
       abort(signal);
       refreshState();
 
@@ -201,6 +229,10 @@ export async function runAdaptiveV2(context) {
         stopReason = STOP_REASONS.maxBudgetExhausted;
         addTrace(trace, state, 'stop', { reasonCode: STOP_REASONS.maxBudgetExhausted }, budget, 'budget_exhausted');
         break;
+      } else if (countCapsExhausted(budget)) {
+        action = { action: 'answer', reasonCode: STOP_REASONS.maxBudgetExhausted };
+        pendingStopReason = STOP_REASONS.maxBudgetExhausted;
+        degraded = true;
       } else if (state.sufficiency?.sufficient && state.hasBodyEvidence() && !belowMin) {
         action = { action: 'answer', reasonCode: 'evidence_sufficient' };
       } else {
@@ -212,7 +244,7 @@ export async function runAdaptiveV2(context) {
         }
       }
 
-      let invalid = state.validate(action);
+      let invalid = pendingStopReason === STOP_REASONS.maxBudgetExhausted ? null : state.validate(action);
       let searchQueries = [];
       if (!invalid && action.action === 'search') {
         for (const candidateQuery of normalizeSearchQueries(action, maxQueriesPerStep)) {
@@ -233,8 +265,8 @@ export async function runAdaptiveV2(context) {
         if (invalid) action = { action: 'stop', reasonCode: invalid };
         if (action.action === 'search') searchQueries = normalizeSearchQueries(action, maxQueriesPerStep);
       }
-      const stepsRemaining = state.maxSteps - state.step;
-      if (stepsRemaining <= 1 && !['answer', 'stop'].includes(action.action)
+      const stepsRemaining = hasStepCap(state.maxSteps) ? state.maxSteps - state.step : null;
+      if (stepsRemaining !== null && stepsRemaining <= 1 && !['answer', 'stop'].includes(action.action)
         && (state.findings.length > 0 || state.candidates.size > 0)) {
         addTrace(trace, state, action.action, { reasonCode: 'forced_final_answer' }, budget, 'forced');
         action = { action: 'answer', reasonCode: 'forced_final_answer' };
@@ -322,9 +354,10 @@ export async function runAdaptiveV2(context) {
 
       if (action.action === 'answer') {
         refreshState();
-        const canContinue = state.step < state.maxSteps
+        const canContinue = (!hasStepCap(state.maxSteps) || state.step < state.maxSteps)
           && loopCanAfford(budget, state.actionCosts.estimate('search'))
-          && !state.budgetView?.hardCapReached;
+          && !state.budgetView?.hardCapReached
+          && !countCapsExhausted(budget);
         const hasDirectEvidence = state.hasBodyEvidence();
         if (!hasDirectEvidence && canContinue && state.evaluationRetries < maxRetries && budget?.canClaim('searchRequests')) {
           state.evaluationRetries += 1;
@@ -379,7 +412,7 @@ export async function runAdaptiveV2(context) {
 
   if (!stopReason) {
     if (budget?.limits?.llmTokens && !budget.canClaim('llmTokens', 1)) stopReason = STOP_REASONS.maxBudgetExhausted;
-    else if (state.step >= state.maxSteps) stopReason = STOP_REASONS.maxStepsSafety;
+    else if (hasStepCap(state.maxSteps) && state.step >= state.maxSteps) stopReason = STOP_REASONS.maxStepsSafety;
     else stopReason = STOP_REASONS.agentStop;
   }
 

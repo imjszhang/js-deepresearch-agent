@@ -4,8 +4,8 @@ export const exploratoryStrategyDefinition = {
   id: 'exploratory',
   label: '探索性调研',
   labelEn: 'Exploratory research',
-  description: '适合复杂、开放或多主体问题；未到 token 下限就继续探索，上限或步数安全阀才截断。',
-  descriptionEn: 'Explores until a token floor is met, then may stop on sufficient evidence; a high token ceiling and maxSteps are hard stops.',
+  description: '适合复杂、开放或多主体问题；主约束是 token 下限/上限。搜索/阅读次数和步数默认不限制；仅在探索性与全局 token 上限都关闭时用步数安全阀防死循环。',
+  descriptionEn: 'Explores until a token floor is met, then may stop on sufficient evidence; the token ceiling is the hard stop. Search/read counts and maxSteps default to unlimited. A step safety valve applies only when both token ceilings are off.',
   requiresLlm: true,
   supportsIterations: false,
   supportsConcurrency: true,
@@ -16,10 +16,12 @@ export const exploratoryStrategyDefinition = {
       const current = step ?? iteration;
       const total = maxSteps ?? iterations;
       if (current && total) return `Enriching sources for step ${current}/${total}`;
+      if (current) return `Enriching sources for step ${current}`;
       return 'Enriching sources';
     },
     searchStartMessage: ({ total, step, maxSteps }) => {
       if (step && maxSteps) return `Running ${total || 0} searches for step ${step}/${maxSteps}`;
+      if (step) return `Running ${total || 0} searches for step ${step}`;
       return `Running ${total || 0} searches`;
     },
   },

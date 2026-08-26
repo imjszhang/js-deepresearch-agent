@@ -131,8 +131,12 @@ npm exec --package=. -- jdr research "Explain the current state of local-first A
 | `--http-proxy` | `http.proxy` | SOCKS5/HTTP 代理 URL；仅 LLM / embedding / rerank 走代理，搜索与正文抓取直连 |
 | `--max-rerank-requests` | `research.budget.maxRerankRequests` | 外部 rerank 请求上限，`0` 不限制 |
 | `--max-rerank-tokens` | `research.budget.maxRerankTokens` | provider 可观测 rerank token 上限，`0` 不限制 |
-| `--exploratory-max-steps` | `research.exploratory.maxSteps` | 探索性调研安全阀步数（防死循环，不是正常深度） |
+| `--max-search-requests` | `research.budget.maxSearchRequests` | 专题/快速搜索次数上限（默认 18）。`--strategy exploratory` 时同时写入 `research.exploratory.maxSearchRequests` |
+| `--max-source-reads` | `research.budget.maxSourceReads` | 专题/快速阅读次数上限（默认 16）。`--strategy exploratory` 时同时写入 `research.exploratory.maxSourceReads` |
+| `--exploratory-max-steps` | `research.exploratory.maxSteps` | 探索性步数上限，`0` 不限制（默认）。不是正常深度；仅在探索性与全局 token 硬上限都关闭时启用 64 步安全阀 |
 | `--exploratory-max-reads-per-step` | `research.exploratory.maxReadsPerStep` | 探索性调研每步阅读数 |
+| `--exploratory-max-search-requests` | `research.exploratory.maxSearchRequests` | 探索性搜索次数上限，`0` 不限制（默认）。不继承全局 `research.budget` |
+| `--exploratory-max-source-reads` | `research.exploratory.maxSourceReads` | 探索性阅读次数上限，`0` 不限制（默认）。不继承全局 `research.budget` |
 | `--exploratory-min-llm-tokens` | `research.exploratory.minLlmTokens` | 探索性调研 LLM token 下限；未达到前继续探索，不允许因证据充分而早停。`--exploratory-target-llm-tokens` 仍是该键的兼容别名 |
 | `--exploratory-max-llm-tokens` | `research.exploratory.maxLlmTokens` | 探索性调研 LLM token 上限（默认 80000）。`--max-llm-tokens` 若更小则取更紧的硬上限 |
 | `--focused-iteration-control` | `research.focused.iterationControl.enabled` | 专题调研规则早停 |
@@ -591,19 +595,19 @@ npm run benchmark:strategies -- \
 |---|---|---|---|---|
 | `quick` | 快速调研 | 快 | 浅 | 快速了解主题、发现方向；不承诺正文级证据。1 轮 = 原 Rapid，多轮 = 原 Parallel |
 | `focused` | 专题调研 | 均衡 | 深 | **默认**；针对明确问题阅读来源并形成有依据的报告 |
-| `exploratory` | 探索性调研 | 可变 | 深 | 复杂、开放或多主体问题；先花到 token 下限再允许停，硬上限或 `maxSteps` 才截断 |
+| `exploratory` | 探索性调研 | 可变 | 深 | 复杂、开放或多主体问题；主约束是 token 下限/上限。搜索/阅读次数和步数默认不限制，不继承全局 18/16 |
 
 Agent 选型建议：
 
 - 用户要**快速答案** → `--strategy quick`（默认单轮；`--iterations` 未指定时不会沿用专题调研的轮次）
 - 用户要**引用与深度** → `--strategy focused`（默认；轮次由 `iterationControl` 管，`--iterations` 仅在关闭早停时生效）
-- 用户要**开放探索** → `--strategy exploratory`；用 `--exploratory-min-llm-tokens` 设下限、`--exploratory-max-llm-tokens` 或 `--max-llm-tokens` 设上限。未到下限前继续探索；证据充分且已过下限才停，不要把下限当成停点
+- 用户要**开放探索** → `--strategy exploratory`；用 `--exploratory-min-llm-tokens` 设下限、`--exploratory-max-llm-tokens` 或 `--max-llm-tokens` 设上限。未到下限前继续探索；证据充分且已过下限才停，不要把下限当成停点。次数和步数上限默认关闭；若要限制用 `--max-source-reads` / `--exploratory-max-steps`（用尽后立刻写报告）
 
 旧 ID（`rapid`、`parallel`、`source-based`、`adaptive`）不再注册。CLI 传入旧值会报迁移错误。历史 `work_dir` / Intel / SQLite 记录仍可读取。
 
 ### 研究控制与 Schema v3
 
-预算、查询记忆、来源聚类、passage/claim 证据链与自适应停轮**默认已开启**（质量优先预设）。快速摸底可用 `--focused-fetch-mode disabled`、`--focused-evidence-passages false` 等 flag 单次关闭。`preReportGate` 与 LLM 相关性过滤仍默认关闭。单次实验也可用 `--max-llm-tokens`、`--max-search-requests`、`--max-source-reads` 等覆盖预算。探索性调研以 `research.exploratory.minLlmTokens`（默认 20000）为探索下限、`research.exploratory.maxLlmTokens`（默认 80000）为上限；未到下限不因证据充分早停，`maxSteps` 只防止廉价死循环。
+预算、查询记忆、来源聚类、passage/claim 证据链与自适应停轮**默认已开启**（质量优先预设）。快速摸底可用 `--focused-fetch-mode disabled`、`--focused-evidence-passages false` 等 flag 单次关闭。`preReportGate` 与 LLM 相关性过滤仍默认关闭。专题/快速的次数预算是 `research.budget.maxSearchRequests`（默认 18）和 `maxSourceReads`（默认 16），可用 `--max-search-requests` / `--max-source-reads` 覆盖。探索性调研以 `research.exploratory.minLlmTokens`（默认 20000）为探索下限、`research.exploratory.maxLlmTokens`（默认 80000）为上限；搜索/阅读次数和 `maxSteps` 默认 `0`（不限制）。显式设了探索性次数上限时，用尽后立刻写报告，不再空转决策。仅当探索性与全局 token 硬上限都关闭时，才用 64 步安全阀防止廉价死循环。
 
 Schema v3 在旧四件套之外写入 `gaps.json`、`passages.json`、`claims.json`、`quality.json`、`trace.json`。Intel Store 继续读取 v2；`intel import --upgrade-existing` 可从有正文的旧产物派生 passage/claim，不能从 snippet 伪造正文证据。Wiki 会为 v3 生成 `Evidence/` 与 `Open Questions/` 页面。
 

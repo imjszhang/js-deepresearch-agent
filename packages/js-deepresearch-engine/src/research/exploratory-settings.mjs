@@ -8,6 +8,22 @@ function tokenBound(raw, fallback) {
   return Number.isFinite(number) && number > 0 ? number : 0;
 }
 
+function countBound(raw, fallback = 0) {
+  if (raw === undefined || raw === null || raw === '') return fallback;
+  const number = Number(raw);
+  return Number.isFinite(number) && number > 0 ? number : 0;
+}
+
+export const EXPLORATORY_SAFETY_MAX_STEPS = 64;
+
+export function effectiveExploratoryMaxSteps(exploratory = {}, tokenCeiling) {
+  const configured = countBound(exploratory.maxSteps, 0);
+  if (configured > 0) return configured;
+  const cap = Number(tokenCeiling ?? exploratory.maxLlmTokens) || 0;
+  if (cap > 0) return 0;
+  return EXPLORATORY_SAFETY_MAX_STEPS;
+}
+
 export function resolveExploratorySettings(settings = {}) {
   const raw = readExploratoryRaw(settings);
   const hasMin = raw.minLlmTokens !== undefined && raw.minLlmTokens !== null && raw.minLlmTokens !== '';
@@ -20,7 +36,7 @@ export function resolveExploratorySettings(settings = {}) {
     minLlmTokens = maxLlmTokens;
   }
   return {
-    maxSteps: Number(raw.maxSteps) || 16,
+    maxSteps: countBound(raw.maxSteps, 0),
     minLlmTokens,
     maxLlmTokens,
     targetLlmTokens: minLlmTokens,
@@ -28,6 +44,8 @@ export function resolveExploratorySettings(settings = {}) {
     maxOpenGaps: Number(raw.maxOpenGaps) || 8,
     maxQueriesPerStep: Number(raw.maxQueriesPerStep) || 3,
     maxReadsPerStep: Number(raw.maxReadsPerStep) || 4,
+    maxSearchRequests: countBound(raw.maxSearchRequests, 0),
+    maxSourceReads: countBound(raw.maxSourceReads, 0),
     plannerParallelism: Number(raw.plannerParallelism) || 2,
     enableCoding: raw.enableCoding === true,
     gateMode: raw.gateMode || 'rules-then-llm',
@@ -37,7 +55,18 @@ export function resolveExploratorySettings(settings = {}) {
   };
 }
 
+export function applyExploratoryBudget(budget, exploratory) {
+  applyExploratoryTokenLimits(budget, exploratory);
+  if (!budget?.limits) return;
+  budget.limits.searchRequests = countBound(exploratory?.maxSearchRequests, 0);
+  budget.limits.sourceReads = countBound(exploratory?.maxSourceReads, 0);
+}
+
 export function applyExploratoryTokenBudget(budget, exploratory) {
+  applyExploratoryBudget(budget, exploratory);
+}
+
+function applyExploratoryTokenLimits(budget, exploratory) {
   if (!budget) return;
   const min = Number(exploratory?.minLlmTokens) || 0;
   const max = Number(exploratory?.maxLlmTokens) || 0;

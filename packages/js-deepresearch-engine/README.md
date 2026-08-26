@@ -130,13 +130,13 @@ The engine does not read `.env` files or persist settings. Callers are responsib
 
 - `quick` — snippet-only scan. One iteration is original query plus a few follow-ups; more than one iteration uses the shared iterative loop. It does not enrich URL bodies.
 - `focused` — default topic research: source-informed follow-ups, optional URL enrichment, source selection, evidence chain, and iteration/evidence early-stop
-- `exploratory` — budget-driven agent loop that chooses structured `search`, `read`, `reflect`, `answer`, or `stop` actions. Spend at least `research.exploratory.minLlmTokens` (default 20000) exploring before evidence sufficiency may stop the loop. `research.exploratory.maxLlmTokens` (default 80000) is the high ceiling; a tighter `research.budget.maxLlmTokens` still wins. `research.exploratory.maxSteps` is only a safety valve against infinite cheap loops.
+- `exploratory` — budget-driven agent loop that chooses structured `search`, `read`, `reflect`, `answer`, or `stop` actions. Spend at least `research.exploratory.minLlmTokens` (default 20000) exploring before evidence sufficiency may stop the loop. `research.exploratory.maxLlmTokens` (default 80000) is the high ceiling; a tighter `research.budget.maxLlmTokens` still wins. Search/read count caps and `maxSteps` default to `0` (unlimited) and do not inherit `research.budget` counts. A 64-step safety valve applies only when both the exploratory and global token ceilings are off.
 
 Custom strategies can still be added with `registerStrategy()`. Historical IDs (`rapid`, `parallel`, `source-based`, `adaptive`) are not registered.
 
 ## Research Controls and Schema v3
 
-`focused` defaults to a quality-oriented preset: `fetchMode: summary`, enabled `queryMemory`, `sourceSelection`, `evidencePassages` (with `claimAlignment`), and `iterationControl`, plus soft budgets (`maxSearchRequests: 18`, `maxSourceReads: 16`). Set `fetchMode: disabled` or turn individual controls off when embedding the engine in latency-sensitive paths. `preReportGate` and LLM relevance filtering stay disabled by default.
+`focused` defaults to a quality-oriented preset: `fetchMode: summary`, enabled `queryMemory`, `sourceSelection`, `evidencePassages` (with `claimAlignment`), and `iterationControl`, plus soft budgets (`maxSearchRequests: 18`, `maxSourceReads: 16`). Those global count budgets apply to `focused` / `quick` only. Set `fetchMode: disabled` or turn individual controls off when embedding the engine in latency-sensitive paths. `preReportGate` and LLM relevance filtering stay disabled by default.
 
 Schema v3 results retain `report`, `findings`, and `sources` and add `gaps`, `passages`, `claims`, `quality`, and a structured `trace`. Passage and claim generation run when `evidencePassages` is enabled (default for `focused`). Semantic helpers use pluggable research providers and deterministic local fallbacks.
 

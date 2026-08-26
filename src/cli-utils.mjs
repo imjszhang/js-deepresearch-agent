@@ -150,6 +150,8 @@ export function applyResearchFlags(settings, flags) {
     'exploratory-min-llm-tokens': 'research.exploratory.minLlmTokens',
     'exploratory-max-llm-tokens': 'research.exploratory.maxLlmTokens',
     'exploratory-target-llm-tokens': 'research.exploratory.minLlmTokens',
+    'exploratory-max-search-requests': 'research.exploratory.maxSearchRequests',
+    'exploratory-max-source-reads': 'research.exploratory.maxSourceReads',
     'adaptive-max-steps': 'research.exploratory.maxSteps',
     'adaptive-max-reads-per-step': 'research.exploratory.maxReadsPerStep',
   };
@@ -171,6 +173,15 @@ export function applyResearchFlags(settings, flags) {
   for (const [flag, key] of Object.entries(mappings)) {
     if (flags[flag] !== undefined) {
       setDeepValue(settings, key, flags[flag]);
+    }
+  }
+  const strategy = String(flags.strategy || settings.research?.strategy || '');
+  if (strategy === 'exploratory') {
+    if (flags['max-search-requests'] !== undefined && flags['exploratory-max-search-requests'] === undefined) {
+      setDeepValue(settings, 'research.exploratory.maxSearchRequests', flags['max-search-requests']);
+    }
+    if (flags['max-source-reads'] !== undefined && flags['exploratory-max-source-reads'] === undefined) {
+      setDeepValue(settings, 'research.exploratory.maxSourceReads', flags['max-source-reads']);
     }
   }
   if (flags['exploratory-min-llm-tokens'] !== undefined || flags['exploratory-target-llm-tokens'] !== undefined) {

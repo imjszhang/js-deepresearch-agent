@@ -46,9 +46,10 @@ export function hostnameWeight(url) {
 }
 
 export class ResearchState {
-  constructor({ query, maxSteps = 12, maxGapDepth = 2, minLlmTokens = 0, targetLlmTokens = 0, budget = null } = {}) {
+  constructor({ query, maxSteps = 0, maxGapDepth = 2, minLlmTokens = 0, targetLlmTokens = 0, budget = null } = {}) {
     this.query = query;
-    this.maxSteps = Math.max(1, Number(maxSteps) || 12);
+    const parsedSteps = Number(maxSteps);
+    this.maxSteps = Number.isFinite(parsedSteps) && parsedSteps > 0 ? Math.floor(parsedSteps) : 0;
     this.maxGapDepth = Math.max(0, Number(maxGapDepth) || 0);
     this.minLlmTokens = Number(minLlmTokens || targetLlmTokens) || 0;
     this.targetLlmTokens = this.minLlmTokens;
@@ -181,7 +182,7 @@ export class ResearchState {
       query: this.query,
       step: this.step,
       maxSteps: this.maxSteps,
-      stepsRemaining: Math.max(0, this.maxSteps - this.step),
+      stepsRemaining: this.maxSteps > 0 ? Math.max(0, this.maxSteps - this.step) : null,
       lastAction: this.lastAction,
       gaps,
       focusGapId: this.focusGap()?.id || 'gap-1',
@@ -231,7 +232,7 @@ export class ResearchState {
 
   validate(action) {
     if (!ACTIONS.has(action?.action)) return 'unknown_action';
-    if (this.step >= this.maxSteps && !['answer', 'stop'].includes(action.action)) return 'max_steps';
+    if (this.maxSteps > 0 && this.step >= this.maxSteps && !['answer', 'stop'].includes(action.action)) return 'max_steps';
     if (action.action === 'read') {
       if (!action.sourceIds?.length) return 'missing_source_ids';
       if (action.sourceIds.some((id) => !this.candidates.has(id))) return 'unknown_source';

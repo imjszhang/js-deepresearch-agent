@@ -147,6 +147,8 @@ describe('CLI utilities', () => {
     assert.equal(settings.research.strategy, 'exploratory');
     assert.equal(settings.research.budget.maxSearchRequests, 12);
     assert.equal(settings.research.budget.maxSourceReads, 5);
+    assert.equal(settings.research.exploratory.maxSearchRequests, 12);
+    assert.equal(settings.research.exploratory.maxSourceReads, 5);
     assert.equal(settings.research.focused.iterationControl.enabled, true);
     assert.equal(settings.research.focused.queryMemory.enabled, false);
     assert.equal(settings.research.focused.sourceSelection.enabled, true);
@@ -180,6 +182,47 @@ describe('CLI utilities', () => {
     assert.equal(settings.research.exploratory.minLlmTokens, 18000);
     assert.equal(settings.research.exploratory.maxLlmTokens, 72000);
     assert.equal(settings.research.exploratory.targetLlmTokens, 18000);
+  });
+
+  it('writes exploratory count caps from generic flags only for exploratory strategy', () => {
+    const exploratory = applyResearchFlags({
+      research: { budget: { maxSearchRequests: 8, maxSourceReads: 8 }, exploratory: {} },
+    }, {
+      strategy: 'exploratory',
+      'max-source-reads': '16',
+    });
+    assert.equal(exploratory.research.exploratory.maxSourceReads, 16);
+    assert.equal(exploratory.research.budget.maxSourceReads, 16);
+
+    const focused = applyResearchFlags({
+      research: { strategy: 'focused', exploratory: { maxSourceReads: 0 } },
+    }, { 'max-source-reads': '16' });
+    assert.equal(focused.research.budget.maxSourceReads, 16);
+    assert.equal(focused.research.exploratory.maxSourceReads, 0);
+  });
+
+  it('does not copy persisted global count budgets onto exploratory when flags are omitted', () => {
+    const settings = applyResearchFlags({
+      research: {
+        strategy: 'exploratory',
+        budget: { maxSearchRequests: 8, maxSourceReads: 8 },
+        exploratory: { maxSearchRequests: 0, maxSourceReads: 0 },
+      },
+    }, {});
+    assert.equal(settings.research.exploratory.maxSearchRequests, 0);
+    assert.equal(settings.research.exploratory.maxSourceReads, 0);
+    assert.equal(settings.research.budget.maxSearchRequests, 8);
+    assert.equal(settings.research.budget.maxSourceReads, 8);
+  });
+
+  it('maps exploratory count alias flags onto exploratory keys', () => {
+    const settings = applyResearchFlags({ research: {} }, {
+      'exploratory-max-search-requests': '4',
+      'exploratory-max-source-reads': '7',
+    });
+    assert.equal(settings.research.exploratory.maxSearchRequests, 4);
+    assert.equal(settings.research.exploratory.maxSourceReads, 7);
+    assert.equal(settings.research.budget?.maxSearchRequests, undefined);
   });
 
   it('maps legacy exploratory-target-llm-tokens onto the min floor', () => {

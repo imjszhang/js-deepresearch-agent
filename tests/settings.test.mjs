@@ -34,7 +34,9 @@ describe('settings defaults', () => {
     assert.equal(settings.research.exploratory.minLlmTokens, 20000);
     assert.equal(settings.research.exploratory.maxLlmTokens, 80000);
     assert.equal(settings.research.exploratory.targetLlmTokens, 20000);
-    assert.equal(settings.research.exploratory.maxSteps, 16);
+    assert.equal(settings.research.exploratory.maxSteps, 0);
+    assert.equal(settings.research.exploratory.maxSearchRequests, 0);
+    assert.equal(settings.research.exploratory.maxSourceReads, 0);
   });
 
   it('treats a persisted target of 0 as an explicit disabled token floor', () => {
