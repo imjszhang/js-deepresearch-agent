@@ -216,6 +216,99 @@ describe('benchmark rule scoring', () => {
 });
 
 describe('runBenchmark', () => {
+  it('reuses stored schema v3 verdicts and shows evaluation origin/version', async () => {
+    const workDir = createFixture({
+      report: '# Key Findings\n\nSecurity risks exist in local model execution [1.1].',
+      findings: [{
+        id: 'finding-1',
+        question: 'q',
+        sources: [
+          { id: 'wiki', title: 'Wikipedia', url: 'https://en.wikipedia.org/wiki/Ollama', snippet: 'security risks' },
+          { id: 'official', title: 'Official', url: 'https://ollama.com', snippet: 'official', content: 'security risks exist' },
+        ],
+      }],
+      sources: [
+        { id: 'wiki', title: 'Wikipedia', url: 'https://en.wikipedia.org/wiki/Ollama', snippet: 'security risks' },
+        { id: 'official', title: 'Official', url: 'https://ollama.com', snippet: 'official', content: 'security risks exist' },
+      ],
+    });
+    fs.writeFileSync(path.join(workDir, 'passages.json'), JSON.stringify([
+      { id: 'passage-official', sourceId: 'official', text: 'security risks exist in local model execution' },
+    ]), 'utf8');
+    fs.writeFileSync(path.join(workDir, 'claims.json'), JSON.stringify([{
+      id: 'claim-old',
+      text: 'Security risks exist in local model execution [1.1].',
+      kind: 'key_claim',
+      citationKeys: ['1.1'],
+      citedSourceIds: ['wiki'],
+      flags: [],
+      evidence: [{ sourceId: 'official', passageId: 'passage-official', verdict: 'supported', score: 0.9 }],
+      evaluation: {
+        verdict: 'supported',
+        confidence: 0.9,
+        method: 'rules',
+        origin: 'runtime_rule',
+        evaluationVersion: 2,
+        evidenceCounts: { supported: 1, partiallySupported: 0, unsupported: 0, unverifiable: 0 },
+      },
+    }]), 'utf8');
+
+    const result = await runBenchmark({ workDir, llmEnabled: false });
+    assert.equal(result.metrics.claims.supported, 1);
+    assert.equal(result.evaluation.usedStoredRule, true);
+    assert.deepEqual(result.evaluation.storedEvaluationVersions, [2]);
+    assert.equal(result.claims[0].effectiveVerdict, 'supported');
+    assert.equal(result.claims[0].evaluationOrigin, 'stored_rule');
+    assert.equal(result.claims[0].effectiveEvaluation.evaluationVersion, 2);
+    const json = JSON.parse(formatJsonSummary(result));
+    assert.equal(json.evaluation.usedStoredRule, true);
+    assert.deepEqual(json.evaluation.storedEvaluationVersions, [2]);
+    assert.equal(json.claims[0].evaluationOrigin, 'stored_rule');
+    assert.equal(json.claims[0].evaluationVersion, 2);
+  });
+
+  it('flags schema v3 claims that cite one source but borrowed evidence from another', async () => {
+    const workDir = createFixture({
+      report: '# Summary\n\nSecurity risks exist [1.1].',
+      findings: [{
+        question: 'q',
+        sources: [
+          { id: 'wiki', title: 'Wikipedia', url: 'https://en.wikipedia.org/wiki/Ollama', snippet: 'security' },
+          { id: 'official', title: 'Official', url: 'https://ollama.com', content: 'security risks exist' },
+        ],
+      }],
+      sources: [
+        { id: 'wiki', title: 'Wikipedia', url: 'https://en.wikipedia.org/wiki/Ollama', snippet: 'security' },
+        { id: 'official', title: 'Official', url: 'https://ollama.com', content: 'security risks exist' },
+      ],
+    });
+    fs.writeFileSync(path.join(workDir, 'passages.json'), JSON.stringify([
+      { id: 'passage-official', sourceId: 'official', text: 'security risks exist' },
+    ]), 'utf8');
+    fs.writeFileSync(path.join(workDir, 'claims.json'), JSON.stringify([{
+      id: 'claim-borrowed',
+      text: 'Security risks exist [1.1].',
+      kind: 'key_claim',
+      citationKeys: ['1.1'],
+      citedSourceIds: ['wiki'],
+      flags: ['missing_direct_evidence'],
+      evidence: [{ sourceId: 'official', passageId: 'passage-official', verdict: 'supported', score: 0.8 }],
+      evaluation: {
+        verdict: 'unverifiable',
+        confidence: 0,
+        method: 'rules',
+        evaluationVersion: 3,
+        evidenceCounts: { supported: 0, partiallySupported: 0, unsupported: 0, unverifiable: 1 },
+      },
+    }]), 'utf8');
+
+    const result = await runBenchmark({ workDir, llmEnabled: false });
+    assert.ok(result.claims[0].rule.flags.includes('borrowed_uncited_source'));
+    assert.ok(result.claims[0].rule.flags.includes('missing_direct_evidence'));
+    assert.equal(result.claims[0].effectiveVerdict, 'unverifiable');
+    assert.equal(result.evaluation.usedStoredRule, true);
+  });
+
   it('prefers Schema v3 claims and validates passage links', async () => {
     const workDir = createFixture({
       report: '# Key Findings\n\nA sufficiently long claim about evidence-backed local research behavior.',

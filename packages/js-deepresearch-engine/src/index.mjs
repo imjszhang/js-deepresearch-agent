@@ -33,7 +33,7 @@ export {
   migrateResearchSettings,
   researchSettingsNeedMigration,
 } from './research/strategy-aliases.mjs';
-export { getSourceEvidence, resolveFocusedSettings } from './research/focused-settings.mjs';
+export { getSourceEvidence, getSourceEvidenceClass, sourceHasFetchedBody, resolveFocusedSettings } from './research/focused-settings.mjs';
 export { resolveExploratorySettings } from './research/exploratory-settings.mjs';
 export { createHttpFetch, resetHttpFetchCache } from './http/create-http-fetch.mjs';
 export {
@@ -48,7 +48,19 @@ export { resolveSearchConcurrency } from './search/search-capabilities.mjs';
 export { BudgetManager, BudgetExceededError } from './research/budget-manager.mjs';
 export { QueryMemory, normalizeQuery, querySimilarity } from './research/query-memory.mjs';
 export { normalizeSourceUrl, selectDiverseSources, SourceCandidatePool, isPrimarySource } from './research/source-candidates.mjs';
-export { buildEvidenceArtifacts, extractClaims, stableSourceId } from './research/evidence-chain.mjs';
+export {
+  buildEvidenceArtifacts,
+  extractClaims,
+  stableSourceId,
+  alignClaimToCitedPassages,
+  listSnippetOnlyCitationKeys,
+} from './research/evidence-chain.mjs';
+export {
+  parseCitations,
+  buildCitationMap,
+  resolveCitations,
+  resolveCitedSourceIds,
+} from './research/citations.mjs';
 export { ReportGenerationError, validateReportOutput } from './research/report-builder.mjs';
 export { createResearchProviders, deterministicResearchProviders } from './research/research-providers.mjs';
 export { DisabledRerankProvider, RulesRerankProvider } from './research/providers/rules-rerank-provider.mjs';
@@ -64,11 +76,13 @@ export {
   FACT_CLAIM_KINDS,
   classifyClaimSection,
   extractQualityClaims,
+  splitAtomicClaimTexts,
   aggregateEvidenceVerdict,
   buildClaimEvaluation,
   normalizeClaim,
   calculateQualityMetrics,
   qualityGateFromClaims,
+  selectCountableClaims,
 } from './research/claim-quality.mjs';
 export { resetEngineRegistries } from './registry-reset.mjs';
 export {

@@ -12,22 +12,38 @@ import { aggregateBenchmark } from './aggregate.mjs';
 
 function schemaV3Rule(claim, artifacts, strictPlatform) {
   const evidence = Array.isArray(claim.evidence) ? claim.evidence : [];
-  const resolvedSources = evidence.map((entry) => ({
-    key: entry.passageId,
-    source: artifacts.sources.find((source) => source.id === entry.sourceId) || {},
-    passage: artifacts.passages?.find((passage) => passage.id === entry.passageId) || null,
-  }));
-  const unresolvedCitations = evidence
-    .filter((entry) => !artifacts.passages?.some((passage) => passage.id === entry.passageId))
-    .map((entry) => entry.passageId);
+  const citationKeys = claim.citationKeys?.length
+    ? claim.citationKeys
+    : evidence.map((entry) => entry.passageId).filter(Boolean);
+  const unresolvedCitations = [
+    ...(claim.unresolvedCitationKeys || []),
+    ...evidence
+      .filter((entry) => entry.passageId && !artifacts.passages?.some((passage) => passage.id === entry.passageId))
+      .map((entry) => entry.passageId),
+  ];
+  const resolvedSources = (claim.citedSourceIds?.length ? claim.citedSourceIds : evidence.map((entry) => entry.sourceId))
+    .filter(Boolean)
+    .map((sourceId) => ({
+      key: sourceId,
+      source: artifacts.sources.find((source) => source.id === sourceId) || {},
+      passage: artifacts.passages?.find((passage) => passage.sourceId === sourceId) || null,
+    }));
+  const borrowedEvidence = evidence.filter((entry) => (
+    claim.citedSourceIds?.length && !claim.citedSourceIds.includes(entry.sourceId)
+  ));
+  const flags = [...new Set([
+    ...(claim.flags || []),
+    ...(unresolvedCitations.length ? ['unresolved_citation'] : []),
+    ...(borrowedEvidence.length ? ['borrowed_uncited_source'] : []),
+  ])];
   return {
     claim,
-    flags: unresolvedCitations.length ? ['missing_passage'] : [],
-    hasCitations: evidence.length > 0,
-    citationKeys: evidence.map((entry) => entry.passageId),
+    flags,
+    hasCitations: citationKeys.length > 0,
+    citationKeys,
     unresolvedCitations,
     resolvedSources,
-    platformMatch: !strictPlatform || resolvedSources.every((entry) => entry.source.engine === strictPlatform),
+    platformMatch: !strictPlatform || resolvedSources.every((entry) => !entry.source.engine || entry.source.engine === strictPlatform),
     keywordOverlap: null,
   };
 }
@@ -60,6 +76,7 @@ function storedEvaluation(claim) {
   return {
     ...evaluation,
     origin: evaluation.method === 'llm' ? 'stored_llm' : 'stored_rule',
+    evaluationVersion: evaluation.evaluationVersion,
   };
 }
 
@@ -89,7 +106,10 @@ export async function runBenchmark({
   const citationMap = buildCitationMap(artifacts.findings);
   const schemaV3 = Array.isArray(artifacts.claims) && artifacts.claims.length > 0;
   const claims = (schemaV3 ? artifacts.claims : extractClaims(artifacts.report))
-    .map((claim) => normalizeClaim(claim, { origin: schemaV3 ? 'stored_rule' : 'runtime_rule' }));
+    .map((claim) => normalizeClaim(claim, {
+      origin: schemaV3 ? 'stored_rule' : 'runtime_rule',
+      preserveEvaluation: schemaV3,
+    }));
   const artifactsHealth = summarizeFindingsHealth(artifacts.findings, artifacts.sources);
   const claimResults = [];
   let llmInvoked = false;
@@ -117,6 +137,7 @@ export async function runBenchmark({
       llmVerdict: llmResult?.skipped ? null : (llmResult?.verdict || null),
       effectiveVerdict: effectiveEvaluation.verdict,
       evaluationOrigin: effectiveEvaluation.origin,
+      evaluationVersion: effectiveEvaluation.evaluationVersion || CLAIM_EVALUATION_VERSION,
       effectiveEvaluation,
       llm: llmResult,
     });

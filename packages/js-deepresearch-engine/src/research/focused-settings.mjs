@@ -105,6 +105,18 @@ export function getSourceEvidence(source = {}) {
   return String(source.summary || source.content || source.snippet || '').trim();
 }
 
+export function sourceHasFetchedBody(source = {}) {
+  return Boolean(String(source.content || '').trim())
+    && (source.fetchStatus === 'ok' || source.contentOrigin === 'fetched');
+}
+
+export function getSourceEvidenceClass(source = {}) {
+  if (sourceHasFetchedBody(source)) return 'source_body';
+  if (String(source.summary || '').trim()) return 'source_summary';
+  if (String(source.snippet || '').trim()) return 'snippet_only';
+  return 'missing';
+}
+
 export function focusedSourceSelection(settings) {
   return settings?.research?.focused?.sourceSelection
     || settings?.research?.sourceBased?.sourceSelection;

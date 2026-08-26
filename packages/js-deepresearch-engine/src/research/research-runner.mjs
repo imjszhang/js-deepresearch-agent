@@ -6,7 +6,7 @@ import { buildReport } from './report-builder.mjs';
 import { runStrategy } from './strategies.mjs';
 import { BudgetManager, BudgetExceededError, wrapProvidersWithBudget } from './budget-manager.mjs';
 import { QueryMemory } from './query-memory.mjs';
-import { buildEvidenceArtifacts } from './evidence-chain.mjs';
+import { buildEvidenceArtifacts, listSnippetOnlyCitationKeys } from './evidence-chain.mjs';
 import { evaluatePreReport } from './quality-gates.mjs';
 import { resolveFocusedSettings } from './focused-settings.mjs';
 import { createResearchProviders } from './research-providers.mjs';
@@ -71,10 +71,15 @@ export class ResearchRunner {
     const degradedLimitation = findings.some((finding) => finding?.degraded)
       ? 'Evidence gathering was cut short before completion; treat the collected evidence as incomplete and state remaining uncertainty explicitly.'
       : null;
+    const snippetOnlyKeys = listSnippetOnlyCitationKeys(findings);
+    const snippetLimitation = (strategy === 'focused' || strategy === 'exploratory') && snippetOnlyKeys.length
+      ? `Sources ${snippetOnlyKeys.map((key) => `[${key}]`).join(', ')} are search snippets only and cannot verify Summary or Key Findings facts. Mark those facts Unverified or move them to Caveats.`
+      : null;
     const reportLimitations = [
       ...preReport.limitations,
       ...(budgetLimitation ? [budgetLimitation] : []),
       ...(degradedLimitation ? [degradedLimitation] : []),
+      ...(snippetLimitation ? [snippetLimitation] : []),
     ];
     if (focused.preReportGate.blockUnsupportedClaims && preReport.gate === 'fail') {
       const error = new Error(`Research quality gate failed: ${preReport.flags.join(', ')}`);
@@ -83,7 +88,7 @@ export class ResearchRunner {
     }
     emit({ stage: 'synthesizing_report' });
     let report = await buildReport({
-      llm, query, findings, signal, purpose: 'report', limitations: reportLimitations,
+      llm, query, findings, signal, purpose: 'report', limitations: reportLimitations, strategy,
       maxTokens: budget.limits.llmTokens > 0 ? (budget.maxReportOutputTokens || budget.reserveReportTokens) : undefined,
       minChars: settings?.research?.reportValidation?.minChars,
       maxAttempts: settings?.research?.reportValidation?.maxAttempts,
@@ -102,7 +107,12 @@ export class ResearchRunner {
       ? { ...focused.evidencePassages, enabled: true, claimAlignment: true }
       : focused.evidencePassages;
     if (evidenceOptions.enabled) emit({ stage: 'extracting_passages' });
-    const evidence = buildEvidenceArtifacts({ query, findings, report, options: evidenceOptions });
+    const evidence = buildEvidenceArtifacts({
+      query,
+      findings,
+      report,
+      options: { ...evidenceOptions, strategy },
+    });
     findings = evidence.findings;
     gaps = tracksGaps ? buildGapsFromFindings(findings, query) : [];
     if (evidenceOptions.claimAlignment) {

@@ -391,7 +391,29 @@ describe('report and research context', () => {
     const userContent = messages[1].content;
     assert.match(userContent, /Evidence: Karpathy LLM wiki summary evidence/);
     assert.doesNotMatch(userContent, /Evidence: title only snippet/);
+    assert.match(userContent, /Evidence class:/);
     assert.match(messages[0].content, /insufficient/i);
+    assert.match(messages[0].content, /one verifiable fact/i);
+    assert.match(messages[0].content, /snippet-only source/i);
+  });
+
+  it('keeps quick reports snippet-compatible in the prompt', () => {
+    const messages = reportPrompt({
+      query: 'quick scan',
+      strategy: 'quick',
+      findings: [{
+        question: 'What is llm wiki?',
+        sources: [{
+          title: 'Wiki',
+          url: 'https://example.com',
+          snippet: 'title only snippet',
+        }],
+      }],
+    });
+    assert.match(messages[0].content, /snippet-only scan/i);
+    assert.doesNotMatch(messages[0].content, /Do not treat a snippet-only source/);
+    assert.match(messages[1].content, /Evidence class: search snippet only/);
+    assert.match(messages[1].content, /Evidence: title only snippet/);
   });
 
   it('formats follow-up context from enriched evidence', () => {
