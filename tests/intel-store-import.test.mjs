@@ -31,7 +31,7 @@ describe('intel store import', () => {
     return dir;
   }
 
-  function writeSession(root, strategy, timestamp, { researchId = null } = {}) {
+  function writeSession(root, strategy, timestamp, { researchId = null, loopVersion = null, trace = null } = {}) {
     const sessionDir = path.join(root, strategy, timestamp);
     fs.mkdirSync(sessionDir, { recursive: true });
     fs.writeFileSync(path.join(sessionDir, 'report.md'), '# Report\n\nClaim [1.1].', 'utf8');
@@ -41,13 +41,18 @@ describe('intel store import', () => {
     fs.writeFileSync(path.join(sessionDir, 'sources.json'), JSON.stringify([
       { title: 'A', url: 'https://a.test', snippet: 'alpha' },
     ], null, 2), 'utf8');
+    const settings = { iterations: 1 };
+    if (loopVersion) settings.adaptive = { loopVersion };
     fs.writeFileSync(path.join(sessionDir, 'meta.json'), JSON.stringify({
       query: 'test query',
       strategy,
       researchId,
       createdAt: '2026-05-26T00:00:00.000Z',
-      settings: { iterations: 1 },
+      settings,
     }, null, 2), 'utf8');
+    if (trace) {
+      fs.writeFileSync(path.join(sessionDir, 'trace.json'), JSON.stringify(trace, null, 2), 'utf8');
+    }
     return sessionDir;
   }
 
@@ -159,16 +164,25 @@ describe('intel store import', () => {
     const root = makeTempRoot();
     writeSession(root, 'source-based', '2026-05-26_065414');
     writeSession(root, 'rapid', '2026-05-26_070000');
-    writeSession(root, 'adaptive', '2026-05-26_080000');
+    writeSession(root, 'adaptive', '2026-05-26_080000', { loopVersion: 'v1' });
+    writeSession(root, 'adaptive', '2026-05-26_081000', { loopVersion: 'v2' });
+    writeSession(root, 'adaptive', '2026-05-26_082000', { trace: [{ reasonCode: 'agent_loop_v2' }] });
     writeSession(root, 'focused', '2026-05-26_090000');
 
     const focused = discoverWorkDirSessions({ root, strategyFilter: 'focused' });
-    assert.deepEqual(focused.map((session) => session.strategy).sort(), ['focused', 'source-based']);
+    assert.deepEqual(focused.map((session) => `${session.strategy}:${session.timestamp}`).sort(), [
+      'adaptive:2026-05-26_080000',
+      'focused:2026-05-26_090000',
+      'source-based:2026-05-26_065414',
+    ]);
 
     const quick = discoverWorkDirSessions({ root, strategyFilter: 'quick' });
     assert.deepEqual(quick.map((session) => session.strategy), ['rapid']);
 
     const exploratory = discoverWorkDirSessions({ root, strategyFilter: 'exploratory' });
-    assert.deepEqual(exploratory.map((session) => session.strategy), ['adaptive']);
+    assert.deepEqual(exploratory.map((session) => session.timestamp).sort(), [
+      '2026-05-26_081000',
+      '2026-05-26_082000',
+    ]);
   });
 });

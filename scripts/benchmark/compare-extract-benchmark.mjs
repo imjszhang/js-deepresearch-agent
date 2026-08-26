@@ -24,7 +24,7 @@ function loadJsonArtifacts(filePath) {
   return {
     meta: {
       query: payload.meta?.query || 'Ollama 与 llama.cpp 在本地 LLM 部署上的差异和适用场景',
-      strategy: 'adaptive',
+      strategy: 'exploratory',
       createdAt: payload.quality?.budget ? new Date().toISOString() : null,
     },
     report: payload.report || '',
@@ -144,8 +144,8 @@ export async function buildExtractComparison({
     'node scripts/verify-openclaw-embedding.mjs',
     '',
     'npm exec --package=. -- jdr research "Ollama 与 llama.cpp 在本地 LLM 部署上的差异和适用场景" \\',
-    '  --strategy adaptive --adaptive-loop-version v2 \\',
-    '  --source-fetch-mode extract \\',
+    '  --strategy exploratory \\',
+    '  --focused-fetch-mode extract \\',
     '  --embedding-provider openai-compatible \\',
     '  --embedding-base-url http://127.0.0.1:18789 \\',
     '  --embedding-model openclaw/default \\',

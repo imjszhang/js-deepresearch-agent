@@ -67,18 +67,21 @@ async function main() {
         </div>
         <p id="strategyHelp" class="muted strategy-help"></p>
 
-        <div id="quickFields" class="grid strategy-panel">
+        <div id="searchFields" class="grid strategy-panel">
           <div>
             <label for="questions">Questions per iteration</label>
             <input id="questions" type="number" min="1" max="8" value="${settings.research.questionsPerIteration}" />
           </div>
           <div>
-            <label for="iterations">Iterations</label>
-            <input id="iterations" type="number" min="1" max="10" value="${settings.research.iterations}" />
-          </div>
-          <div>
             <label for="concurrency">Concurrency</label>
             <input id="concurrency" type="number" min="1" max="8" value="${settings.research.concurrency}" />
+          </div>
+        </div>
+
+        <div id="quickFields" class="grid strategy-panel">
+          <div>
+            <label for="iterations">Iterations</label>
+            <input id="iterations" type="number" min="1" max="10" value="${settings.research.strategy === 'quick' ? settings.research.iterations : 1}" />
           </div>
         </div>
 
@@ -171,9 +174,9 @@ function collectSettings() {
     research: {
       ...(loadedSettings?.research || {}),
       strategy: value('#strategy'),
-      questionsPerIteration: Number(value('#questions') || 3),
-      iterations: Number(value('#iterations') || 2),
-      concurrency: Number(value('#concurrency') || 2),
+      questionsPerIteration: Number(value('#questions') || 2),
+      iterations: Number(value('#iterations') || 1),
+      concurrency: Number(value('#concurrency') || 1),
       budget: {
         ...currentResearchBudget(),
         ...(loadedSettings?.research?.budget || {}),
@@ -211,6 +214,7 @@ function syncStrategyPanels() {
   if (help) {
     help.textContent = selected?.description || '';
   }
+  togglePanel('#searchFields', strategy === 'quick' || strategy === 'focused');
   togglePanel('#quickFields', strategy === 'quick');
   togglePanel('#focusedFields', strategy === 'focused');
   togglePanel('#exploratoryFields', strategy === 'exploratory');

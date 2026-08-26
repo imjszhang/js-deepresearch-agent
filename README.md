@@ -119,9 +119,9 @@ Runtime settings are stored in the local SQLite database under `data/`. Values f
 - Search engine: `searxng`
 - Search base URL: `http://127.0.0.1:8080`
 - Research strategy: `focused`
-- Research iterations: `2`
-- Research questions per iteration: `3`
-- Research concurrency: `2`
+- Research iterations: `2` (focused fallback when iteration control is off; `--strategy quick` defaults to 1)
+- Research questions per iteration: `2`
+- Research concurrency: `1`
 
 SearXNG is the default search adapter in the embeddable `js-deepresearch-engine` package. **JS Eyes is an app-local provider** registered at startup from `src/search-providers/`—it is not bundled inside the npm package. DuckDuckGo, Tavily, and Brave Search are represented in the adapter metadata for later implementation.
 
