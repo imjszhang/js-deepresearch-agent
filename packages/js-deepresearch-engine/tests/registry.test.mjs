@@ -104,10 +104,9 @@ describe('registry APIs', () => {
     resetEngineRegistries();
 
     assert.deepEqual(strategyMetadata.map((entry) => entry.id), [
-      'rapid',
-      'source-based',
-      'parallel',
-      'adaptive',
+      'quick',
+      'focused',
+      'exploratory',
     ]);
     assert.ok(providerMetadata.some((entry) => entry.id === 'openai-compatible'));
     assert.ok(searchEngineMetadata.some((entry) => entry.id === 'searxng'));

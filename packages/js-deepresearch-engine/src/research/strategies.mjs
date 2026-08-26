@@ -1,14 +1,12 @@
 import { buildStrategyContext } from './strategy-context.mjs';
-import { parallelStrategyDefinition, runParallel } from './strategies/parallel.mjs';
-import { rapidStrategyDefinition, runRapid } from './strategies/rapid.mjs';
-import { runSourceBased, sourceBasedStrategyDefinition } from './strategies/source-based.mjs';
-import { adaptiveStrategyDefinition, runAdaptive } from './strategies/adaptive.mjs';
+import { exploratoryStrategyDefinition, runExploratory } from './strategies/exploratory.mjs';
+import { focusedStrategyDefinition, runFocused } from './strategies/focused.mjs';
+import { quickStrategyDefinition, runQuick } from './strategies/quick.mjs';
 
 const BUILTIN_STRATEGIES = [
-  { ...rapidStrategyDefinition, run: runRapid },
-  { ...sourceBasedStrategyDefinition, run: runSourceBased },
-  { ...parallelStrategyDefinition, run: runParallel },
-  { ...adaptiveStrategyDefinition, run: runAdaptive },
+  { ...quickStrategyDefinition, run: runQuick },
+  { ...focusedStrategyDefinition, run: runFocused },
+  { ...exploratoryStrategyDefinition, run: runExploratory },
 ];
 
 const strategyRegistry = {};
@@ -25,7 +23,9 @@ function buildStrategyMetadata() {
   return Object.values(strategyRegistry).map(({
     id,
     label,
+    labelEn,
     description,
+    descriptionEn,
     requiresLlm,
     supportsIterations,
     supportsConcurrency,
@@ -34,7 +34,9 @@ function buildStrategyMetadata() {
   }) => ({
     id,
     label,
+    labelEn,
     description,
+    descriptionEn,
     requiresLlm,
     supportsIterations,
     supportsConcurrency,
@@ -66,7 +68,9 @@ export function registerStrategy(id, entry) {
   strategyRegistry[id] = {
     id,
     label: entry.label || id,
+    labelEn: entry.labelEn || entry.label || id,
     description: entry.description || '',
+    descriptionEn: entry.descriptionEn || entry.description || '',
     requiresLlm: entry.requiresLlm ?? true,
     supportsIterations: entry.supportsIterations ?? false,
     supportsConcurrency: entry.supportsConcurrency ?? true,

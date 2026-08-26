@@ -1,5 +1,6 @@
 import { enrichFindings } from '../source-enricher.mjs';
-import { resolveSourceBasedSettings } from '../source-based-settings.mjs';
+import { resolveFocusedSettings } from '../focused-settings.mjs';
+import { resolveExploratorySettings } from '../exploratory-settings.mjs';
 import { decideAdaptiveAction, fallbackAdaptiveAction, evaluateAnswerReadiness, decomposeQuery, pickUnreadCandidates } from '../adaptive/agent-policy.mjs';
 import { ResearchState, hostnameOf } from '../adaptive/research-state.mjs';
 
@@ -54,15 +55,15 @@ function normalizeSearchQueries(action, maxQueries) {
 
 export async function runAdaptiveV2(context) {
   const { query, llm, search, signal, emit, settings, budget, queryMemory, trace, researchProviders } = context;
-  const adaptive = settings?.research?.adaptive || {};
-  const sourceBased = resolveSourceBasedSettings(settings);
-  const state = new ResearchState({ query, maxSteps: adaptive.maxSteps });
-  const maxReads = Math.max(1, Number(adaptive.maxReadsPerStep) || 3);
-  const maxRetries = Math.max(0, Number(adaptive.maxEvaluationRetries) || 0);
-  const maxOpenGaps = Number(adaptive.maxOpenGaps) || 8;
-  const maxQueriesPerStep = Math.max(1, Number(adaptive.maxQueriesPerStep) || 3);
-  const autoReadTopK = Math.min(Math.max(0, Number(adaptive.autoReadTopK ?? 2)), maxReads);
-  const answerGateEnabled = adaptive.answerGate !== false;
+  const exploratory = resolveExploratorySettings(settings);
+  const focused = resolveFocusedSettings(settings);
+  const state = new ResearchState({ query, maxSteps: exploratory.maxSteps });
+  const maxReads = Math.max(1, Number(exploratory.maxReadsPerStep) || 3);
+  const maxRetries = Math.max(0, Number(exploratory.maxEvaluationRetries) || 0);
+  const maxOpenGaps = Number(exploratory.maxOpenGaps) || 8;
+  const maxQueriesPerStep = Math.max(1, Number(exploratory.maxQueriesPerStep) || 3);
+  const autoReadTopK = Math.min(Math.max(0, Number(exploratory.autoReadTopK ?? 2)), maxReads);
+  const answerGateEnabled = exploratory.answerGate !== false;
   let degraded = false;
 
   emit({ stage: 'assessing_query' });
@@ -74,11 +75,11 @@ export async function runAdaptiveV2(context) {
     let finding = selectedFinding(state, sourceIds, gapId);
     finding = (await enrichFindings([finding], {
       query,
-      fetchMode: sourceBased.fetchMode,
+      fetchMode: focused.fetchMode,
       maxUrlsPerIteration: maxReads,
       maxUrlsTotal: maxReads,
-      maxContentChars: sourceBased.maxContentChars,
-      enrichConcurrency: sourceBased.enrichConcurrency,
+      maxContentChars: focused.maxContentChars,
+      enrichConcurrency: focused.enrichConcurrency,
       llm,
       signal,
       settings,

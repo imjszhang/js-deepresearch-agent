@@ -1,4 +1,5 @@
 import { normalizeSearchConfig } from '../search/normalize-search-config.mjs';
+import { migrateResearchSettings } from '../research/strategy-aliases.mjs';
 
 export const defaultSettings = Object.freeze({
   http: {
@@ -22,7 +23,7 @@ export const defaultSettings = Object.freeze({
     options: {},
   },
   research: {
-    strategy: 'source-based',
+    strategy: 'focused',
     iterations: 2,
     questionsPerIteration: 2,
     concurrency: 1,
@@ -58,7 +59,7 @@ export const defaultSettings = Object.freeze({
         timeoutMs: 30000,
       },
     },
-    sourceBased: {
+    focused: {
       fetchMode: 'summary',
       fetchBackend: 'auto',
       maxUrlsPerIteration: 8,
@@ -69,7 +70,7 @@ export const defaultSettings = Object.freeze({
       maxSourcesForReport: 30,
       questionContextLimit: 30,
       contextCharsPerSource: 500,
-      adaptiveControl: {
+      iterationControl: {
         enabled: true,
         minIterations: 1,
         maxIterations: 3,
@@ -101,8 +102,7 @@ export const defaultSettings = Object.freeze({
         blockUnsupportedClaims: false,
       },
     },
-    adaptive: {
-      loopVersion: 'v1',
+    exploratory: {
       maxSteps: 16,
       maxGapDepth: 2,
       maxOpenGaps: 8,
@@ -124,64 +124,68 @@ export function mergeSettings(overrides = {}) {
   }
   delete searchOverrides.searxngUrl;
 
+  const researchOverrides = migrateResearchSettings(overrides.research || {});
+
   const merged = {
     http: { ...defaultSettings.http, ...(overrides.http || {}) },
     llm: { ...defaultSettings.llm, ...(overrides.llm || {}) },
     search: { ...defaultSettings.search, ...searchOverrides },
     research: {
       ...defaultSettings.research,
-      ...(overrides.research || {}),
+      ...researchOverrides,
       budget: {
         ...defaultSettings.research.budget,
-        ...(overrides.research?.budget || {}),
+        ...(researchOverrides.budget || {}),
       },
       reportValidation: {
         ...defaultSettings.research.reportValidation,
-        ...(overrides.research?.reportValidation || {}),
+        ...(researchOverrides.reportValidation || {}),
       },
       providers: {
         ...defaultSettings.research.providers,
-        ...(overrides.research?.providers || {}),
+        ...(researchOverrides.providers || {}),
         embedding: {
           ...defaultSettings.research.providers.embedding,
-          ...(overrides.research?.providers?.embedding || {}),
+          ...(researchOverrides.providers?.embedding || {}),
         },
         rerank: {
           ...defaultSettings.research.providers.rerank,
-          ...(overrides.research?.providers?.rerank || {}),
+          ...(researchOverrides.providers?.rerank || {}),
         },
       },
-      sourceBased: {
-        ...defaultSettings.research.sourceBased,
-        ...(overrides.research?.sourceBased || {}),
-        adaptiveControl: {
-          ...defaultSettings.research.sourceBased.adaptiveControl,
-          ...(overrides.research?.sourceBased?.adaptiveControl || {}),
+      focused: {
+        ...defaultSettings.research.focused,
+        ...(researchOverrides.focused || {}),
+        iterationControl: {
+          ...defaultSettings.research.focused.iterationControl,
+          ...(researchOverrides.focused?.iterationControl || {}),
         },
         queryMemory: {
-          ...defaultSettings.research.sourceBased.queryMemory,
-          ...(overrides.research?.sourceBased?.queryMemory || {}),
+          ...defaultSettings.research.focused.queryMemory,
+          ...(researchOverrides.focused?.queryMemory || {}),
         },
         sourceSelection: {
-          ...defaultSettings.research.sourceBased.sourceSelection,
-          ...(overrides.research?.sourceBased?.sourceSelection || {}),
+          ...defaultSettings.research.focused.sourceSelection,
+          ...(researchOverrides.focused?.sourceSelection || {}),
         },
         evidencePassages: {
-          ...defaultSettings.research.sourceBased.evidencePassages,
-          ...(overrides.research?.sourceBased?.evidencePassages || {}),
+          ...defaultSettings.research.focused.evidencePassages,
+          ...(researchOverrides.focused?.evidencePassages || {}),
         },
         preReportGate: {
-          ...defaultSettings.research.sourceBased.preReportGate,
-          ...(overrides.research?.sourceBased?.preReportGate || {}),
+          ...defaultSettings.research.focused.preReportGate,
+          ...(researchOverrides.focused?.preReportGate || {}),
         },
       },
-      adaptive: {
-        ...defaultSettings.research.adaptive,
-        ...(overrides.research?.adaptive || {}),
+      exploratory: {
+        ...defaultSettings.research.exploratory,
+        ...(researchOverrides.exploratory || {}),
       },
     },
   };
 
+  delete merged.research.sourceBased;
+  delete merged.research.adaptive;
   merged.search = normalizeSearchConfig(merged.search);
   return merged;
 }

@@ -1,9 +1,11 @@
-import { runSourceBasedPipeline } from './source-based-pipeline.mjs';
+import { runFocusedPipeline } from './focused-pipeline.mjs';
 
-export const sourceBasedStrategyDefinition = {
-  id: 'source-based',
-  label: 'Source Based',
-  description: 'Iteratively generate source-informed questions and search with controlled concurrency.',
+export const focusedStrategyDefinition = {
+  id: 'focused',
+  label: '专题调研',
+  labelEn: 'Focused research',
+  description: '针对明确问题，阅读来源并形成有依据的报告。',
+  descriptionEn: 'Read sources and produce a cited report for a well-bounded question.',
   requiresLlm: true,
   supportsIterations: true,
   supportsConcurrency: true,
@@ -25,6 +27,6 @@ export const sourceBasedStrategyDefinition = {
 };
 
 /** @param {import('../../types.mjs').StrategyContext} context */
-export async function runSourceBased(context) {
-  return runSourceBasedPipeline(context);
+export async function runFocused(context) {
+  return runFocusedPipeline(context);
 }

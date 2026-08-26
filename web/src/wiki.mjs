@@ -63,7 +63,7 @@ async function main() {
         <h2>Compile</h2>
         ${runs.length === 0 ? `
           <p class="muted">No archived runs in intel store. Run research or import work_dir via CLI:</p>
-          <pre class="log">npm exec jdr -- intel import --strategy source-based</pre>
+          <pre class="log">npm exec jdr -- intel import --strategy focused</pre>
         ` : `
           <label for="research-id">Research run</label>
           <select id="research-id">${runs.map((run) => `

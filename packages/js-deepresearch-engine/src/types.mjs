@@ -21,8 +21,8 @@
  */
 
 /**
- * @typedef {Object} SourceBasedSettings
- * @property {'disabled'|'full'|'summary'} [fetchMode]
+ * @typedef {Object} FocusedSettings
+ * @property {'disabled'|'full'|'summary'|'extract'} [fetchMode]
  * @property {'auto'|'http'|'js-eyes'} [fetchBackend]
  * @property {number} [maxUrlsPerIteration]
  * @property {number} [maxUrlsTotal]
@@ -32,6 +32,7 @@
  * @property {number} [maxSourcesForReport]
  * @property {number} [questionContextLimit]
  * @property {number} [contextCharsPerSource]
+ * @property {Record<string, unknown>} [iterationControl]
  */
 
 /**
@@ -41,9 +42,9 @@
  * @property {number} [questionsPerIteration]
  * @property {number} [concurrency]
  * @property {string} [workDir]
- * @property {SourceBasedSettings} [sourceBased]
+ * @property {FocusedSettings} [focused]
  * @property {Record<string, number>} [budget]
- * @property {Record<string, unknown>} [adaptive]
+ * @property {Record<string, unknown>} [exploratory]
  */
 
 /**

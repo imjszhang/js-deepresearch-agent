@@ -378,11 +378,12 @@ function printHelp() {
 js-deepresearch-agent
 
 Commands:
-  research "query" [--search js-eyes|searxng] [--search-skills skillA,skillB] [--search-server-url ws://localhost:18080] [--strategy source-based|rapid|parallel|adaptive] [--iterations 2] [--questions 3] [--concurrency 2] [--max-search-requests 0] [--max-source-reads 0] [--source-adaptive-control true|false] [--source-query-memory true|false] [--source-evidence-passages true|false] [--source-claim-alignment true|false] [--source-pre-report-gate true|false] [--work-dir work_dir] [--output report.md] [--json] [--no-save] [--no-work-dir]
+  research "query" [--search js-eyes|searxng] [--search-skills skillA,skillB] [--search-server-url ws://localhost:18080] [--strategy focused|quick|exploratory] [--iterations 2] [--questions 3] [--concurrency 2] [--max-search-requests 0] [--max-source-reads 0] [--focused-iteration-control true|false] [--focused-query-memory true|false] [--focused-evidence-passages true|false] [--focused-claim-alignment true|false] [--focused-pre-report-gate true|false] [--work-dir work_dir] [--output report.md] [--json] [--no-save] [--no-work-dir]
+    Strategies: focused (default, 专题调研) | quick (快速调研) | exploratory (探索性调研)
     Budgets: --max-llm-tokens 0 --max-search-requests 0 --max-source-reads 0 --max-rerank-requests 0 --max-rerank-tokens 0 --reserve-report-tokens 1200
     Optional rerank: --rerank-provider rules|disabled|jina|http|local --rerank-model <name> --rerank-base-url <url> --rerank-api-key <key> --rerank-timeout-ms 30000
-    Adaptive experiment: --adaptive-loop-version v1|v2
-    Source controls: --source-cluster-results true|false --source-max-per-hostname 2
+    Focused: --focused-fetch-mode summary|disabled|full|extract --focused-fetch-backend auto|http|js-eyes --focused-max-urls 12 --focused-cluster-results true|false --focused-max-per-hostname 2
+    Exploratory: --exploratory-max-steps 16 --exploratory-max-reads-per-step 4
     Press Ctrl+C once to cancel gracefully; press again to force exit.
   config get [key]
   config set <key> <value>
@@ -392,7 +393,7 @@ Commands:
   intel show <researchId> [--json]
   intel sources <researchId> [--limit 20] [--json]
   intel findings <researchId> [--limit 20] [--json]
-  intel import [--root work_dir] [--strategy source-based] [--dry-run] [--force] [--upgrade-existing] [--json]
+  intel import [--root work_dir] [--strategy focused] [--dry-run] [--force] [--upgrade-existing] [--json]
   wiki init [--vault wiki] [--init-obsidian-config]
   wiki compile [--research-id <id>] [--vault wiki] [--force] [--lint] [--json]
   wiki lint [--vault wiki] [--json]

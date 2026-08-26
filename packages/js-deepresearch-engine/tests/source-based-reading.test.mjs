@@ -11,9 +11,9 @@ import {
 import { reportPrompt } from '../src/research/prompts.mjs';
 import { formatSourcesForResearchContext } from '../src/research/source-context.mjs';
 import { enrichFindings } from '../src/research/source-enricher.mjs';
-import { getSourceEvidence, resolveSourceBasedSettings } from '../src/research/source-based-settings.mjs';
+import { getSourceEvidence, resolveFocusedSettings } from '../src/research/focused-settings.mjs';
 import { filterFindingsByRelevance } from '../src/research/source-relevance-filter.mjs';
-import { runSourceBasedPipeline } from '../src/research/strategies/source-based-pipeline.mjs';
+import { runFocusedPipeline } from '../src/research/strategies/focused-pipeline.mjs';
 import { runStrategy } from '../src/research/strategies.mjs';
 
 const originalFetch = globalThis.fetch;
@@ -31,13 +31,13 @@ function mockHtmlFetch(html) {
   });
 }
 
-describe('source-based settings', () => {
+describe('focused settings', () => {
   it('defaults to the quality deep-research preset', () => {
-    const resolved = resolveSourceBasedSettings({});
+    const resolved = resolveFocusedSettings({});
     assert.equal(resolved.fetchMode, 'summary');
     assert.equal(resolved.fetchBackend, 'auto');
     assert.equal(resolved.maxUrlsTotal, 12);
-    assert.equal(resolved.adaptiveControl.enabled, true);
+    assert.equal(resolved.iterationControl.enabled, true);
     assert.equal(resolved.queryMemory.enabled, true);
     assert.equal(resolved.sourceSelection.enabled, true);
     assert.equal(resolved.sourceSelection.clusterResults, true);
@@ -85,7 +85,7 @@ describe('content resolver', () => {
     }));
 
     const result = await resolveUrlContent('https://example.com/a', {
-      settings: { research: { sourceBased: { fetchBackend: 'auto' } } },
+      settings: { research: { focused: { fetchBackend: 'auto' } } },
     });
 
     assert.equal(result.status, 'ok');
@@ -102,7 +102,7 @@ describe('content resolver', () => {
     });
 
     const result = await resolveUrlContent('https://example.com/a', {
-      settings: { research: { sourceBased: { fetchBackend: 'auto' } } },
+      settings: { research: { focused: { fetchBackend: 'auto' } } },
     });
 
     assert.equal(result.status, 'ok');
@@ -121,7 +121,7 @@ describe('content resolver', () => {
     });
 
     const result = await resolveUrlContent('https://example.com/a', {
-      settings: { research: { sourceBased: { fetchBackend: 'http' } } },
+      settings: { research: { focused: { fetchBackend: 'http' } } },
     });
 
     assert.match(result.content, /Direct HTTP/);
@@ -131,7 +131,7 @@ describe('content resolver', () => {
     registerContentFetchHandler(async () => ({ status: 'unsupported' }));
 
     const result = await resolveUrlContent('https://example.com/a', {
-      settings: { research: { sourceBased: { fetchBackend: 'js-eyes' } } },
+      settings: { research: { focused: { fetchBackend: 'js-eyes' } } },
     });
 
     assert.equal(result.status, 'failed');
@@ -410,21 +410,21 @@ describe('report and research context', () => {
   });
 });
 
-describe('source-based pipeline', () => {
+describe('focused pipeline', () => {
   it('matches disabled enrichment behavior with iterative flow', async () => {
     const searchedQuestions = [];
 
     const findings = await runStrategy({
-      strategy: 'source-based',
+      strategy: 'focused',
       query: 'deep topic',
       settings: {
         research: {
           iterations: 2,
           questionsPerIteration: 1,
           concurrency: 1,
-          sourceBased: {
+          focused: {
             fetchMode: 'disabled',
-            adaptiveControl: { enabled: false },
+            iterationControl: { enabled: false },
           },
         },
       },
@@ -460,14 +460,14 @@ describe('source-based pipeline', () => {
     mockHtmlFetch('<html><title>T</title><body><p>Body</p></body></html>');
     const stages = [];
 
-    await runSourceBasedPipeline({
+    await runFocusedPipeline({
       query: 'topic',
       iterations: 1,
       questionCount: 1,
       concurrency: 1,
       settings: {
         research: {
-          sourceBased: {
+          focused: {
             fetchMode: 'full',
             maxUrlsPerIteration: 4,
             maxUrlsTotal: 4,
@@ -502,12 +502,12 @@ describe('source-based pipeline', () => {
     assert.ok(stages.includes('filtering_sources'));
   });
 
-  it('stops source-based research early when the runtime evidence gate passes', async () => {
+  it('stops focused research early when the runtime evidence gate passes', async () => {
     const searches = [];
     const stages = [];
-    const findings = await runSourceBasedPipeline({
+    const findings = await runFocusedPipeline({
       query: 'well covered topic', iterations: 2, questionCount: 1, concurrency: 1,
-      settings: { research: { sourceBased: { fetchMode: 'disabled', adaptiveControl: { enabled: true, minIterations: 1, maxIterations: 4, earlyStop: true } } } },
+      settings: { research: { focused: { fetchMode: 'disabled', iterationControl: { enabled: true, minIterations: 1, maxIterations: 4, earlyStop: true } } } },
       search: { async search(question) { searches.push(question); return [{ title: question, url: `https://source-${searches.length}.test`, snippet: 'usable evidence' }]; } },
       llm: { async complete() { return JSON.stringify(['independent angle']); } },
       emit: (event) => stages.push(event.stage),
@@ -520,12 +520,12 @@ describe('source-based pipeline', () => {
   it('focuses the next iteration on primary sources when only secondary coverage exists', async () => {
     const searches = [];
     const trace = [];
-    const findings = await runSourceBasedPipeline({
+    const findings = await runFocusedPipeline({
       query: 'compare open source research framework architecture',
       iterations: 2,
       questionCount: 1,
       concurrency: 1,
-      settings: { research: { sourceBased: { fetchMode: 'disabled', adaptiveControl: { enabled: true, minIterations: 1, maxIterations: 2, earlyStop: true } } } },
+      settings: { research: { focused: { fetchMode: 'disabled', iterationControl: { enabled: true, minIterations: 1, maxIterations: 2, earlyStop: true } } } },
       search: { async search(question) {
         searches.push(question);
         return question.includes('site:github.com')
@@ -542,22 +542,22 @@ describe('source-based pipeline', () => {
   });
 });
 
-describe('parallel strategy isolation', () => {
-  it('keeps using shared iterative pipeline without sourceBased enrichment', async () => {
-    const parallelPath = path.join(import.meta.dirname, '../src/research/strategies/parallel.mjs');
-    const source = fs.readFileSync(parallelPath, 'utf8');
+describe('quick strategy isolation', () => {
+  it('keeps using snippet-only search even when focused fetch settings are enabled', async () => {
+    const quickPath = path.join(import.meta.dirname, '../src/research/strategies/quick.mjs');
+    const source = fs.readFileSync(quickPath, 'utf8');
     assert.match(source, /runIterativeStrategy/);
 
     const stages = [];
     await runStrategy({
-      strategy: 'parallel',
-      query: 'parallel topic',
+      strategy: 'quick',
+      query: 'quick topic',
       settings: {
         research: {
-          iterations: 1,
+          iterations: 2,
           questionsPerIteration: 1,
           concurrency: 1,
-          sourceBased: {
+          focused: {
             fetchMode: 'full',
             enableRelevanceFilter: true,
           },

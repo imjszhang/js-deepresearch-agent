@@ -195,4 +195,38 @@ EXISTING=from-file
 
     db.close();
   });
+
+  it('rewrites persisted research strategy IDs and nested keys once', () => {
+    const db = migrateDb(new Database(':memory:'));
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO settings (key, value, updated_at)
+      VALUES (?, ?, ?)
+    `).run('app', JSON.stringify({
+      research: {
+        strategy: 'source-based',
+        sourceBased: {
+          fetchMode: 'full',
+          adaptiveControl: { enabled: false },
+        },
+        adaptive: { loopVersion: 'v2', maxSteps: 7 },
+      },
+    }), now);
+
+    const store = new SettingsStore(db);
+    const settings = store.get();
+    assert.equal(settings.research.strategy, 'focused');
+    assert.equal(settings.research.focused.fetchMode, 'full');
+    assert.equal(settings.research.focused.iterationControl.enabled, false);
+    assert.equal(settings.research.exploratory.maxSteps, 7);
+    assert.equal(settings.research.sourceBased, undefined);
+    assert.equal(settings.research.adaptive, undefined);
+
+    const stored = JSON.parse(db.prepare('SELECT value FROM settings WHERE key = ?').get('app').value);
+    assert.equal(stored.research.strategy, 'focused');
+    assert.equal(stored.research.sourceBased, undefined);
+    assert.equal(stored.research.adaptive, undefined);
+
+    db.close();
+  });
 });

@@ -91,8 +91,8 @@ Options:
   --strict-platform <id>   e.g. js-eyes:zhihu
 
 Examples:
-  node scripts/benchmark-research.mjs work_dir/source-based/2026-05-26_043125
+  node scripts/benchmark-research.mjs work_dir/focused/2026-05-26_043125
   node scripts/benchmark-research.mjs --research-id imported__source-based__2026-05-26_065414 --no-llm
-  node scripts/benchmark-research.mjs work_dir/source-based/2026-05-26_043125 --no-llm --json
+  node scripts/benchmark-research.mjs work_dir/focused/2026-05-26_043125 --no-llm --json
 `);
 }

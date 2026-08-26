@@ -15,16 +15,49 @@ describe('settings defaults', () => {
     assert.equal(settings.search.searxngUrl, undefined);
   });
 
-  it('enables the quality source-based deep-research preset by default', () => {
+  it('enables the quality focused deep-research preset by default', () => {
     const settings = mergeSettings({});
+    assert.equal(settings.research.strategy, 'focused');
     assert.equal(settings.research.questionsPerIteration, 2);
     assert.equal(settings.research.concurrency, 1);
     assert.equal(settings.research.budget.maxSearchRequests, 18);
     assert.equal(settings.research.budget.maxSourceReads, 16);
-    assert.equal(settings.research.sourceBased.fetchMode, 'summary');
-    assert.equal(settings.research.sourceBased.evidencePassages.enabled, true);
-    assert.equal(settings.research.sourceBased.evidencePassages.claimAlignment, true);
-    assert.equal(defaultSettings.research.sourceBased.queryMemory.enabled, true);
+    assert.equal(settings.research.focused.fetchMode, 'summary');
+    assert.equal(settings.research.focused.evidencePassages.enabled, true);
+    assert.equal(settings.research.focused.evidencePassages.claimAlignment, true);
+    assert.equal(settings.research.focused.iterationControl.enabled, true);
+    assert.equal(defaultSettings.research.focused.queryMemory.enabled, true);
+    assert.equal(settings.research.sourceBased, undefined);
+    assert.equal(settings.research.adaptive, undefined);
+  });
+
+  it('migrates persisted source-based and adaptive settings to live keys', () => {
+    const settings = mergeSettings({
+      research: {
+        strategy: 'adaptive',
+        sourceBased: {
+          fetchMode: 'full',
+          adaptiveControl: { enabled: false, maxIterations: 2 },
+        },
+        adaptive: { loopVersion: 'v2', maxSteps: 9 },
+      },
+    });
+    assert.equal(settings.research.strategy, 'exploratory');
+    assert.equal(settings.research.focused.fetchMode, 'full');
+    assert.equal(settings.research.focused.iterationControl.enabled, false);
+    assert.equal(settings.research.focused.iterationControl.maxIterations, 2);
+    assert.equal(settings.research.exploratory.maxSteps, 9);
+    assert.equal(settings.research.exploratory.loopVersion, undefined);
+    assert.equal(settings.research.sourceBased, undefined);
+    assert.equal(settings.research.adaptive, undefined);
+  });
+
+  it('maps adaptive v1 persisted strategy to focused', () => {
+    const settings = mergeSettings({
+      research: { strategy: 'adaptive', adaptive: { loopVersion: 'v1', maxSteps: 8 } },
+    });
+    assert.equal(settings.research.strategy, 'focused');
+    assert.equal(settings.research.exploratory.maxSteps, 8);
   });
 
   it('keeps semantic providers optional and deeply merges rerank overrides', () => {

@@ -1,3 +1,4 @@
+import { migrateResearchSettings, researchSettingsNeedMigration } from 'js-deepresearch-engine';
 import { defaultAppSettings, mergeAppSettings } from './app-settings.mjs';
 import { settingsFromEnv } from './env-overrides.mjs';
 
@@ -20,18 +21,29 @@ export class SettingsStore {
       }
     }
 
+    if (researchSettingsNeedMigration(stored.research)) {
+      stored = {
+        ...stored,
+        research: migrateResearchSettings(stored.research || {}),
+      };
+      this.persist(mergeAppSettings(stored));
+    }
+
     return mergeAppSettings(this.withEnvOverrides(stored));
   }
 
-  save(settings) {
-    const merged = mergeAppSettings(settings);
+  persist(settings) {
     const now = new Date().toISOString();
     this.db.prepare(`
       INSERT INTO settings (key, value, updated_at)
       VALUES (?, ?, ?)
       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
-    `).run(SETTINGS_KEY, JSON.stringify(merged), now);
-    return merged;
+    `).run(SETTINGS_KEY, JSON.stringify(settings), now);
+    return settings;
+  }
+
+  save(settings) {
+    return this.persist(mergeAppSettings(settings));
   }
 
   snapshot(overrides = {}) {

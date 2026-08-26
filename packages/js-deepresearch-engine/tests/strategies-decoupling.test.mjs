@@ -5,9 +5,9 @@ import { describe, it } from 'node:test';
 
 const strategyModules = [
   '../src/research/strategies.mjs',
-  '../src/research/strategies/rapid.mjs',
-  '../src/research/strategies/source-based.mjs',
-  '../src/research/strategies/parallel.mjs',
+  '../src/research/strategies/quick.mjs',
+  '../src/research/strategies/focused.mjs',
+  '../src/research/strategies/exploratory.mjs',
   '../src/research/strategies/iterative.mjs',
 ];
 

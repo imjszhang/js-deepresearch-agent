@@ -1,5 +1,12 @@
 import { resolveUrlContent } from './content-resolver.mjs';
+import { focusedSourceSelection } from './focused-settings.mjs';
 import { selectRelevantPassages } from './passage-selector.mjs';
+
+function relatedLinksFromFetch(fetched, settings) {
+  const selection = focusedSourceSelection(settings);
+  if (!selection?.expandPageLinks) return undefined;
+  return (fetched.links || []).slice(0, selection.maxExpandedLinksPerPage || 5);
+}
 
 function isAbortError(error) {
   return error?.name === 'AbortError';
@@ -68,9 +75,7 @@ async function enrichOneSource(source, {
       content: fetched.content,
       contentOrigin: 'fetched',
       fetchStatus: 'ok',
-      relatedLinks: settings?.research?.sourceBased?.sourceSelection?.expandPageLinks
-        ? (fetched.links || []).slice(0, settings.research.sourceBased.sourceSelection.maxExpandedLinksPerPage || 5)
-        : undefined,
+      relatedLinks: relatedLinksFromFetch(fetched, settings),
     };
   }
 
@@ -91,9 +96,7 @@ async function enrichOneSource(source, {
       summary: String(summary || '').trim() || source.snippet,
       extractionMethod: embedding ? 'embedding' : 'overlap',
       fetchStatus: 'ok',
-      relatedLinks: settings?.research?.sourceBased?.sourceSelection?.expandPageLinks
-        ? (fetched.links || []).slice(0, settings.research.sourceBased.sourceSelection.maxExpandedLinksPerPage || 5)
-        : undefined,
+      relatedLinks: relatedLinksFromFetch(fetched, settings),
     };
   }
 
@@ -118,9 +121,7 @@ async function enrichOneSource(source, {
     contentOrigin: 'fetched',
     summary: String(summary || '').trim() || source.snippet,
     fetchStatus: 'ok',
-    relatedLinks: settings?.research?.sourceBased?.sourceSelection?.expandPageLinks
-      ? (fetched.links || []).slice(0, settings.research.sourceBased.sourceSelection.maxExpandedLinksPerPage || 5)
-      : undefined,
+    relatedLinks: relatedLinksFromFetch(fetched, settings),
   };
 }
 
