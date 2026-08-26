@@ -58,6 +58,32 @@ describe('citation parsing and resolution', () => {
 });
 
 describe('citation-constrained claim alignment', () => {
+  it('aligns adapter URL ids to the same stable sourceId as passages', () => {
+    const hostinger = {
+      id: 'https://www.hostinger.com/tutorials/what-is-ollama/',
+      title: 'What is Ollama?',
+      url: 'https://www.hostinger.com/tutorials/what-is-ollama/',
+      snippet: 'Run models locally.',
+      content: 'Ollama is a free, open-source platform designed to run large language models (LLMs) locally on user hardware.',
+      fetchStatus: 'ok',
+      contentOrigin: 'fetched',
+    };
+    const result = artifacts(
+      '# Summary\n\nOllama is a free, open-source platform designed to run large language models (LLMs) locally on user hardware [1.1].',
+      [hostinger],
+    );
+    const claim = result.claims[0];
+    const expectedId = stableSourceId(hostinger);
+    assert.equal(result.sources[0].id, expectedId);
+    assert.ok(result.passages.every((passage) => passage.sourceId === expectedId));
+    assert.deepEqual(claim.citationKeys, ['1.1']);
+    assert.deepEqual(claim.citedSourceIds, [expectedId]);
+    assert.equal(claim.flags.includes('missing_direct_evidence'), false);
+    assert.ok(claim.evidence.length > 0);
+    assert.ok(claim.evidence.every((entry) => entry.sourceId === expectedId));
+    assert.equal(claim.evaluation.verdict, 'supported');
+  });
+
   it('emits evidence only from cited sourceIds', () => {
     const result = artifacts(
       '# Summary\n\nOfficial documentation discusses sandboxing and trusted weights [1.2].',

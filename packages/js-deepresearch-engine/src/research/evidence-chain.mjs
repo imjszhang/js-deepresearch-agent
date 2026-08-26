@@ -149,7 +149,7 @@ export function buildEvidenceArtifacts({ query, findings = [], report = '', opti
     const passageIds = [];
     for (const source of finding.sources || []) {
       const sourceId = stableSourceId(source);
-      source.id = source.id || sourceId;
+      source.id = sourceId;
       sourceIds.push(sourceId);
       sourceMap.set(sourceId, mergeSourceRecord(sourceMap.get(sourceId), source));
       const hasFetchedContent = sourceHasFetchedBody(source);
