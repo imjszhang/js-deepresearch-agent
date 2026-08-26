@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
-import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { loadArtifacts } from './load-artifacts.mjs';
-import { extractRunStats, formatDurationMs } from './extract-run-stats.mjs';
+import { extractRunStats } from './extract-run-stats.mjs';
 import { runBenchmark } from './run-benchmark.mjs';
 
 const isCliEntry = process.argv[1]
