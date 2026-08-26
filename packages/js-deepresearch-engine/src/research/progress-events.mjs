@@ -49,8 +49,13 @@ export function mapStructuredProgressEvent(event) {
       };
     case 'searching':
       return {
-        message: resolveMessage(progressProfile.searchStartMessage, event) || `Running ${total} searches`,
-        progress: iteration && iterations ? progressBase(iteration, iterations) + 5 : 25,
+        message: resolveMessage(progressProfile.searchStartMessage, event)
+          || (event.step && event.maxSteps
+            ? `Running ${total} searches for step ${event.step}/${event.maxSteps}`
+            : `Running ${total} searches`),
+        progress: iteration && iterations
+          ? progressBase(iteration, iterations) + 5
+          : (event.step && event.maxSteps ? progressBase(event.step, event.maxSteps) + 5 : 25),
         level,
       };
     case 'search_item_complete':
@@ -71,8 +76,14 @@ export function mapStructuredProgressEvent(event) {
     case 'enriching_sources':
       return {
         message: resolveMessage(progressProfile.enrichingSourcesMessage, event)
-          || `Enriching sources for iteration ${iteration}/${iterations}`,
-        progress: iteration && iterations ? progressBase(iteration, iterations) + 8 : 55,
+          || (event.step && event.maxSteps
+            ? `Enriching sources for step ${event.step}/${event.maxSteps}`
+            : (iteration && iterations
+              ? `Enriching sources for iteration ${iteration}/${iterations}`
+              : 'Enriching sources')),
+        progress: iteration && iterations
+          ? progressBase(iteration, iterations) + 8
+          : (event.step && event.maxSteps ? progressBase(event.step, event.maxSteps) + 8 : 55),
         level,
       };
     case 'filtering_sources':

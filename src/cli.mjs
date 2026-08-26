@@ -383,7 +383,7 @@ Commands:
     Budgets: --max-llm-tokens 0 --max-search-requests 0 --max-source-reads 0 --max-rerank-requests 0 --max-rerank-tokens 0 --reserve-report-tokens 1200
     Optional rerank: --rerank-provider rules|disabled|jina|http|local --rerank-model <name> --rerank-base-url <url> --rerank-api-key <key> --rerank-timeout-ms 30000
     Focused: --focused-fetch-mode summary|disabled|full|extract --focused-fetch-backend auto|http|js-eyes --focused-max-urls 12 --focused-cluster-results true|false --focused-max-per-hostname 2
-    Exploratory: --exploratory-max-steps 16 --exploratory-max-reads-per-step 4
+    Exploratory: --exploratory-max-steps 16 --exploratory-max-reads-per-step 4 --exploratory-target-llm-tokens 20000
     Press Ctrl+C once to cancel gracefully; press again to force exit.
   config get [key]
   config set <key> <value>

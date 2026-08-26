@@ -130,7 +130,7 @@ The engine does not read `.env` files or persist settings. Callers are responsib
 
 - `quick` — snippet-only scan. One iteration is original query plus a few follow-ups; more than one iteration uses the shared iterative loop. It does not enrich URL bodies.
 - `focused` — default topic research: source-informed follow-ups, optional URL enrichment, source selection, evidence chain, and iteration/evidence early-stop
-- `exploratory` — Agent Loop that chooses structured `search`, `read`, `reflect`, `answer`, or `stop` actions per step. Runtime rules enforce action preconditions, cancellation, budgets, and step limits.
+- `exploratory` — budget-driven agent loop that chooses structured `search`, `read`, `reflect`, `answer`, or `stop` actions. The LLM token budget (`research.exploratory.targetLlmTokens` soft target, `research.budget.maxLlmTokens` hard cap) is the primary constraint; evidence sufficiency can stop early. `research.exploratory.maxSteps` is only a safety valve against infinite cheap loops.
 
 Custom strategies can still be added with `registerStrategy()`. Historical IDs (`rapid`, `parallel`, `source-based`, `adaptive`) are not registered.
 

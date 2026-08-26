@@ -179,7 +179,7 @@ Available research strategies are exposed through `/api/strategies` and shared b
 
 - `quick` (快速调研): snippet-only scan. One iteration is the former Rapid path (original query plus a few follow-ups). More than one iteration reuses the former Parallel iterative loop. It does not promise body-level evidence.
 - `focused` (专题调研, default): read sources and produce a cited report for a well-bounded question. Default URL enrichment uses `research.focused.fetchMode: summary`. Use `disabled` for snippet-only runs; relevance filtering stays off by default.
-- `exploratory` (探索性调研): the former Adaptive v2 Agent Loop. The model chooses structured search/read/reflect/answer actions while the runtime guards legality, cancellation, budgets, and maximum steps.
+- `exploratory` (探索性调研): budget-driven agent loop. The model chooses structured search/read/reflect/answer actions while the runtime guards legality, cancellation, token budgets, evidence sufficiency, and a max-steps safety valve.
 
 `focused` defaults to a quality preset: `fetchMode: summary`, query memory, source clustering, passage/claim evidence, iteration/evidence early-stop, and soft budgets (`maxSearchRequests: 18`, `maxSourceReads: 16`). Override per run with CLI flags such as `--focused-fetch-mode disabled` or `config set` / Web UI settings. `preReportGate` and LLM relevance filtering remain off by default.
 

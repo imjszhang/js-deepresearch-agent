@@ -4,8 +4,10 @@ function readExploratoryRaw(settings = {}) {
 
 export function resolveExploratorySettings(settings = {}) {
   const raw = readExploratoryRaw(settings);
+  const targetRaw = raw.targetLlmTokens;
   return {
     maxSteps: Number(raw.maxSteps) || 16,
+    targetLlmTokens: targetRaw === undefined || targetRaw === null ? 20000 : (Number(targetRaw) || 0),
     maxGapDepth: Number(raw.maxGapDepth) || 2,
     maxOpenGaps: Number(raw.maxOpenGaps) || 8,
     maxQueriesPerStep: Number(raw.maxQueriesPerStep) || 3,

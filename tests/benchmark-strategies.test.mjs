@@ -137,7 +137,78 @@ describe('extract run stats', () => {
     assert.equal(stats.strategyLabel, 'focused');
     assert.equal(stats.durationMs, 91000);
     assert.equal(stats.cost.llmTokens, 12000);
+    assert.equal(stats.actualLlmTokens, 12000);
     assert.equal(stats.counts.sourceCount, 1);
+  });
+
+  it('surfaces exploratory target tokens, stop reason, and unused budget', () => {
+    const dir = createFixture({
+      strategy: 'exploratory',
+      quality: {
+        schemaVersion: 3,
+        gate: 'pass',
+        flags: [],
+        stopReason: 'evidence_sufficient',
+        budget: {
+          targetLlmTokens: 20000,
+          unusedBudgetTokens: 8000,
+          controllerStopReason: 'evidence_sufficient',
+          usage: {
+            llmRequests: 6,
+            llmTokens: 12000,
+            searchRequests: 2,
+            sourceReads: 3,
+            rerankRequests: 0,
+            rerankTokens: 0,
+            estimatedCost: 0,
+          },
+          unknown: { estimatedCost: true },
+          stopReason: null,
+        },
+      },
+    });
+    const artifacts = {
+      workDir: dir,
+      meta: JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8')),
+      quality: JSON.parse(fs.readFileSync(path.join(dir, 'quality.json'), 'utf8')),
+      sources: JSON.parse(fs.readFileSync(path.join(dir, 'sources.json'), 'utf8')),
+      findings: JSON.parse(fs.readFileSync(path.join(dir, 'findings.json'), 'utf8')),
+      report: fs.readFileSync(path.join(dir, 'report.md'), 'utf8'),
+      trace: [],
+      claims: [],
+      passages: [],
+    };
+    const stats = extractRunStats(artifacts);
+    assert.equal(stats.stopReason, 'evidence_sufficient');
+    assert.equal(stats.targetLlmTokens, 20000);
+    assert.equal(stats.actualLlmTokens, 12000);
+    assert.equal(stats.unusedBudgetTokens, 8000);
+    const markdown = formatStrategyCompareMarkdown({
+      query: 'What is Ollama?',
+      comparedAt: '2026-08-26T00:00:00.000Z',
+      warnings: [],
+      runs: [{
+        ...stats,
+        benchmark: {
+          metrics: {
+            rates: {
+              supportedRate: null,
+              partiallySupportedRate: null,
+              unsupportedRate: null,
+              unverifiableRate: null,
+              evidenceCoverageRate: null,
+              directEvidenceRate: null,
+              keyClaimSupportedRate: null,
+            },
+          },
+        },
+      }],
+      deltas: [],
+    });
+    assert.match(markdown, /target tokens: 20000/);
+    assert.match(markdown, /actual tokens: 12000/);
+    assert.match(markdown, /unused budget: 8000/);
+    assert.match(markdown, /stop reason: evidence_sufficient/);
   });
 });
 
