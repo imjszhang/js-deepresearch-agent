@@ -85,7 +85,13 @@ export async function fetchUrlContent(url, { signal, maxChars = 8000, timeoutMs 
       links,
     };
   } catch (error) {
-    if (error?.name === 'AbortError') throw error;
+    if (signal?.aborted) throw error;
+    if (error?.name === 'AbortError') {
+      return {
+        status: 'failed',
+        error: `Timed out after ${timeoutMs}ms`,
+      };
+    }
     return {
       status: 'failed',
       error: error?.message || 'Fetch failed',

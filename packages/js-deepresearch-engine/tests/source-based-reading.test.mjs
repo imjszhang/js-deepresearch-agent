@@ -73,6 +73,37 @@ describe('content fetcher', () => {
     assert.equal(result.status, 'failed');
     assert.match(result.error, /404/);
   });
+
+  it('returns failed on fetch timeout instead of throwing AbortError', async () => {
+    globalThis.fetch = (_url, { signal } = {}) => new Promise((_resolve, reject) => {
+      signal?.addEventListener('abort', () => {
+        const error = new Error('This operation was aborted');
+        error.name = 'AbortError';
+        reject(error);
+      }, { once: true });
+    });
+
+    const result = await fetchUrlContent('https://example.com/slow', { timeoutMs: 20 });
+    assert.equal(result.status, 'failed');
+    assert.match(result.error, /Timed out after 20ms/);
+  });
+
+  it('rethrows when the parent research signal aborts', async () => {
+    const controller = new AbortController();
+    globalThis.fetch = (_url, { signal } = {}) => new Promise((_resolve, reject) => {
+      signal?.addEventListener('abort', () => {
+        const error = new Error('This operation was aborted');
+        error.name = 'AbortError';
+        reject(error);
+      }, { once: true });
+    });
+
+    setTimeout(() => controller.abort(), 15);
+    await assert.rejects(
+      () => fetchUrlContent('https://example.com/slow', { signal: controller.signal, timeoutMs: 5000 }),
+      { name: 'AbortError' },
+    );
+  });
 });
 
 describe('content resolver', () => {
