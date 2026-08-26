@@ -14,6 +14,16 @@ describe('research control infrastructure', () => {
     assert.equal(events.filter((event) => event.stage === 'budget_exhausted' && event.kind === 'searchRequests').length, 1);
   });
 
+  it('reserves report prompt and output tokens against the hard LLM cap', () => {
+    const manager = new BudgetManager({ research: { budget: { maxLlmTokens: 4000, reserveReportTokens: 1000 } } });
+    manager.updateReportReserve(500);
+    assert.equal(manager.canClaim('llmTokens', 2600), false);
+    assert.equal(manager.canClaim('llmTokens', 2000), true);
+    manager.claim('llmTokens', 2000);
+    assert.equal(manager.canClaim('llmTokens', 800, { report: true }), true);
+    assert.ok(manager.snapshot().reservedReportTotalTokens >= 1000);
+  });
+
   it('deduplicates normalized and overlapping queries', async () => {
     const memory = new QueryMemory({ enabled: true, similarityThreshold: 0.7 });
     memory.record({ query: 'Current LLM Wiki research', gapId: 'g1', status: 'useful', results: [] });

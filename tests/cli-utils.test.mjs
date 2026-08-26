@@ -164,6 +164,7 @@ describe('CLI utilities', () => {
       'rerank-api-key': 'one-run-key',
       'rerank-timeout-ms': '1234',
       'exploratory-max-steps': '12',
+      'exploratory-target-llm-tokens': '18000',
     });
     assert.equal(settings.research.budget.maxRerankRequests, 3);
     assert.equal(settings.research.budget.maxRerankTokens, 900);
@@ -175,6 +176,7 @@ describe('CLI utilities', () => {
       timeoutMs: 1234,
     });
     assert.equal(settings.research.exploratory.maxSteps, 12);
+    assert.equal(settings.research.exploratory.targetLlmTokens, 18000);
   });
 
   it('maps embedding and extract fetch mode flags', () => {

@@ -29,6 +29,8 @@ describe('settings defaults', () => {
     assert.equal(defaultSettings.research.focused.queryMemory.enabled, true);
     assert.equal(settings.research.sourceBased, undefined);
     assert.equal(settings.research.adaptive, undefined);
+    assert.equal(settings.research.exploratory.targetLlmTokens, 20000);
+    assert.equal(settings.research.exploratory.maxSteps, 16);
   });
 
   it('migrates persisted source-based and adaptive settings to live keys', () => {

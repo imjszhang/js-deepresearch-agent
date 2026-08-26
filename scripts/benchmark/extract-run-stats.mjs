@@ -72,7 +72,15 @@ export function extractRunStats(artifacts, { wallClockDurationMs = null } = {}) 
     durationLabel: formatDurationMs(durationMs),
     gate: quality.gate || null,
     qualityFlags: Array.isArray(quality.flags) ? quality.flags : [],
-    stopReason: budget.stopReason || null,
+    stopReason: quality.stopReason || budget.controllerStopReason || budget.stopReason || null,
+    targetLlmTokens: budget.targetLlmTokens || null,
+    actualLlmTokens: usage.llmTokens ?? 0,
+    unusedBudgetTokens: budget.unusedBudgetTokens
+      ?? (budget.targetLlmTokens > 0 && Number.isFinite(usage.llmTokens)
+        ? Math.max(0, budget.targetLlmTokens - usage.llmTokens)
+        : (budget.limits?.llmTokens > 0 && Number.isFinite(usage.llmTokens)
+          ? Math.max(0, budget.limits.llmTokens - usage.llmTokens)
+          : null)),
     cost: {
       llmRequests: usage.llmRequests ?? 0,
       llmTokens: usage.llmTokens ?? 0,

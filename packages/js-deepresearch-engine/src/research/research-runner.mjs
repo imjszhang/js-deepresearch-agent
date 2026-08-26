@@ -84,7 +84,7 @@ export class ResearchRunner {
     emit({ stage: 'synthesizing_report' });
     let report = await buildReport({
       llm, query, findings, signal, purpose: 'report', limitations: reportLimitations,
-      maxTokens: budget.limits.llmTokens > 0 ? budget.reserveReportTokens : undefined,
+      maxTokens: budget.limits.llmTokens > 0 ? (budget.maxReportOutputTokens || budget.reserveReportTokens) : undefined,
       minChars: settings?.research?.reportValidation?.minChars,
       maxAttempts: settings?.research?.reportValidation?.maxAttempts,
       onAttempt: (event) => {
@@ -124,6 +124,7 @@ export class ResearchRunner {
       : (preReport.gate === 'pass_with_warnings' || claimGate === 'pass_with_warnings' ? 'pass_with_warnings' : 'pass');
     const quality = {
       schemaVersion: 3,
+      stopReason: budget.controllerStopReason || null,
       qualityMetricsVersion: qualityMetrics.metricsVersion,
       claimExtractionVersion: qualityMetrics.claimExtractionVersion,
       claimEvaluationVersion: qualityMetrics.claimEvaluationVersion,
@@ -160,7 +161,7 @@ export class ResearchRunner {
       trace: [
         ...trace,
         { step: trace.length + 1, action: 'finalize', reasonCode: 'completed', budgetAfter: budget.snapshot(), createdAt: new Date().toISOString() },
-        ...(strategy === 'exploratory' ? [{ step: trace.length + 2, action: 'stop', reasonCode: budget.stopReason || 'research_sufficient', budgetAfter: budget.snapshot(), createdAt: new Date().toISOString() }] : []),
+        ...(strategy === 'exploratory' ? [{ step: trace.length + 2, action: 'stop', reasonCode: budget.controllerStopReason || budget.stopReason || 'research_sufficient', budgetAfter: budget.snapshot(), createdAt: new Date().toISOString() }] : []),
       ],
     };
   }

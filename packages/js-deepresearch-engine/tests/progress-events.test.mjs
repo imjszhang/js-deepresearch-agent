@@ -131,6 +131,21 @@ describe('progress events', () => {
     );
   });
 
+  it('uses step language for exploratory enrich events', () => {
+    assert.deepEqual(
+      mapStructuredProgressEvent({
+        stage: 'enriching_sources',
+        step: 3,
+        maxSteps: 8,
+      }),
+      {
+        message: 'Enriching sources for step 3/8',
+        progress: 33,
+        level: 'info',
+      },
+    );
+  });
+
   it('uses generic fallback messages for strategies without progress profiles', () => {
     assert.deepEqual(
       mapStructuredProgressEvent({

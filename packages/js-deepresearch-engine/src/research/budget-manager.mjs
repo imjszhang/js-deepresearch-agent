@@ -22,8 +22,17 @@ export class BudgetManager {
       rerankTokens: limit(budget.maxRerankTokens),
       estimatedCost: limit(budget.maxEstimatedCost),
     };
-    this.reserveReportTokens = limit(budget.reserveReportTokens) || 1200;
-    if (this.limits.llmTokens > 0) this.reserveReportTokens = Math.min(this.reserveReportTokens, this.limits.llmTokens);
+    this.maxReportOutputTokens = limit(budget.reserveReportTokens) || 1200;
+    this.reserveReportTokens = this.maxReportOutputTokens;
+    this.estimatedReportPromptTokens = 400;
+    this.reservedReportTotalTokens = this.maxReportOutputTokens + this.estimatedReportPromptTokens;
+    if (this.limits.llmTokens > 0) {
+      this.maxReportOutputTokens = Math.min(this.maxReportOutputTokens, this.limits.llmTokens);
+      this.reserveReportTokens = this.maxReportOutputTokens;
+      this.reservedReportTotalTokens = Math.min(this.reservedReportTotalTokens, this.limits.llmTokens);
+    }
+    this.targetLlmTokens = limit(settings?.research?.exploratory?.targetLlmTokens);
+    this.controllerStopReason = null;
     this.defaultLlmMaxTokens = limit(settings?.llm?.maxTokens) || 4000;
     this.usage = { llmRequests: 0, llmTokens: 0, searchRequests: 0, sourceReads: 0, rerankRequests: 0, rerankTokens: 0, estimatedCost: 0 };
     this.unknown = { llmTokens: false, rerankTokens: false, estimatedCost: false };
@@ -32,11 +41,53 @@ export class BudgetManager {
     this.emit = emit;
   }
 
+  setControllerStopReason(reason) {
+    this.controllerStopReason = reason || null;
+  }
+
+  updateReportReserve(promptTokens) {
+    const estimated = Math.max(0, Number(promptTokens) || 0);
+    this.estimatedReportPromptTokens = estimated;
+    const desired = estimated + this.maxReportOutputTokens;
+    if (this.limits.llmTokens > 0) {
+      const remaining = Math.max(0, this.limits.llmTokens - (this.usage.llmTokens || 0));
+      this.reservedReportTotalTokens = Math.min(desired, remaining, this.limits.llmTokens);
+      this.reservedReportTotalTokens = Math.max(
+        Math.min(this.maxReportOutputTokens, remaining),
+        this.reservedReportTotalTokens,
+      );
+    } else {
+      this.reservedReportTotalTokens = desired;
+    }
+    return this.reservedReportTotalTokens;
+  }
+
+  reportReserveTotal({ report = false } = {}) {
+    if (report) return 0;
+    return this.reservedReportTotalTokens || this.reserveReportTokens || 0;
+  }
+
+  remainingVsHardCap() {
+    if (!this.limits.llmTokens) return null;
+    return Math.max(0, this.limits.llmTokens - (this.usage.llmTokens || 0));
+  }
+
+  remainingVsTarget() {
+    if (!this.targetLlmTokens) return null;
+    return Math.max(0, this.targetLlmTokens - (this.usage.llmTokens || 0));
+  }
+
+  unusedBudgetTokens() {
+    if (this.targetLlmTokens > 0) return this.remainingVsTarget();
+    if (this.limits.llmTokens > 0) return this.remainingVsHardCap();
+    return null;
+  }
+
   claim(kind, amount = 1, { report = false } = {}) {
     const cap = this.limits[kind] || 0;
     if (cap > 0) {
       const used = this.usage[kind] || 0;
-      const reserve = kind === 'llmTokens' && !report ? this.reserveReportTokens : 0;
+      const reserve = kind === 'llmTokens' ? this.reportReserveTotal({ report }) : 0;
       if (used + amount > Math.max(0, cap - reserve)) {
         this.markExhausted(kind);
         throw new BudgetExceededError(kind);
@@ -79,12 +130,26 @@ export class BudgetManager {
   canClaim(kind, amount = 1, options) {
     const cap = this.limits[kind] || 0;
     if (cap === 0) return true;
-    const reserve = kind === 'llmTokens' && !options?.report ? this.reserveReportTokens : 0;
+    const reserve = kind === 'llmTokens' ? this.reportReserveTotal({ report: options?.report }) : 0;
     return (this.usage[kind] || 0) + amount <= Math.max(0, cap - reserve);
   }
 
   snapshot() {
-    return { limits: { ...this.limits }, reserveReportTokens: this.reserveReportTokens, usage: { ...this.usage }, unknown: { ...this.unknown }, stopReason: this.stopReason };
+    return {
+      limits: { ...this.limits },
+      reserveReportTokens: this.reserveReportTokens,
+      maxReportOutputTokens: this.maxReportOutputTokens,
+      estimatedReportPromptTokens: this.estimatedReportPromptTokens,
+      reservedReportTotalTokens: this.reservedReportTotalTokens,
+      targetLlmTokens: this.targetLlmTokens || 0,
+      unusedBudgetTokens: this.unusedBudgetTokens(),
+      unusedTargetTokens: this.remainingVsTarget(),
+      unusedHardCapTokens: this.remainingVsHardCap(),
+      controllerStopReason: this.controllerStopReason,
+      usage: { ...this.usage },
+      unknown: { ...this.unknown },
+      stopReason: this.stopReason,
+    };
   }
 }
 

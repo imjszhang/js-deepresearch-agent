@@ -129,15 +129,13 @@ describe('exploratory agent loop', () => {
     assert.ok(snapshot.focusGapId);
   });
 
-  it('falls back to reflect instead of answering when every candidate is read after a search', () => {
+  it('falls back to answer instead of reflect when every candidate is already read', () => {
     const state = new ResearchState({ query: 'topic', maxSteps: 10 });
     state.addCandidates([{ url: 'https://done.test/page', title: 'Done' }], 'gap-1');
     state.readSourceIds.add('https://done.test/page');
     state.lastAction = 'search';
-    assert.equal(fallbackAdaptiveAction(state).action, 'reflect');
-
-    state.lastAction = 'reflect';
     assert.equal(fallbackAdaptiveAction(state).action, 'answer');
+    assert.equal(fallbackAdaptiveAction(state).reasonCode, 'fallback_evidence_available');
   });
 
   it('lets the agent read a non-top rerank candidate and works without embeddings', async () => {
@@ -378,7 +376,8 @@ describe('exploratory agent loop', () => {
     const autoRead = result.trace.find((entry) => entry.action === 'read' && entry.reasonCode === 'auto_read_top_ranked');
     assert.ok(autoRead, 'search should be followed by an automatic read');
     assert.equal(autoRead.sourceIds.length, 2);
-    assert.equal(decisionCalls, 2);
+    assert.equal(decisionCalls, 1);
+    assert.equal(result.quality.stopReason, 'evidence_sufficient');
   });
 
   it('uses extract mode without source_summary LLM calls when embedding is configured', async () => {
@@ -514,6 +513,184 @@ describe('exploratory agent loop', () => {
     });
     assert.equal(result.findings[0].sources[0].url, 'https://first.test');
     assert.equal(result.findings[0].degraded, true);
-    assert.ok(result.trace.some((entry) => entry.reasonCode === 'budget_exhausted'));
+    assert.ok(result.trace.some((entry) => entry.reasonCode === 'max_budget_exhausted'));
+  });
+
+  it('keeps a comparison query open until each subject has body evidence', async () => {
+    const searches = [
+      [{ title: 'Ollama', url: 'https://ollama.com', content: 'Ollama is a local model runner.', fetchStatus: 'ok' }],
+      [{ title: 'llama.cpp', url: 'https://github.com/ggml-org/llama.cpp', content: 'llama.cpp is a C++ inference engine.', fetchStatus: 'ok' }],
+    ];
+    const decisions = [
+      { action: 'search', query: 'ollama overview', gapId: 'gap-1', reasonCode: 'search_ollama' },
+      { action: 'search', query: 'llama.cpp overview', gapId: 'gap-1', reasonCode: 'search_llamacpp' },
+      { action: 'answer', reasonCode: 'done' },
+    ];
+    const result = await new ResearchRunner().run({
+      query: 'Compare Ollama and llama.cpp',
+      settings: { llm: {}, search: {}, research: {
+        strategy: 'exploratory',
+        exploratory: { maxSteps: 8, maxEvaluationRetries: 0, autoReadTopK: 2, targetLlmTokens: 0 },
+        focused: { fetchMode: 'disabled' },
+      } },
+      search: { async search() { return searches.shift() || []; } },
+      llm: llmFor(decisions, { onDecompose: () => JSON.stringify({ subQuestions: ['How does Ollama work?', 'How does llama.cpp work?'] }) }),
+    });
+    assert.equal(result.quality.budget.usage.searchRequests, 2);
+    assert.equal(result.quality.stopReason, 'evidence_sufficient');
+    const texts = result.findings.flatMap((finding) => (finding.sources || []).map((source) => `${source.title} ${source.content}`)).join(' ');
+    assert.match(texts, /Ollama/);
+    assert.match(texts, /llama\.cpp/);
+  });
+
+  it('stops a definitional query on evidence_sufficient without opening paraphrased gaps', async () => {
+    const events = [];
+    const result = await new ResearchRunner().run({
+      query: 'What is Ollama?',
+      settings: { llm: {}, search: {}, research: {
+        strategy: 'exploratory',
+        exploratory: { maxSteps: 8, maxEvaluationRetries: 0, targetLlmTokens: 20000 },
+        focused: { fetchMode: 'disabled' },
+      } },
+      onProgress: (event) => events.push(event.message),
+      search: { async search() {
+        return [{
+          title: 'Ollama docs',
+          url: 'https://ollama.com',
+          snippet: 'Ollama runs local models',
+          content: 'Ollama is a tool for running large language models locally.',
+          fetchStatus: 'ok',
+        }];
+      } },
+      llm: llmFor(
+        [{ action: 'search', query: 'What is Ollama?', gapId: 'gap-1', reasonCode: 'find_sources' }],
+        { onDecompose: () => JSON.stringify({ subQuestions: ['What features does Ollama have?', 'How do you install Ollama?'] }) },
+      ),
+    });
+    assert.equal(result.quality.stopReason, 'evidence_sufficient');
+    assert.equal(result.quality.budget.controllerStopReason, 'evidence_sufficient');
+    assert.ok((result.quality.budget.usage.llmTokens || 0) < 20000);
+    assert.equal(result.trace.find((entry) => entry.action === 'decompose')?.reasonCode, 'decompose_skipped_definitional');
+    assert.ok(!result.trace.some((entry) => entry.action === 'reflect'));
+    assert.ok(events.every((message) => !/undefined\/undefined/.test(message)));
+    assert.ok(events.some((message) => /Research stopped: evidence_sufficient/.test(message)));
+    assert.ok(!events.some((message) => /Research stopped: max_steps/.test(message)));
+  });
+
+  it('auto-read does not consume a decision step or block a later read of other sources', async () => {
+    const decisions = [
+      { action: 'search', query: 'harvest extra sources', gapId: 'gap-1', reasonCode: 'search' },
+      { action: 'read', sourceIds: ['https://harvest-b.test/page'], gapId: 'gap-1', reasonCode: 'extra_read' },
+      { action: 'answer', reasonCode: 'done' },
+    ];
+    const result = await new ResearchRunner().run({
+      query: 'harvest extra sources',
+      settings: { llm: {}, search: {}, research: {
+        strategy: 'exploratory',
+        exploratory: { maxSteps: 8, maxEvaluationRetries: 0, autoReadTopK: 1, targetLlmTokens: 0 },
+        focused: { fetchMode: 'disabled' },
+      } },
+      search: { async search() {
+        return [
+          { title: 'A', url: 'https://harvest-a.test/page', content: 'First host body evidence.', fetchStatus: 'ok' },
+          { title: 'B', url: 'https://harvest-b.test/page', content: 'Second host body evidence.', fetchStatus: 'ok' },
+          { title: 'C', url: 'https://harvest-c.test/page', content: 'Third host body evidence.', fetchStatus: 'ok' },
+        ];
+      } },
+      llm: llmFor(decisions),
+    });
+    const autoRead = result.trace.find((entry) => entry.action === 'read' && entry.reasonCode === 'auto_read_top_ranked');
+    const extraRead = result.trace.find((entry) => entry.action === 'read' && entry.reasonCode === 'extra_read');
+    assert.ok(autoRead, 'auto-read should harvest after search');
+    assert.equal(autoRead.harvest, true);
+    assert.equal(autoRead.decisionStep, false);
+    assert.ok(extraRead, 'a later read of a different unread source must be allowed');
+    assert.equal(extraRead.loopStep, autoRead.loopStep + 1);
+    assert.ok(!result.trace.some((entry) => entry.status === 'rejected' && entry.reasonCode === 'repeat_action'));
+  });
+
+  it('does not record an agent answer as max_steps and uses step language for enrich', async () => {
+    const events = [];
+    const decisions = [
+      { action: 'search', query: 'stop reason topic', gapId: 'gap-1', reasonCode: 'search' },
+      { action: 'answer', reasonCode: 'done' },
+    ];
+    const result = await new ResearchRunner().run({
+      query: 'stop reason topic',
+      settings: { llm: {}, search: {}, research: {
+        strategy: 'exploratory',
+        exploratory: { maxSteps: 2, maxEvaluationRetries: 0, autoReadTopK: 1, targetLlmTokens: 0 },
+        focused: { fetchMode: 'disabled' },
+      } },
+      onProgress: (event) => events.push(event.message),
+      search: { async search() {
+        return [{ title: 'S', url: 'https://stop-reason.test', content: 'Stop reason topic evidence from a selected source.', fetchStatus: 'ok' }];
+      } },
+      llm: llmFor(decisions),
+    });
+    assert.notEqual(result.quality.stopReason, 'max_steps');
+    assert.ok(['agent_stop', 'evidence_sufficient'].includes(result.quality.stopReason));
+    assert.ok(events.some((message) => /Enriching sources for step \d+\/\d+/.test(message)));
+    assert.ok(events.every((message) => !/undefined\/undefined/.test(message)));
+    assert.ok(!events.some((message) => /Research stopped: max_steps/.test(message)));
+  });
+
+  it('reserves report tokens and stops with max_budget_exhausted instead of max_steps', async () => {
+    const events = [];
+    const decisions = [
+      { action: 'search', query: 'budget exhaustion topic', gapId: 'gap-1', reasonCode: 'search' },
+      { action: 'search', query: 'budget exhaustion follow up', gapId: 'gap-1', reasonCode: 'search_more' },
+      { action: 'read', sourceIds: ['https://budget-cap.test'], gapId: 'gap-1', reasonCode: 'read' },
+      { action: 'answer', reasonCode: 'done' },
+    ];
+    const result = await new ResearchRunner().run({
+      query: 'budget exhaustion topic',
+      settings: { llm: {}, search: {}, research: {
+        strategy: 'exploratory',
+        exploratory: { maxSteps: 12, maxEvaluationRetries: 0, targetLlmTokens: 0, autoReadTopK: 2 },
+        focused: { fetchMode: 'disabled' },
+        budget: { maxLlmTokens: 2500, reserveReportTokens: 800, maxSearchRequests: 8, maxSourceReads: 8 },
+      } },
+      onProgress: (event) => events.push(event.message),
+      search: { async search() {
+        return [{ title: 'Cap', url: 'https://budget-cap.test', content: 'Budget exhaustion topic evidence from a selected source.', fetchStatus: 'ok' }];
+      } },
+      llm: llmFor(decisions, { onDecompose: () => 'no json' }),
+    });
+    assert.equal(result.quality.stopReason, 'max_budget_exhausted');
+    assert.notEqual(result.quality.stopReason, 'max_steps');
+    assert.ok(result.quality.budget.reservedReportTotalTokens >= result.quality.budget.maxReportOutputTokens);
+    assert.ok(result.report);
+    assert.ok(events.every((message) => !/undefined\/undefined/.test(message)));
+    assert.ok(!events.some((message) => /Research stopped: max_steps/.test(message)));
+  });
+
+  it('rejects a consecutive read of the same sources and falls back without reflect', async () => {
+    const decisions = [
+      { action: 'search', query: 'open topic space', gapId: 'gap-1', reasonCode: 'search' },
+      { action: 'read', sourceIds: ['https://open-a.test'], gapId: 'gap-1', reasonCode: 'read' },
+      { action: 'read', sourceIds: ['https://open-a.test'], gapId: 'gap-1', reasonCode: 'read_again' },
+      { action: 'reflect', gapQuestion: 'What is a paraphrased open topic space?', reasonCode: 'should_not_run' },
+      { action: 'answer', reasonCode: 'done' },
+    ];
+    const result = await new ResearchRunner().run({
+      query: 'open topic space',
+      settings: { llm: {}, search: {}, research: {
+        strategy: 'exploratory',
+        exploratory: { maxSteps: 10, maxEvaluationRetries: 0, autoReadTopK: 0, targetLlmTokens: 0 },
+        focused: { fetchMode: 'disabled' },
+      } },
+      search: { async search() {
+        return [
+          { title: 'A', url: 'https://open-a.test', content: 'Open topic space evidence from host A.', fetchStatus: 'ok' },
+          { title: 'B', url: 'https://open-b.test', content: 'Open topic space evidence from host B.', fetchStatus: 'ok' },
+        ];
+      } },
+      llm: llmFor(decisions),
+    });
+    assert.ok(result.trace.some((entry) => entry.status === 'rejected' && entry.reasonCode === 'repeat_action'));
+    assert.ok(result.trace.some((entry) => entry.action === 'read' && entry.reasonCode === 'fallback_read_evidence'));
+    assert.ok(!result.trace.some((entry) => entry.action === 'reflect' && entry.reasonCode === 'fallback_reflect_gaps'));
+    assert.ok(!result.trace.some((entry) => entry.action === 'reflect' && entry.reasonCode === 'should_not_run'));
   });
 });

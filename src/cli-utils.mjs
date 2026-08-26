@@ -147,6 +147,7 @@ export function applyResearchFlags(settings, flags) {
     'http-proxy': 'http.proxy',
     'exploratory-max-steps': 'research.exploratory.maxSteps',
     'exploratory-max-reads-per-step': 'research.exploratory.maxReadsPerStep',
+    'exploratory-target-llm-tokens': 'research.exploratory.targetLlmTokens',
     'adaptive-max-steps': 'research.exploratory.maxSteps',
     'adaptive-max-reads-per-step': 'research.exploratory.maxReadsPerStep',
   };

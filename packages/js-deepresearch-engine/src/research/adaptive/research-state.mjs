@@ -1,3 +1,10 @@
+import { ActionCostTracker, buildBudgetView, estimateReportPromptTokens } from './budget-view.mjs';
+import {
+  evaluateExploratorySufficiency,
+  similarQuestions,
+  sourceHasBody,
+} from './exploratory-sufficiency.mjs';
+
 const ACTIONS = new Set(['search', 'read', 'reflect', 'answer', 'stop']);
 const RANKED_CANDIDATE_LIMIT = 20;
 const SNAPSHOT_CANDIDATE_LIMIT = 8;
@@ -39,12 +46,18 @@ export function hostnameWeight(url) {
 }
 
 export class ResearchState {
-  constructor({ query, maxSteps = 12 }) {
+  constructor({ query, maxSteps = 12, maxGapDepth = 2, targetLlmTokens = 0, budget = null } = {}) {
     this.query = query;
     this.maxSteps = Math.max(1, Number(maxSteps) || 12);
+    this.maxGapDepth = Math.max(0, Number(maxGapDepth) || 0);
+    this.targetLlmTokens = Number(targetLlmTokens) || 0;
+    this.budgetManager = budget;
+    this.actionCosts = new ActionCostTracker();
+    this.budgetView = null;
+    this.sufficiency = null;
     this.step = 0;
     this.lastAction = null;
-    this.gaps = [{ id: 'gap-1', question: query, status: 'open', priority: 'critical' }];
+    this.gaps = [{ id: 'gap-1', question: query, status: 'open', priority: 'critical', depth: 0 }];
     this.findings = [];
     this.candidates = new Map();
     this.readSourceIds = new Set();
@@ -60,17 +73,59 @@ export class ResearchState {
     this.diary.push(`step ${this.step}: ${text}`);
   }
 
-  addGap(question, priority = 'normal') {
+  addGap(question, priority = 'normal', { depth } = {}) {
     const text = String(question || '').trim();
     if (!text) return null;
-    const gap = { id: `gap-${this.gaps.length + 1}`, question: text, status: 'open', priority };
+    if (this.gaps.some((gap) => similarQuestions(gap.question, text))) return null;
+    const nextDepth = depth ?? 1;
+    if (this.maxGapDepth > 0 && nextDepth > this.maxGapDepth) return null;
+    const gap = { id: `gap-${this.gaps.length + 1}`, question: text, status: 'open', priority, depth: nextDepth };
     this.gaps.push(gap);
     return gap;
   }
 
   gapCovered(gapId) {
     return this.findings.some((finding) => finding.gapId === gapId
-      && (finding.sources || []).some((source) => source.fetchStatus === 'ok' || source.content || source.summary));
+      && (finding.sources || []).some(sourceHasBody));
+  }
+
+  hasBodyEvidence() {
+    return this.findings.some((finding) => (finding.sources || []).some(sourceHasBody));
+  }
+
+  syncGapCoverage() {
+    for (const gap of this.gaps) {
+      if (this.gapCovered(gap.id) && gap.status === 'open') {
+        gap.status = 'resolved';
+        gap.resolvedAtStep = this.step;
+      }
+    }
+  }
+
+  refreshBudgetView({ budget, targetLlmTokens, actionCosts } = {}) {
+    const manager = budget || this.budgetManager;
+    if (manager) {
+      if (targetLlmTokens !== undefined) {
+        manager.targetLlmTokens = Number(targetLlmTokens) || 0;
+        this.targetLlmTokens = manager.targetLlmTokens;
+      } else if (this.targetLlmTokens && !manager.targetLlmTokens) {
+        manager.targetLlmTokens = this.targetLlmTokens;
+      }
+      manager.updateReportReserve(estimateReportPromptTokens({ query: this.query, findings: this.findings }));
+      this.budgetView = buildBudgetView({
+        budget: manager,
+        actionCosts: actionCosts || this.actionCosts,
+        targetLlmTokens: manager.targetLlmTokens,
+      });
+    }
+    this.syncGapCoverage();
+    this.sufficiency = evaluateExploratorySufficiency({
+      query: this.query,
+      findings: this.findings,
+      gaps: this.gaps,
+      state: this,
+    });
+    return this.budgetView;
   }
 
   focusGap() {
@@ -113,18 +168,24 @@ export class ResearchState {
   }
 
   snapshot() {
+    const gaps = this.gaps.map((gap) => ({
+      ...gap,
+      covered: this.gapCovered(gap.id),
+    }));
     return {
       query: this.query,
       step: this.step,
       maxSteps: this.maxSteps,
       stepsRemaining: Math.max(0, this.maxSteps - this.step),
       lastAction: this.lastAction,
-      gaps: this.gaps.map((gap) => ({
-        ...gap,
-        covered: this.gapCovered(gap.id),
-      })),
+      gaps,
       focusGapId: this.focusGap()?.id || 'gap-1',
       findingsCount: this.findings.length,
+      bodyEvidenceCoverage: {
+        hasBodyEvidence: this.hasBodyEvidence(),
+        resolvedGaps: gaps.filter((gap) => gap.covered || gap.status === 'resolved').map((gap) => gap.id),
+        openGaps: gaps.filter((gap) => gap.status === 'open' && !gap.covered).map((gap) => gap.id),
+      },
       candidates: this.rankedCandidates().slice(0, SNAPSHOT_CANDIDATE_LIMIT).map((candidate) => ({
         id: candidate.id,
         title: candidate.title,
@@ -136,6 +197,15 @@ export class ResearchState {
       knowledge: this.knowledge,
       diary: this.diary.slice(-DIARY_SNAPSHOT_LINES),
       evaluationRetries: this.evaluationRetries,
+      budget: this.budgetView,
+      sufficiency: this.sufficiency,
+      qualityGate: this.sufficiency ? {
+        sufficient: this.sufficiency.sufficient,
+        inconclusive: this.sufficiency.inconclusive,
+        flags: this.sufficiency.flags,
+        decision: this.sufficiency.decision,
+        method: this.sufficiency.method,
+      } : null,
     };
   }
 
@@ -157,20 +227,30 @@ export class ResearchState {
   validate(action) {
     if (!ACTIONS.has(action?.action)) return 'unknown_action';
     if (this.step >= this.maxSteps && !['answer', 'stop'].includes(action.action)) return 'max_steps';
-    if (action.action === this.lastAction && !['answer', 'stop'].includes(action.action)) {
+    if (action.action === 'read') {
+      if (!action.sourceIds?.length) return 'missing_source_ids';
+      if (action.sourceIds.some((id) => !this.candidates.has(id))) return 'unknown_source';
+      if (this.lastAction === 'read') {
+        const unread = action.sourceIds.filter((id) => !this.readSourceIds.has(id));
+        if (!unread.length) return 'repeat_action';
+      }
+    }
+    if (action.action === this.lastAction && !['answer', 'stop', 'read'].includes(action.action)) {
       const lastSearch = [...this.observations].reverse().find((observation) => observation.type === 'search_result');
       const emptySearchRetry = action.action === 'search' && lastSearch?.resultCount === 0;
       if (!emptySearchRetry) return 'repeat_action';
     }
-    if (action.action === 'answer' && this.lastAction === 'search') return 'answer_after_search';
+    if (action.action === 'answer' && this.lastAction === 'search' && !this.hasBodyEvidence()) {
+      return 'answer_after_search';
+    }
     if (action.action === 'search') {
       const queries = Array.isArray(action.queries) ? action.queries : [];
       const primary = String(action.query || queries[0] || '').trim();
       if (!primary) return 'missing_query';
     }
-    if (action.action === 'read') {
-      if (!action.sourceIds?.length) return 'missing_source_ids';
-      if (action.sourceIds.some((id) => !this.candidates.has(id))) return 'unknown_source';
+    if (action.action === 'reflect') {
+      const question = String(action.gapQuestion || '').trim();
+      if (question && this.gaps.some((gap) => similarQuestions(gap.question, question))) return 'repeat_gap';
     }
     if (action.action === 'answer' && this.findings.length === 0 && this.candidates.size === 0) return 'no_evidence';
     return null;
