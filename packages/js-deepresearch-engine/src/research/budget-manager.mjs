@@ -11,33 +11,47 @@ export class BudgetExceededError extends Error {
   }
 }
 
+function purposeBucket(purpose, report = false) {
+  if (report || purpose === 'report') return 'reportTokens';
+  if (purpose === 'answer_evaluation') return 'evaluationTokens';
+  return 'explorationTokens';
+}
+
 export class BudgetManager {
   constructor(settings = {}, emit = () => {}) {
     const budget = settings?.research?.budget || {};
+    const report = settings?.research?.report || {};
     this.limits = {
       llmTokens: limit(budget.maxLlmTokens),
+      totalLlmTokens: limit(budget.maxTotalLlmTokens),
       searchRequests: limit(budget.maxSearchRequests),
       sourceReads: limit(budget.maxSourceReads),
       rerankRequests: limit(budget.maxRerankRequests),
       rerankTokens: limit(budget.maxRerankTokens),
       estimatedCost: limit(budget.maxEstimatedCost),
     };
-    this.maxReportOutputTokens = limit(budget.reserveReportTokens) || 1200;
-    this.reserveReportTokens = this.maxReportOutputTokens;
-    this.estimatedReportPromptTokens = 400;
-    this.reservedReportTotalTokens = this.maxReportOutputTokens + this.estimatedReportPromptTokens;
-    if (this.limits.llmTokens > 0) {
-      this.maxReportOutputTokens = Math.min(this.maxReportOutputTokens, this.limits.llmTokens);
-      this.reserveReportTokens = this.maxReportOutputTokens;
-      this.reservedReportTotalTokens = Math.min(this.reservedReportTotalTokens, this.limits.llmTokens);
-    }
+    this.maxReportOutputTokens = limit(report.maxOutputTokens);
+    this.reserveReportTokens = 0;
+    this.estimatedReportPromptTokens = 0;
+    this.reservedReportTotalTokens = 0;
     this.minLlmTokens = limit(
       settings?.research?.exploratory?.minLlmTokens ?? settings?.research?.exploratory?.targetLlmTokens,
     );
     this.targetLlmTokens = this.minLlmTokens;
     this.controllerStopReason = null;
     this.defaultLlmMaxTokens = limit(settings?.llm?.maxTokens) || 4000;
-    this.usage = { llmRequests: 0, llmTokens: 0, searchRequests: 0, sourceReads: 0, rerankRequests: 0, rerankTokens: 0, estimatedCost: 0 };
+    this.usage = {
+      llmRequests: 0,
+      llmTokens: 0,
+      explorationTokens: 0,
+      reportTokens: 0,
+      evaluationTokens: 0,
+      searchRequests: 0,
+      sourceReads: 0,
+      rerankRequests: 0,
+      rerankTokens: 0,
+      estimatedCost: 0,
+    };
     this.unknown = { llmTokens: false, rerankTokens: false, estimatedCost: false };
     this.stopReason = null;
     this.exhaustedKinds = new Set();
@@ -48,36 +62,30 @@ export class BudgetManager {
     this.controllerStopReason = reason || null;
   }
 
-  updateReportReserve(promptTokens) {
-    const estimated = Math.max(0, Number(promptTokens) || 0);
-    this.estimatedReportPromptTokens = estimated;
-    const desired = estimated + this.maxReportOutputTokens;
-    if (this.limits.llmTokens > 0) {
-      const remaining = Math.max(0, this.limits.llmTokens - (this.usage.llmTokens || 0));
-      this.reservedReportTotalTokens = Math.min(desired, remaining, this.limits.llmTokens);
-      this.reservedReportTotalTokens = Math.max(
-        Math.min(this.maxReportOutputTokens, remaining),
-        this.reservedReportTotalTokens,
-      );
-    } else {
-      this.reservedReportTotalTokens = desired;
-    }
-    return this.reservedReportTotalTokens;
+  updateReportReserve(_promptTokens) {
+    this.reserveReportTokens = 0;
+    this.reservedReportTotalTokens = 0;
+    return 0;
   }
 
-  reportReserveTotal({ report = false } = {}) {
-    if (report) return 0;
-    return this.reservedReportTotalTokens || this.reserveReportTokens || 0;
+  reportReserveTotal() {
+    return 0;
+  }
+
+  explorationUsed() {
+    const bucketed = (this.usage.explorationTokens || 0) + (this.usage.evaluationTokens || 0);
+    if (bucketed > 0 || (this.usage.reportTokens || 0) > 0) return bucketed;
+    return Math.max(0, (this.usage.llmTokens || 0) - (this.usage.reportTokens || 0));
   }
 
   remainingVsHardCap() {
     if (!this.limits.llmTokens) return null;
-    return Math.max(0, this.limits.llmTokens - (this.usage.llmTokens || 0));
+    return Math.max(0, this.limits.llmTokens - this.explorationUsed());
   }
 
   remainingVsMin() {
     if (!this.minLlmTokens) return null;
-    return Math.max(0, this.minLlmTokens - (this.usage.llmTokens || 0));
+    return Math.max(0, this.minLlmTokens - this.explorationUsed());
   }
 
   remainingVsTarget() {
@@ -89,17 +97,26 @@ export class BudgetManager {
     return this.remainingVsMin();
   }
 
-  claim(kind, amount = 1, { report = false } = {}) {
-    const cap = this.limits[kind] || 0;
-    if (cap > 0) {
-      const used = this.usage[kind] || 0;
-      const reserve = kind === 'llmTokens' ? this.reportReserveTotal({ report }) : 0;
-      if (used + amount > Math.max(0, cap - reserve)) {
-        this.markExhausted(kind);
-        throw new BudgetExceededError(kind);
-      }
+  isReportClaim(options = {}) {
+    return options.report === true || options.purpose === 'report';
+  }
+
+  claim(kind, amount = 1, options = {}) {
+    if (!this.canClaim(kind, amount, options)) {
+      this.markExhausted(kind);
+      throw new BudgetExceededError(kind);
     }
     this.usage[kind] = (this.usage[kind] || 0) + amount;
+    if (kind === 'llmTokens') {
+      const bucket = purposeBucket(options.purpose, options.report);
+      this.usage[bucket] = (this.usage[bucket] || 0) + amount;
+    }
+  }
+
+  revertLlmClaim(amount, options = {}) {
+    this.usage.llmTokens = Math.max(0, (this.usage.llmTokens || 0) - amount);
+    const bucket = purposeBucket(options.purpose, options.report);
+    this.usage[bucket] = Math.max(0, (this.usage[bucket] || 0) - amount);
   }
 
   markExhausted(kind) {
@@ -109,10 +126,13 @@ export class BudgetManager {
     this.emit({ stage: 'budget_exhausted', kind });
   }
 
-  recordLlmUsage(usage) {
+  recordLlmUsage(usage, options = {}) {
     const tokens = Number(usage?.totalTokens ?? usage?.total_tokens);
-    if (Number.isFinite(tokens)) this.usage.llmTokens += tokens;
-    else this.unknown.llmTokens = true;
+    if (Number.isFinite(tokens)) {
+      this.usage.llmTokens += tokens;
+      const bucket = purposeBucket(options.purpose, options.report);
+      this.usage[bucket] = (this.usage[bucket] || 0) + tokens;
+    } else this.unknown.llmTokens = true;
     const cost = Number(usage?.estimatedCost ?? usage?.estimated_cost);
     if (Number.isFinite(cost)) {
       this.usage.estimatedCost += cost;
@@ -133,20 +153,28 @@ export class BudgetManager {
     }
   }
 
-  canClaim(kind, amount = 1, options) {
+  canClaim(kind, amount = 1, options = {}) {
+    if (kind === 'llmTokens') {
+      if (this.limits.totalLlmTokens > 0 && (this.usage.llmTokens || 0) + amount > this.limits.totalLlmTokens) {
+        return false;
+      }
+      if (this.isReportClaim(options)) return true;
+      const cap = this.limits.llmTokens || 0;
+      if (cap === 0) return true;
+      return this.explorationUsed() + amount <= cap;
+    }
     const cap = this.limits[kind] || 0;
     if (cap === 0) return true;
-    const reserve = kind === 'llmTokens' ? this.reportReserveTotal({ report: options?.report }) : 0;
-    return (this.usage[kind] || 0) + amount <= Math.max(0, cap - reserve);
+    return (this.usage[kind] || 0) + amount <= cap;
   }
 
   snapshot() {
     return {
       limits: { ...this.limits },
-      reserveReportTokens: this.reserveReportTokens,
+      reserveReportTokens: 0,
       maxReportOutputTokens: this.maxReportOutputTokens,
       estimatedReportPromptTokens: this.estimatedReportPromptTokens,
-      reservedReportTotalTokens: this.reservedReportTotalTokens,
+      reservedReportTotalTokens: 0,
       minLlmTokens: this.minLlmTokens || 0,
       targetLlmTokens: this.minLlmTokens || this.targetLlmTokens || 0,
       unusedBudgetTokens: this.unusedBudgetTokens(),
@@ -175,14 +203,18 @@ export function wrapProvidersWithBudget({ llm, search, budget, onLlmEvent = () =
         onLlmEvent({ status: 'started', callId, purpose });
         try {
           budget.usage.llmRequests += 1;
-          const requestedTokens = Number(args?.maxTokens) || (budget.limits.llmTokens > 0 ? budget.defaultLlmMaxTokens : 1);
-          budget.claim('llmTokens', requestedTokens, { report: purpose === 'report' });
+          const requested = Number(args?.maxTokens);
+          const isReport = purpose === 'report';
+          const claimAmount = Number.isFinite(requested) && requested > 0
+            ? requested
+            : (isReport ? 1 : (budget.limits.llmTokens > 0 ? budget.defaultLlmMaxTokens : 1));
+          budget.claim('llmTokens', claimAmount, { purpose, report: isReport });
           const result = typeof llm.completeWithMetadata === 'function'
             ? await llm.completeWithMetadata(args)
             : await llm.complete(args);
           if (result?.usage) {
-            budget.usage.llmTokens -= requestedTokens;
-            budget.recordLlmUsage(result.usage);
+            budget.revertLlmClaim(claimAmount, { purpose, report: isReport });
+            budget.recordLlmUsage(result.usage, { purpose, report: isReport });
           } else {
             budget.unknown.llmTokens = true;
           }

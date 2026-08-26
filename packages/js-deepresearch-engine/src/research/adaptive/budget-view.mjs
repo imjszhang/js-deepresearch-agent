@@ -55,18 +55,25 @@ export class ActionCostTracker {
   }
 }
 
+function explorationUsed(budget = {}) {
+  if (typeof budget.explorationUsed === 'function') return budget.explorationUsed();
+  const exploration = Number(budget?.usage?.explorationTokens) || 0;
+  const evaluation = Number(budget?.usage?.evaluationTokens) || 0;
+  if (exploration > 0 || evaluation > 0 || Number(budget?.usage?.reportTokens) > 0) {
+    return exploration + evaluation;
+  }
+  return Math.max(0, (Number(budget?.usage?.llmTokens) || 0) - (Number(budget?.usage?.reportTokens) || 0));
+}
+
 export function buildBudgetView({ budget, actionCosts, minLlmTokens, targetLlmTokens } = {}) {
-  const used = Number(budget?.usage?.llmTokens) || 0;
+  const used = explorationUsed(budget);
   const hardCap = Number(budget?.limits?.llmTokens) || 0;
   const min = Number(minLlmTokens ?? targetLlmTokens ?? budget?.minLlmTokens ?? budget?.targetLlmTokens) || 0;
-  const reservedTotal = Number(budget?.reservedReportTotalTokens ?? budget?.reserveReportTokens) || 0;
-  const reservedOutput = Number(budget?.maxReportOutputTokens ?? budget?.reserveReportTokens) || 0;
-  const estimatedPrompt = Number(budget?.estimatedReportPromptTokens) || 0;
   const remainingVsHardCap = hardCap > 0 ? Math.max(0, hardCap - used) : null;
   const remainingVsMin = min > 0 ? Math.max(0, min - used) : null;
   const belowMin = min > 0 && used < min;
   const minReached = min === 0 || used >= min;
-  const hardCapReached = hardCap > 0 && remainingVsHardCap !== null && remainingVsHardCap <= reservedTotal;
+  const hardCapReached = hardCap > 0 && remainingVsHardCap !== null && remainingVsHardCap <= 0;
   const unusedBudgetTokens = hardCap > 0 ? remainingVsHardCap : remainingVsMin;
 
   return {
@@ -77,9 +84,9 @@ export function buildBudgetView({ budget, actionCosts, minLlmTokens, targetLlmTo
     remainingVsHardCap,
     remainingVsMin,
     remainingVsTarget: remainingVsMin,
-    reservedReportTokens: reservedTotal,
-    reservedReportOutputTokens: reservedOutput,
-    estimatedReportPromptTokens: estimatedPrompt,
+    reservedReportTokens: 0,
+    reservedReportOutputTokens: Number(budget?.maxReportOutputTokens) || 0,
+    estimatedReportPromptTokens: Number(budget?.estimatedReportPromptTokens) || 0,
     belowMin,
     minReached,
     nearTarget: false,

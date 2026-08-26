@@ -61,7 +61,9 @@ export {
   resolveCitations,
   resolveCitedSourceIds,
 } from './research/citations.mjs';
-export { ReportGenerationError, validateReportOutput } from './research/report-builder.mjs';
+export { ReportGenerationError, validateReportOutput, looksTruncated } from './research/report-builder.mjs';
+export { assembleReport, reviseUnsupportedKeyClaims } from './research/report-assembler.mjs';
+export { resolveReportSettings } from './research/report-settings.mjs';
 export { createResearchProviders, deterministicResearchProviders } from './research/research-providers.mjs';
 export { DisabledRerankProvider, RulesRerankProvider } from './research/providers/rules-rerank-provider.mjs';
 export { JinaRerankProvider } from './research/providers/jina-rerank-provider.mjs';

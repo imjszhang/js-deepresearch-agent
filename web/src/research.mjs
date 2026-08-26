@@ -255,7 +255,7 @@ function togglePanel(selector, visible) {
 }
 
 function currentResearchBudget() {
-  return { maxLlmTokens: 0, maxEstimatedCost: 0, reserveReportTokens: 1200 };
+  return { maxLlmTokens: 0, maxEstimatedCost: 0, maxTotalLlmTokens: 0 };
 }
 
 function checked(selector) {

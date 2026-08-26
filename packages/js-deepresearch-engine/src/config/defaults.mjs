@@ -32,14 +32,19 @@ export const defaultSettings = Object.freeze({
       minChars: 200,
       maxAttempts: 2,
     },
+    report: {
+      maxOutputTokens: 0,
+      maxAttempts: 2,
+    },
     budget: {
       maxLlmTokens: 0,
+      maxTotalLlmTokens: 0,
       maxSearchRequests: 18,
       maxSourceReads: 16,
       maxRerankRequests: 0,
       maxRerankTokens: 0,
       maxEstimatedCost: 0,
-      reserveReportTokens: 1200,
+      reserveReportTokens: 0,
     },
     providers: {
       embedding: {
@@ -145,6 +150,10 @@ export function mergeSettings(overrides = {}) {
       reportValidation: {
         ...defaultSettings.research.reportValidation,
         ...(researchOverrides.reportValidation || {}),
+      },
+      report: {
+        ...defaultSettings.research.report,
+        ...(researchOverrides.report || {}),
       },
       providers: {
         ...defaultSettings.research.providers,

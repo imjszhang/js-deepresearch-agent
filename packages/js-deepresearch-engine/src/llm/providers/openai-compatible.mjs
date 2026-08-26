@@ -1,3 +1,11 @@
+function resolvedMaxTokens(maxTokens, fallback) {
+  if (maxTokens === 0) return undefined;
+  if (Number.isFinite(Number(maxTokens)) && Number(maxTokens) > 0) return Number(maxTokens);
+  if (fallback === 0) return undefined;
+  if (Number.isFinite(Number(fallback)) && Number(fallback) > 0) return Number(fallback);
+  return undefined;
+}
+
 export class OpenAICompatibleProvider {
   constructor(config) {
     this.config = config;
@@ -26,7 +34,9 @@ export class OpenAICompatibleProvider {
         model: this.config.model,
         messages,
         temperature: temperature ?? this.config.temperature,
-        max_tokens: maxTokens ?? this.config.maxTokens,
+        ...(resolvedMaxTokens(maxTokens, this.config.maxTokens) === undefined
+          ? {}
+          : { max_tokens: resolvedMaxTokens(maxTokens, this.config.maxTokens) }),
         ...((reasoningEffort || this.config.reasoningEffort || (/qwen/i.test(this.config.model || '') ? 'none' : null))
           ? { reasoning_effort: reasoningEffort || this.config.reasoningEffort || 'none' }
           : {}),

@@ -35,11 +35,11 @@ describe('exploratory budget snapshot and sufficiency', () => {
     assert.equal(snapshot.budget.remainingVsTarget, 4000);
     assert.equal(snapshot.budget.belowMin, true);
     assert.equal(snapshot.budget.minReached, false);
-    assert.ok(snapshot.budget.reservedReportTokens > 0);
-    assert.ok(snapshot.budget.reservedReportOutputTokens <= 1200);
+    assert.equal(snapshot.budget.reservedReportTokens, 0);
+    assert.equal(snapshot.budget.hardCapReached, false);
     assert.ok(snapshot.budget.actionCostEstimates.read.estimatedTokens > 0);
     assert.equal(snapshot.sufficiency.sufficient, true);
-    assert.ok(view.reservedReportTokens >= view.reservedReportOutputTokens);
+    assert.equal(view.reservedReportTokens, 0);
     assert.ok(estimateReportPromptTokens({ query: state.query, findings: state.findings }) > 0);
   });
 
@@ -200,18 +200,18 @@ describe('exploratory budget snapshot and sufficiency', () => {
     assert.deepEqual(keepGoing.sourceIds, ['https://github.com/ollama/ollama']);
   });
 
-  it('keeps a dynamic report reserve inside the hard cap', () => {
+  it('lets exploration use the full token ceiling and still claim a report', () => {
     const budget = new BudgetManager({
       research: { budget: { maxLlmTokens: 3000, reserveReportTokens: 900 } },
     });
     budget.usage.llmTokens = 1500;
-    const reserved = budget.updateReportReserve(700);
-    assert.ok(reserved >= 900);
-    assert.ok(reserved <= 1500);
+    assert.equal(budget.updateReportReserve(700), 0);
     assert.equal(budget.canClaim('llmTokens', 2000), false);
+    assert.equal(budget.canClaim('llmTokens', 1400), true);
     assert.equal(budget.canClaim('llmTokens', 100, { report: true }), true);
     const view = buildBudgetView({ budget, targetLlmTokens: 0 });
-    assert.ok(view.reservedReportTokens > 0);
+    assert.equal(view.reservedReportTokens, 0);
+    assert.equal(view.hardCapReached, false);
     assert.equal(view.hardCapLlmTokens, 3000);
   });
 

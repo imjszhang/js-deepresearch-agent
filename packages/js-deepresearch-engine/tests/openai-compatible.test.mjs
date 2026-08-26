@@ -7,6 +7,22 @@ const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });
 
 describe('OpenAI-compatible provider', () => {
+  it('omits max_tokens when the caller passes 0', async () => {
+    let requestBody;
+    globalThis.fetch = async (_url, options) => {
+      requestBody = JSON.parse(options.body);
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { role: 'assistant', content: 'long report' }, finish_reason: 'stop' }],
+        }),
+      };
+    };
+    const provider = new OpenAICompatibleProvider({ model: 'qwen', apiKey: 'test', baseUrl: 'https://llm.test/v1', maxTokens: 4000 });
+    await provider.completeWithMetadata({ messages: [{ role: 'user', content: 'Write' }], maxTokens: 0 });
+    assert.equal('max_tokens' in requestBody, false);
+  });
+
   it('disables hidden reasoning for Qwen so bounded calls return final content', async () => {
     let requestBody;
     globalThis.fetch = async (_url, options) => {

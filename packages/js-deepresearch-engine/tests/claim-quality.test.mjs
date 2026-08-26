@@ -78,6 +78,22 @@ Ollama is an independent company developing local LLM tools [1.2]. It also offer
     assert.match(atoms[0].text, /\[1\.1\]/);
   });
 
+  it('splits Chinese sentences even when there is no space after the period', () => {
+    const claims = extractQualityClaims(`# 摘要
+截至 2026 年 8 月，llama.cpp、MLX 和 Ollama 在 Apple Silicon 上的定位呈现分层互补态势。llama.cpp 定位为跨平台、无依赖的底层 C/C++ 推理引擎，强调极致性能与硬件兼容性 [1.2]。MLX 是 Apple 官方推出的原生数组框架，专为 Apple Silicon 统一内存架构优化 [6.2]。Ollama 定位为面向开发者的易用封装层 [3.2]。
+`);
+    assert.ok(claims.length >= 4);
+    assert.ok(claims.every((claim) => claim.kind === 'key_claim'));
+    assert.ok(claims.every((claim) => claim.parentClaimText));
+    const metrics = calculateQualityMetrics(claims.map((claim) => ({
+      ...claim,
+      evidence: [],
+      evaluation: buildClaimEvaluation({ ...claim, evidence: [] }),
+    })));
+    assert.equal(metrics.keyClaimCount, claims.length);
+    assert.ok(metrics.keyClaimCount > 1);
+  });
+
   it('does not split versions, decimals, URLs, citations, or abbreviations', () => {
     const text = 'The model reports 195.6 tokens/sec on v1.2.3 at https://example.com/docs?v=1.2 and cites [1.2] in the README, e.g. the official guide.';
     const atoms = splitAtomicClaimTexts(text);

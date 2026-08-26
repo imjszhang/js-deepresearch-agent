@@ -96,7 +96,7 @@ function splitOnDelimiters(text, pattern) {
 }
 
 function splitSentences(text = '') {
-  return splitOnDelimiters(text, /(?<=[.?!。！？])\s+/);
+  return splitOnDelimiters(text, /(?<=[。！？])\s*|(?<=[.?!])(?=\s+)/);
 }
 
 function splitOnSemicolons(text = '') {

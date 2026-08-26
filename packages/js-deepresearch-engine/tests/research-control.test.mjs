@@ -14,14 +14,23 @@ describe('research control infrastructure', () => {
     assert.equal(events.filter((event) => event.stage === 'budget_exhausted' && event.kind === 'searchRequests').length, 1);
   });
 
-  it('reserves report prompt and output tokens against the hard LLM cap', () => {
-    const manager = new BudgetManager({ research: { budget: { maxLlmTokens: 4000, reserveReportTokens: 1000 } } });
+  it('does not reserve report tokens against the exploration cap', () => {
+    const manager = new BudgetManager({
+      research: {
+        budget: { maxLlmTokens: 4000, reserveReportTokens: 1000 },
+        report: { maxOutputTokens: 0 },
+      },
+    });
     manager.updateReportReserve(500);
-    assert.equal(manager.canClaim('llmTokens', 2600), false);
-    assert.equal(manager.canClaim('llmTokens', 2000), true);
-    manager.claim('llmTokens', 2000);
+    assert.equal(manager.canClaim('llmTokens', 2600), true);
+    assert.equal(manager.canClaim('llmTokens', 4000), true);
+    manager.claim('llmTokens', 3900);
+    assert.equal(manager.canClaim('llmTokens', 200), false);
     assert.equal(manager.canClaim('llmTokens', 800, { report: true }), true);
-    assert.ok(manager.snapshot().reservedReportTotalTokens >= 1000);
+    manager.claim('llmTokens', 800, { report: true, purpose: 'report' });
+    assert.equal(manager.snapshot().usage.reportTokens, 800);
+    assert.equal(manager.snapshot().usage.explorationTokens, 3900);
+    assert.equal(manager.snapshot().reservedReportTotalTokens, 0);
   });
 
   it('deduplicates normalized and overlapping queries', async () => {

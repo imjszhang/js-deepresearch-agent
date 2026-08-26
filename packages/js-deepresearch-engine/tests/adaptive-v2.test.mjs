@@ -760,8 +760,10 @@ describe('exploratory agent loop', () => {
     });
     assert.equal(result.quality.stopReason, 'max_budget_exhausted');
     assert.notEqual(result.quality.stopReason, 'max_steps');
-    assert.ok(result.quality.budget.reservedReportTotalTokens >= result.quality.budget.maxReportOutputTokens);
+    assert.equal(result.quality.budget.reservedReportTotalTokens, 0);
     assert.ok(result.report);
+    assert.match(result.report, /## Evidence/);
+    assert.match(result.report, /## Sources/);
     assert.ok(events.every((message) => !/undefined\/undefined/.test(message)));
     assert.ok(!events.some((message) => /Research stopped: max_steps/.test(message)));
   });

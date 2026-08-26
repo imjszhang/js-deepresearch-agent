@@ -184,6 +184,15 @@ describe('CLI utilities', () => {
     assert.equal(settings.research.exploratory.targetLlmTokens, 18000);
   });
 
+  it('maps deprecated reserve-report-tokens onto report.maxOutputTokens', () => {
+    const settings = applyResearchFlags({ research: {} }, {
+      'reserve-report-tokens': '2400',
+      'max-total-llm-tokens': '90000',
+    });
+    assert.equal(settings.research.report.maxOutputTokens, 2400);
+    assert.equal(settings.research.budget.maxTotalLlmTokens, 90000);
+  });
+
   it('writes exploratory count caps from generic flags only for exploratory strategy', () => {
     const exploratory = applyResearchFlags({
       research: { budget: { maxSearchRequests: 8, maxSourceReads: 8 }, exploratory: {} },

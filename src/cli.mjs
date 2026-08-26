@@ -380,7 +380,9 @@ js-deepresearch-agent
 Commands:
   research "query" [--search js-eyes|searxng] [--search-skills skillA,skillB] [--search-server-url ws://localhost:18080] [--strategy focused|quick|exploratory] [--iterations 1] [--questions 2] [--concurrency 1] [--max-search-requests 0] [--max-source-reads 0] [--focused-iteration-control true|false] [--focused-query-memory true|false] [--focused-evidence-passages true|false] [--focused-claim-alignment true|false] [--focused-pre-report-gate true|false] [--work-dir work_dir] [--output report.md] [--json] [--no-save] [--no-work-dir]
     Strategies: focused (default, 专题调研) | quick (快速调研, default 1 iteration) | exploratory (探索性调研)
-    Budgets (focused/quick counts): --max-llm-tokens 0 --max-search-requests 0 --max-source-reads 0 --max-rerank-requests 0 --max-rerank-tokens 0 --reserve-report-tokens 1200
+    Budgets (focused/quick counts): --max-llm-tokens 0 --max-search-requests 0 --max-source-reads 0 --max-rerank-requests 0 --max-rerank-tokens 0
+    Report: --report-max-output-tokens 0 (0 = no app cap; --reserve-report-tokens is a deprecated alias)
+    Optional total fuse: --max-total-llm-tokens 0 (exploration + report; default unlimited)
     Optional rerank: --rerank-provider rules|disabled|jina|http|local --rerank-model <name> --rerank-base-url <url> --rerank-api-key <key> --rerank-timeout-ms 30000
     Focused: --focused-fetch-mode summary|disabled|full|extract --focused-fetch-backend auto|http|js-eyes --focused-max-urls 12 --focused-cluster-results true|false --focused-max-per-hostname 2
     Exploratory: --exploratory-max-steps 0 --exploratory-max-reads-per-step 4 --exploratory-min-llm-tokens 20000 --exploratory-max-llm-tokens 80000 --exploratory-max-search-requests 0 --exploratory-max-source-reads 0

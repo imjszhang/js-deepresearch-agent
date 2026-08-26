@@ -2,7 +2,9 @@ import { createLlmProvider } from '../llm/provider-factory.mjs';
 import { createSearchEngine } from '../search/search-factory.mjs';
 import { createHttpFetch } from '../http/create-http-fetch.mjs';
 import { createProgressEmitter } from './progress-events.mjs';
-import { buildReport } from './report-builder.mjs';
+import { buildReport, validateReportOutput } from './report-builder.mjs';
+import { assembleReport, reviseUnsupportedKeyClaims } from './report-assembler.mjs';
+import { resolveReportSettings } from './report-settings.mjs';
 import { runStrategy } from './strategies.mjs';
 import { BudgetManager, BudgetExceededError, wrapProvidersWithBudget } from './budget-manager.mjs';
 import { QueryMemory } from './query-memory.mjs';
@@ -87,11 +89,13 @@ export class ResearchRunner {
       throw error;
     }
     emit({ stage: 'synthesizing_report' });
-    let report = await buildReport({
+    const reportSettings = resolveReportSettings(settings);
+    const narrative = await buildReport({
       llm, query, findings, signal, purpose: 'report', limitations: reportLimitations, strategy,
-      maxTokens: budget.limits.llmTokens > 0 ? (budget.maxReportOutputTokens || budget.reserveReportTokens) : undefined,
-      minChars: settings?.research?.reportValidation?.minChars,
-      maxAttempts: settings?.research?.reportValidation?.maxAttempts,
+      maxTokens: reportSettings.maxOutputTokens,
+      minChars: reportSettings.minChars,
+      maxAttempts: reportSettings.maxAttempts,
+      mode: 'narrative',
       onAttempt: (event) => {
         trace.push({
           step: trace.length + 1,
@@ -103,11 +107,31 @@ export class ResearchRunner {
         if (event.status === 'invalid') emit({ stage: 'report_retrying', ...event });
       },
     });
+    let report = assembleReport({
+      narrative,
+      findings,
+      limitations: reportLimitations,
+      query,
+    });
+    const assembledCheck = validateReportOutput(report, {
+      minChars: reportSettings.minChars,
+      mode: 'full',
+      findings,
+    });
+    if (!assembledCheck.ok && findings.length > 0) {
+      trace.push({
+        step: trace.length + 1,
+        action: 'report_assemble_invalid',
+        reasonCode: assembledCheck.flags?.[0] || 'report_incomplete',
+        flags: assembledCheck.flags,
+        createdAt: new Date().toISOString(),
+      });
+    }
     const evidenceOptions = strategy === 'exploratory'
       ? { ...focused.evidencePassages, enabled: true, claimAlignment: true }
       : focused.evidencePassages;
     if (evidenceOptions.enabled) emit({ stage: 'extracting_passages' });
-    const evidence = buildEvidenceArtifacts({
+    let evidence = buildEvidenceArtifacts({
       query,
       findings,
       report,
@@ -118,16 +142,31 @@ export class ResearchRunner {
     if (evidenceOptions.claimAlignment) {
       emit({ stage: 'evaluating_report' });
       trace.push({ step: trace.length + 1, action: 'evaluate_report', reasonCode: 'claim_evidence_alignment', createdAt: new Date().toISOString() });
+      const revision = reviseUnsupportedKeyClaims(report, evidence.claims);
+      if (revision.moved.length) {
+        report = assembleReport({
+          narrative: revision.report,
+          findings,
+          limitations: [
+            ...reportLimitations,
+            ...revision.moved.map((text) => `Insufficient direct evidence for: ${text}`),
+          ],
+          query,
+        });
+        evidence = buildEvidenceArtifacts({
+          query,
+          findings,
+          report,
+          options: { ...evidenceOptions, strategy },
+        });
+        findings = evidence.findings;
+      }
     }
     const qualityMetrics = calculateQualityMetrics(evidence.claims);
     const claimGate = qualityGateFromClaims(evidence.claims);
-    const unverifiedKeyClaims = evidence.claims.filter((claim) => claim.kind === 'key_claim' && claim.evaluation?.verdict !== 'supported');
-    for (const claim of unverifiedKeyClaims) {
-      report = report.replace(claim.text, `Unverified: ${claim.text}`);
-    }
-    if (unverifiedKeyClaims.length && !/## Evidence limitations/i.test(report)) {
-      report += `\n\n## Evidence limitations\n\n${unverifiedKeyClaims.map((claim) => `- Insufficient direct evidence for: ${claim.text}`).join('\n')}`;
-    }
+    const unverifiedKeyClaims = evidence.claims.filter((claim) => (
+      claim.kind === 'key_claim' && ['unsupported', 'unverifiable'].includes(claim.evaluation?.verdict)
+    ));
     const noClaims = evidenceOptions.claimAlignment && evidence.claims.length === 0;
     const finalGate = preReport.gate === 'fail' || claimGate === 'fail' || noClaims
       ? 'fail'

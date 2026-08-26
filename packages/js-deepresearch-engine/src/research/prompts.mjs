@@ -61,13 +61,15 @@ export function reportPrompt({ query, findings, limitations = [], strategy = 'fo
     {
       role: 'system',
       content: [
-        'You write concise deep research reports in Markdown.',
+        'You write the narrative sections of a deep research report in Markdown.',
         'Use citations like [1.1] or [1.2, 2.3] when referencing sources.',
-        'Write one verifiable fact per sentence or bullet. Do not pack independent facts into one sentence.',
-        'Include: Summary, Key Findings, Evidence, Caveats, Sources.',
-        'Only use facts supported by the Evidence blocks.',
+        'Write one verifiable fact per sentence or bullet. Put a space after every period, including after Chinese 。',
+        'Include only: a title, Summary, Key Findings, and optional brief Caveats.',
+        'Do not write Evidence or Sources sections; the runtime appends those from collected findings.',
+        'Only use facts supported by the collected evidence blocks.',
         snippetPolicy,
         'If evidence is insufficient, say so in Caveats instead of inventing details.',
+        'Finish every sentence. Do not stop mid-clause or mid-citation.',
       ].join(' '),
     },
     {
@@ -87,7 +89,7 @@ export function reportRetryPrompt({ query, findings, limitations = [], strategy 
     ...messages,
     {
       role: 'user',
-      content: 'The previous response contained no usable final report. Return the final Markdown report now. Do not return analysis, reasoning, JSON, or an empty response.',
+      content: 'The previous narrative was unusable, truncated, or incomplete. Return a complete Markdown narrative now with a title, Summary, and Key Findings. Finish every sentence. Do not write Evidence or Sources sections. Do not return analysis, reasoning, JSON, or an empty response.',
     },
   ];
 }
