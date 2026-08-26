@@ -22,23 +22,46 @@ function formatSection(part) {
   return `${'#'.repeat(Math.max(1, part.level))} ${part.heading}\n${part.lines.join('\n')}`.trim();
 }
 
+export const SOURCE_DUMP_LINE = /\[[0-9]+(?:\.[0-9]+)?\][^\n]*\((?:source body|snippet only|source summary)\)\s*:/i;
+
+export function containsSourceDump(text = '') {
+  return SOURCE_DUMP_LINE.test(String(text));
+}
+
+function normalizeComparable(value = '') {
+  return String(value).normalize('NFKC').trim().replace(/\s+/g, ' ');
+}
+
+export function looksLikeDumpSection(part = {}, query = '') {
+  const heading = normalizeComparable(part.heading || '');
+  const body = Array.isArray(part.lines) ? part.lines.join('\n') : String(part.body || '');
+  if (containsSourceDump(body)) return true;
+  const normalizedQuery = normalizeComparable(query);
+  if (normalizedQuery && heading && heading === normalizedQuery) return true;
+  return heading.length > 80 && containsSourceDump(body);
+}
+
 function isGeneratedHeading(heading) {
   const kind = classifyClaimSection(heading);
-  return kind === 'source_entry' || ['evidence', '证据', 'analysis', '分析'].includes(String(heading || '').normalize('NFKC').trim().toLowerCase());
+  return kind === 'source_entry' || kind === 'evidence_entry';
 }
 
 function isCaveatHeading(heading) {
   return classifyClaimSection(heading) === 'caveat';
 }
 
-export function keepNarrativeSections(narrative) {
+export function keepNarrativeSections(narrative, { query = '' } = {}) {
   const kept = [];
   for (const part of splitMarkdownSections(narrative)) {
     if (!part.heading) {
-      if (part.lines.some((line) => line.trim())) kept.push(formatSection(part));
+      if (part.lines.some((line) => line.trim()) && !containsSourceDump(part.lines.join('\n'))) {
+        kept.push(formatSection(part));
+      }
       continue;
     }
-    if (part.level === 1 || (!isGeneratedHeading(part.heading) && !isCaveatHeading(part.heading))) {
+    if (isGeneratedHeading(part.heading) || isCaveatHeading(part.heading)) continue;
+    if (looksLikeDumpSection(part, query)) continue;
+    if (part.level === 1 || !isGeneratedHeading(part.heading)) {
       kept.push(formatSection(part));
     }
   }
@@ -95,7 +118,7 @@ export function assembleReport({
   limitations = [],
   query = '',
 } = {}) {
-  const kept = keepNarrativeSections(narrative) || `# Research Report\n\n${query}`.trim();
+  const kept = keepNarrativeSections(narrative, { query }) || `# Research Report\n\n${query}`.trim();
   const caveats = renderCaveatsSection(limitations, extractNarrativeCaveats(narrative));
   return [kept, renderEvidenceSection(findings), caveats, renderSourcesSection(findings)]
     .filter(Boolean)

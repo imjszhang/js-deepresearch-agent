@@ -2,7 +2,7 @@ import { createLlmProvider } from '../llm/provider-factory.mjs';
 import { createSearchEngine } from '../search/search-factory.mjs';
 import { createHttpFetch } from '../http/create-http-fetch.mjs';
 import { createProgressEmitter } from './progress-events.mjs';
-import { buildReport, validateReportOutput } from './report-builder.mjs';
+import { buildReport, ReportGenerationError, validateReportOutput } from './report-builder.mjs';
 import { assembleReport, reviseUnsupportedKeyClaims } from './report-assembler.mjs';
 import { resolveReportSettings } from './report-settings.mjs';
 import { runStrategy } from './strategies.mjs';
@@ -13,6 +13,7 @@ import { evaluatePreReport } from './quality-gates.mjs';
 import { resolveFocusedSettings } from './focused-settings.mjs';
 import { createResearchProviders } from './research-providers.mjs';
 import { calculateQualityMetrics, qualityGateFromClaims } from './claim-quality.mjs';
+import { applyClaimEntailment } from './claim-entailment.mjs';
 
 export class ResearchRunner {
   async run({ query, settings, signal, onProgress = () => {}, llm: providedLlm, search: providedSearch }) {
@@ -119,12 +120,11 @@ export class ResearchRunner {
       findings,
     });
     if (!assembledCheck.ok && findings.length > 0) {
-      trace.push({
-        step: trace.length + 1,
-        action: 'report_assemble_invalid',
-        reasonCode: assembledCheck.flags?.[0] || 'report_incomplete',
+      throw new ReportGenerationError({
+        attempts: reportSettings.maxAttempts,
+        minChars: reportSettings.minChars,
+        outputChars: assembledCheck.outputChars,
         flags: assembledCheck.flags,
-        createdAt: new Date().toISOString(),
       });
     }
     const evidenceOptions = strategy === 'exploratory'
@@ -142,6 +142,14 @@ export class ResearchRunner {
     if (evidenceOptions.claimAlignment) {
       emit({ stage: 'evaluating_report' });
       trace.push({ step: trace.length + 1, action: 'evaluate_report', reasonCode: 'claim_evidence_alignment', createdAt: new Date().toISOString() });
+      const entailmentMode = settings?.research?.quality?.entailment || 'rules_then_llm';
+      const judgeClaims = async (current) => applyClaimEntailment(current.claims, {
+        llm,
+        passages: current.passages,
+        signal,
+        mode: entailmentMode,
+      });
+      evidence = { ...evidence, claims: await judgeClaims(evidence) };
       const revision = reviseUnsupportedKeyClaims(report, evidence.claims);
       if (revision.moved.length) {
         report = assembleReport({
@@ -160,6 +168,7 @@ export class ResearchRunner {
           options: { ...evidenceOptions, strategy },
         });
         findings = evidence.findings;
+        evidence = { ...evidence, claims: await judgeClaims(evidence) };
       }
     }
     const qualityMetrics = calculateQualityMetrics(evidence.claims);
@@ -167,10 +176,11 @@ export class ResearchRunner {
     const unverifiedKeyClaims = evidence.claims.filter((claim) => (
       claim.kind === 'key_claim' && ['unsupported', 'unverifiable'].includes(claim.evaluation?.verdict)
     ));
-    const noClaims = evidenceOptions.claimAlignment && evidence.claims.length === 0;
-    const finalGate = preReport.gate === 'fail' || claimGate === 'fail' || noClaims
+    const noClaims = evidenceOptions.claimAlignment && qualityMetrics.keyClaimCount === 0;
+    const emptyExtraction = evidenceOptions.claimAlignment && qualityMetrics.claimCount === 0;
+    const finalGate = preReport.gate === 'fail' || claimGate === 'fail' || emptyExtraction
       ? 'fail'
-      : (preReport.gate === 'pass_with_warnings' || claimGate === 'pass_with_warnings' ? 'pass_with_warnings' : 'pass');
+      : (preReport.gate === 'pass_with_warnings' || claimGate === 'pass_with_warnings' || noClaims ? 'pass_with_warnings' : 'pass');
     const quality = {
       schemaVersion: 3,
       stopReason: budget.controllerStopReason || null,

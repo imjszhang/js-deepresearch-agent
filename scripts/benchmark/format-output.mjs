@@ -23,6 +23,7 @@ export function formatMarkdownSummary(result) {
     '',
     `- Claims: ${metrics.evaluatedClaimCount} evaluated (${metrics.keyClaimCount} key, ${metrics.supportingClaimCount} supporting)`,
     `- Supported: ${metrics.claims.supported} (${formatPercent(metrics.rates.supportedRate)})`,
+    `- Supported or partial: ${formatPercent(metrics.rates.supportedOrPartialRate)}`,
     `- Partial: ${metrics.claims.partiallySupported} (${formatPercent(metrics.rates.partiallySupportedRate)})`,
     `- Unsupported: ${metrics.claims.unsupported} (${formatPercent(metrics.rates.unsupportedRate)})`,
     `- Unverifiable: ${metrics.claims.unverifiable} (${formatPercent(metrics.rates.unverifiableRate)})`,

@@ -45,14 +45,14 @@ export function formatStrategyCompareMarkdown(comparison) {
     '',
     '## Quality Metrics',
     '',
-    '| Strategy | Supported | Partial | Unsupported | Unverifiable | Evidence cov. | Direct ev. | Key claim sup. |',
-    '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |',
+    '| Strategy | Supported | At least partial | Partial | Unsupported | Unverifiable | Evidence cov. | Direct ev. | Key claim sup. |',
+    '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |',
   );
 
   for (const run of comparison.runs) {
     const { metrics } = run.benchmark;
     lines.push(
-      `| ${run.strategyLabel} | ${formatPercent(metrics.rates.supportedRate)} | ${formatPercent(metrics.rates.partiallySupportedRate)} | ${formatPercent(metrics.rates.unsupportedRate)} | ${formatPercent(metrics.rates.unverifiableRate)} | ${formatPercent(metrics.rates.evidenceCoverageRate)} | ${formatPercent(metrics.rates.directEvidenceRate)} | ${formatPercent(metrics.rates.keyClaimSupportedRate)} |`,
+      `| ${run.strategyLabel} | ${formatPercent(metrics.rates.supportedRate)} | ${formatPercent(metrics.rates.supportedOrPartialRate)} | ${formatPercent(metrics.rates.partiallySupportedRate)} | ${formatPercent(metrics.rates.unsupportedRate)} | ${formatPercent(metrics.rates.unverifiableRate)} | ${formatPercent(metrics.rates.evidenceCoverageRate)} | ${formatPercent(metrics.rates.directEvidenceRate)} | ${formatPercent(metrics.rates.keyClaimSupportedRate)} |`,
     );
   }
 

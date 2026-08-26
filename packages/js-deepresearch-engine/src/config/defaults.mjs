@@ -36,6 +36,9 @@ export const defaultSettings = Object.freeze({
       maxOutputTokens: 0,
       maxAttempts: 2,
     },
+    quality: {
+      entailment: 'rules_then_llm',
+    },
     budget: {
       maxLlmTokens: 0,
       maxTotalLlmTokens: 0,
@@ -154,6 +157,10 @@ export function mergeSettings(overrides = {}) {
       report: {
         ...defaultSettings.research.report,
         ...(researchOverrides.report || {}),
+      },
+      quality: {
+        ...defaultSettings.research.quality,
+        ...(researchOverrides.quality || {}),
       },
       providers: {
         ...defaultSettings.research.providers,

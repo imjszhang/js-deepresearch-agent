@@ -113,13 +113,13 @@ export async function buildExtractComparison({
     '',
     '## Quality Metrics',
     '',
-    '| Strategy | Supported | Partial | Unverifiable | Evidence cov. | Key claim sup. |',
-    '| --- | ---: | ---: | ---: | ---: | ---: |',
+    '| Strategy | Supported | At least partial | Partial | Unverifiable | Evidence cov. | Key claim sup. |',
+    '| --- | ---: | ---: | ---: | ---: | ---: | ---: |',
   );
   for (const run of runs) {
     const { metrics } = run.benchmark;
     lines.push(
-      `| ${run.strategyLabel} | ${formatPercent(metrics.rates.supportedRate)} | ${formatPercent(metrics.rates.partiallySupportedRate)} | ${formatPercent(metrics.rates.unverifiableRate)} | ${formatPercent(metrics.rates.evidenceCoverageRate)} | ${formatPercent(metrics.rates.keyClaimSupportedRate)} |`,
+      `| ${run.strategyLabel} | ${formatPercent(metrics.rates.supportedRate)} | ${formatPercent(metrics.rates.supportedOrPartialRate)} | ${formatPercent(metrics.rates.partiallySupportedRate)} | ${formatPercent(metrics.rates.unverifiableRate)} | ${formatPercent(metrics.rates.evidenceCoverageRate)} | ${formatPercent(metrics.rates.keyClaimSupportedRate)} |`,
     );
   }
 

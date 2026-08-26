@@ -56,6 +56,8 @@ function renderQuality(quality) {
       <div class="grid">
         <p>Evaluated claims: <strong>${metrics.evaluatedClaimCount ?? 0}</strong></p>
         <p>Key claim support: <strong>${formatRate(metrics.rates?.keyClaimSupportedRate)}</strong></p>
+        <p>Supported: <strong>${formatRate(metrics.rates?.supportedRate)}</strong></p>
+        <p>Supported or partial: <strong>${formatRate(metrics.rates?.supportedOrPartialRate)}</strong></p>
         <p>Evidence coverage: <strong>${formatRate(metrics.rates?.evidenceCoverageRate)}</strong></p>
         <p>Direct evidence: <strong>${formatRate(metrics.rates?.directEvidenceRate)}</strong></p>
       </div>

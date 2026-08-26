@@ -122,7 +122,7 @@ export async function runBenchmark({
     let llmResult = null;
     let effectiveEvaluation = ruleEvaluation;
 
-    if (llmEnabled && llm && ['key_claim', 'supporting_claim'].includes(claim.kind)) {
+    if (llmEnabled && llm && claim.kind === 'key_claim') {
       llmResult = await judgeClaimWithLlm(claim, rule, llm);
       if (!llmResult.skipped) {
         llmInvoked = true;
@@ -157,7 +157,7 @@ export async function runBenchmark({
   result.metrics.passageCount = artifacts.passages?.length || 0;
   result.metrics.averageSourcesPerClaim = result.metrics.evaluatedClaimCount
     ? Number((claims
-      .filter((claim) => ['key_claim', 'supporting_claim'].includes(claim.kind))
+      .filter((claim) => claim.kind === 'key_claim')
       .reduce((sum, claim) => sum + new Set((claim.evidence || []).map((entry) => entry.sourceId)).size, 0)
       / result.metrics.evaluatedClaimCount).toFixed(4))
     : null;

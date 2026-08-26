@@ -13,7 +13,7 @@ export class BudgetExceededError extends Error {
 
 function purposeBucket(purpose, report = false) {
   if (report || purpose === 'report') return 'reportTokens';
-  if (purpose === 'answer_evaluation') return 'evaluationTokens';
+  if (purpose === 'answer_evaluation' || purpose === 'claim_entailment') return 'evaluationTokens';
   return 'explorationTokens';
 }
 

@@ -1,6 +1,8 @@
 import { reportPrompt, reportRetryPrompt } from './prompts.mjs';
 import { parseCitations } from './citations.mjs';
-import { classifyClaimSection } from './claim-quality.mjs';
+import { classifyClaimSection, extractQualityClaims } from './claim-quality.mjs';
+import { containsSourceDump } from './report-assembler.mjs';
+import { parseNarrativeResponse } from './report-narrative.mjs';
 
 export class ReportGenerationError extends Error {
   constructor({ attempts, minChars, outputChars, diagnostic = null, flags = [] }) {
@@ -19,11 +21,13 @@ export class ReportGenerationError extends Error {
 }
 
 const REQUIRED_FULL_GROUPS = {
-  narrative: ['summary', 'key_claim'],
-  evidence: ['supporting_claim'],
+  narrative: ['key_claim'],
+  evidence: ['evidence_entry'],
   caveats: ['caveat'],
   sources: ['source_entry'],
 };
+
+const GENERATED_SECTION_KINDS = new Set(['evidence_entry', 'source_entry', 'caveat']);
 
 function headingsOf(report) {
   return String(report || '')
@@ -55,6 +59,53 @@ export function looksTruncated(report) {
   return last.length > 24;
 }
 
+function textBeforeGeneratedSections(report = '') {
+  const kept = [];
+  for (const line of String(report || '').split(/\r?\n/)) {
+    const heading = line.match(/^#{1,6}\s+(.+)$/);
+    if (heading && GENERATED_SECTION_KINDS.has(classifyClaimSection(heading[1].trim()))) break;
+    kept.push(line);
+  }
+  return kept.join('\n');
+}
+
+const SUMMARY_HEADINGS = new Set(['summary', 'executive summary', '摘要', '总结', '概述']);
+
+function isSummaryHeading(title = '') {
+  const normalized = String(title).normalize('NFKC').trim().toLowerCase().replace(/[：:]$/, '');
+  return SUMMARY_HEADINGS.has(normalized) || [...SUMMARY_HEADINGS].some((alias) => (
+    normalized.startsWith(`${alias}:`) || normalized.startsWith(`${alias}：`)
+  ));
+}
+
+function summarySectionBody(report) {
+  const lines = String(report || '').split(/\r?\n/);
+  const body = [];
+  let capture = false;
+  let captureLevel = 0;
+  for (const line of lines) {
+    const heading = line.match(/^(#{1,6})\s+(.+)$/);
+    if (heading) {
+      const level = heading[1].length;
+      if (isSummaryHeading(heading[2].trim())) {
+        capture = true;
+        captureLevel = level;
+        continue;
+      }
+      if (capture && level <= captureLevel) break;
+    }
+    if (capture) body.push(line);
+  }
+  return body.join('\n');
+}
+
+export function isPlaceholderSummary(text = '') {
+  const stripped = String(text)
+    .replace(/[#*_`[\]()>]/g, '')
+    .replace(/[；;。.!?！？,，、\s…\-–—:：]/g, '');
+  return stripped.length < 12;
+}
+
 function unresolvedCitations(report, findings = []) {
   if (!Array.isArray(findings) || findings.length === 0) return [];
   const keys = parseCitations(report);
@@ -76,6 +127,14 @@ export function validateReportOutput(report, {
   else if (text.length < minChars) flags.push('report_too_short');
   if (text && !/^#{1,6}\s+\S+/m.test(text)) flags.push('report_missing_heading');
   if (text && mode === 'narrative' && looksTruncated(text)) flags.push('report_truncated');
+  const narrativeText = mode === 'full' ? textBeforeGeneratedSections(text) : text;
+  if (text && containsSourceDump(narrativeText)) flags.push('report_contains_source_dump');
+  if (text && isPlaceholderSummary(summarySectionBody(narrativeText))) {
+    flags.push('report_empty_summary');
+  }
+  if (text && !extractQualityClaims(narrativeText).some((claim) => claim.kind === 'key_claim')) {
+    flags.push('report_missing_key_claims');
+  }
   if (mode === 'full') {
     if (!hasSectionKind(text, REQUIRED_FULL_GROUPS.narrative)) flags.push('report_missing_summary_or_findings');
     if (!/^#{1,6}\s+(Evidence|证据)\b/im.test(text)) flags.push('report_missing_evidence');
@@ -120,7 +179,16 @@ export async function buildReport({
       purpose,
       ...(maxTokens > 0 ? { maxTokens } : { maxTokens: 0 }),
     });
-    validation = validateReportOutput(report, { minChars, mode, findings });
+    const parsed = parseNarrativeResponse(report);
+    const candidate = parsed.ok ? parsed.markdown : String(report || '');
+    validation = validateReportOutput(candidate, { minChars, mode, findings });
+    if (parsed.ok === false && parsed.flags?.includes('narrative_has_generated_sections')) {
+      validation = {
+        ...validation,
+        ok: false,
+        flags: [...new Set([...(validation.flags || []), ...parsed.flags])],
+      };
+    }
     const diagnostic = llm.getLastCallMetadata?.() || null;
     onAttempt({
       status: validation.ok ? 'completed' : 'invalid',

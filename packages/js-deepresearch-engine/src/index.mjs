@@ -61,9 +61,26 @@ export {
   resolveCitations,
   resolveCitedSourceIds,
 } from './research/citations.mjs';
-export { ReportGenerationError, validateReportOutput, looksTruncated } from './research/report-builder.mjs';
-export { assembleReport, reviseUnsupportedKeyClaims } from './research/report-assembler.mjs';
+export { ReportGenerationError, validateReportOutput, looksTruncated, isPlaceholderSummary } from './research/report-builder.mjs';
+export {
+  assembleReport,
+  reviseUnsupportedKeyClaims,
+  keepNarrativeSections,
+  containsSourceDump,
+} from './research/report-assembler.mjs';
 export { resolveReportSettings } from './research/report-settings.mjs';
+export {
+  extractJsonObject,
+  validateNarrativeObject,
+  renderNarrativeMarkdown,
+  parseNarrativeResponse,
+} from './research/report-narrative.mjs';
+export {
+  shouldJudgeClaim,
+  applyEntailmentVerdict,
+  applyClaimEntailment,
+  passageContainsQuote,
+} from './research/claim-entailment.mjs';
 export { createResearchProviders, deterministicResearchProviders } from './research/research-providers.mjs';
 export { DisabledRerankProvider, RulesRerankProvider } from './research/providers/rules-rerank-provider.mjs';
 export { JinaRerankProvider } from './research/providers/jina-rerank-provider.mjs';
@@ -77,6 +94,7 @@ export {
   CLAIM_VERDICTS,
   FACT_CLAIM_KINDS,
   classifyClaimSection,
+  resolveClaimKindFromHeadingStack,
   extractQualityClaims,
   splitAtomicClaimTexts,
   aggregateEvidenceVerdict,

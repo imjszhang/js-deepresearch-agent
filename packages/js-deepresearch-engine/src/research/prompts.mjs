@@ -41,6 +41,8 @@ function sourceEvidenceClassLabel(source) {
   return 'missing evidence';
 }
 
+const NARRATIVE_SCHEMA = '{"title":"...","summary":["... [1.1]"],"keyFindings":[{"heading":"...","claims":["... [1.2]"]}],"caveats":["..."]}';
+
 export function reportPrompt({ query, findings, limitations = [], strategy = 'focused' }) {
   const sourceBlock = findings.map((finding, index) => {
     const sources = finding.sources.map((source, sourceIndex) => (
@@ -61,14 +63,16 @@ export function reportPrompt({ query, findings, limitations = [], strategy = 'fo
     {
       role: 'system',
       content: [
-        'You write the narrative sections of a deep research report in Markdown.',
+        'You write only the narrative of a deep research report as JSON.',
+        `Return exactly this shape: ${NARRATIVE_SCHEMA}`,
         'Use citations like [1.1] or [1.2, 2.3] when referencing sources.',
-        'Write one verifiable fact per sentence or bullet. Put a space after every period, including after Chinese 。',
-        'Include only: a title, Summary, Key Findings, and optional brief Caveats.',
-        'Do not write Evidence or Sources sections; the runtime appends those from collected findings.',
+        'Write one verifiable fact per summary item or key-finding claim.',
+        'Do not include evidence, sources, Evidence, or Sources fields.',
+        'Do not copy Evidence class labels or source-body dumps into claims.',
+        'The runtime appends Evidence and Sources from collected findings.',
         'Only use facts supported by the collected evidence blocks.',
         snippetPolicy,
-        'If evidence is insufficient, say so in Caveats instead of inventing details.',
+        'If evidence is insufficient, say so in caveats instead of inventing details.',
         'Finish every sentence. Do not stop mid-clause or mid-citation.',
       ].join(' '),
     },
@@ -83,13 +87,35 @@ export function reportPrompt({ query, findings, limitations = [], strategy = 'fo
   ];
 }
 
+export function claimEntailmentPrompt({ claim, passages = [] }) {
+  const passageBlock = passages.map((passage, index) => (
+    `[P${index + 1}] ${passage.text}`
+  )).join('\n\n');
+  return [
+    {
+      role: 'system',
+      content: [
+        'Judge whether the cited source passages entail the claim.',
+        'Return JSON only: {"verdict":"supported|partially_supported|unsupported|unverifiable","quote":"..."}',
+        'supported: a passage clearly states the claim. partially_supported: a passage supports only part of it.',
+        'unsupported: a passage contradicts the claim. unverifiable: the passages do not decide it.',
+        'quote must be a verbatim excerpt copied from one passage. Do not invent quotes.',
+      ].join(' '),
+    },
+    {
+      role: 'user',
+      content: `Claim:\n${claim.text}\n\nCited passages:\n${passageBlock}`,
+    },
+  ];
+}
+
 export function reportRetryPrompt({ query, findings, limitations = [], strategy = 'focused' }) {
   const messages = reportPrompt({ query, findings, limitations, strategy });
   return [
     ...messages,
     {
       role: 'user',
-      content: 'The previous narrative was unusable, truncated, or incomplete. Return a complete Markdown narrative now with a title, Summary, and Key Findings. Finish every sentence. Do not write Evidence or Sources sections. Do not return analysis, reasoning, JSON, or an empty response.',
+      content: 'The previous narrative was unusable, truncated, incomplete, or not valid JSON. Return a complete Markdown narrative now with a title, Summary, and Key Findings. Finish every sentence. Do not write Evidence or Sources sections. Do not copy source-body dumps. Do not return analysis or an empty response.',
     },
   ];
 }

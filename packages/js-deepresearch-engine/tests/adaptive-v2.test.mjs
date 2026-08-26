@@ -5,7 +5,7 @@ import { ResearchState } from '../src/research/adaptive/research-state.mjs';
 import { fallbackAdaptiveAction } from '../src/research/adaptive/agent-policy.mjs';
 
 function report() {
-  return '# Research Report\n\n## Key Findings\n\nThe selected source provides evidence for the requested topic and preserves agent source choice. [1.1]\n\n## Evidence\n\nThe source was selected deliberately by the research agent and remains traceable in the findings. [1.1]';
+  return '# Research Report\n\n## Summary\n\nThe selected source provides enough evidence to answer the requested topic while keeping the agent source choice visible. [1.1]\n\n## Key Findings\n\nThe selected source provides evidence for the requested topic and preserves agent source choice. [1.1]';
 }
 
 function llmFor(decisions, { onEvaluation = () => report(), onDecompose = () => 'no json here' } = {}) {

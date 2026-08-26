@@ -35,7 +35,7 @@ export function aggregateBenchmark({
     evaluation: result.effectiveEvaluation,
   }));
   const quality = calculateQualityMetrics(evaluatedClaims);
-  const factResults = claimResults.filter((result) => ['key_claim', 'supporting_claim'].includes(result.claim.kind));
+  const factResults = claimResults.filter((result) => result.claim.kind === 'key_claim');
   const claimsWithCitations = factResults.filter((result) => result.rule.hasCitations).length;
   const totalCitations = factResults.reduce((sum, result) => sum + result.rule.citationKeys.length, 0);
   const unresolvedCitations = factResults.reduce((sum, result) => sum + result.rule.unresolvedCitations.length, 0);

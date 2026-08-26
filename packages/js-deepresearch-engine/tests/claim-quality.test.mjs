@@ -67,8 +67,8 @@ Ollama is an independent company developing local LLM tools [1.2]. It also offer
     })));
     assert.equal(metrics.evaluatedClaimCount, claims.length);
     assert.equal(metrics.claimExtractionVersion, CLAIM_EXTRACTION_VERSION);
-    assert.equal(CLAIM_EXTRACTION_VERSION, 3);
-    assert.equal(CLAIM_EVALUATION_VERSION, 3);
+    assert.equal(CLAIM_EXTRACTION_VERSION, 4);
+    assert.equal(CLAIM_EVALUATION_VERSION, 4);
   });
 
   it('keeps a trailing citation after a period with the preceding fact', () => {
@@ -102,6 +102,50 @@ Ollama is an independent company developing local LLM tools [1.2]. It also offer
     assert.match(atoms[0].text, /v1\.2\.3/);
     assert.match(atoms[0].text, /https:\/\/example.com\/docs\?v=1\.2/);
     assert.deepEqual(atoms[0].citationKeys, ['1.2']);
+  });
+
+  it('inherits Key Findings subsections and keeps Evidence out of the rate denominator', () => {
+    const claims = extractQualityClaims(`# Report
+
+## Summary
+llama.cpp is a portable C++ inference engine [1.2].
+
+## Key Findings
+
+### 官方定位与架构差异
+- llama.cpp treats Apple Silicon as a first-class Metal backend [1.2].
+- MLX targets unified memory on Apple Silicon [5.1].
+
+## Evidence
+
+### 截至2026年8月，llama.cpp、MLX 与 Ollama 在 Apple Silicon 上做本地 LLM 推理的官方定位、性能取舍与推荐用法是什么？优先引用官方文档和 GitHub。
+*   **[1.2] llama.cpp README** (source body): llama.cpp is a portable C++ inference engine. Apple Silicon is a first-class citizen.
+`);
+    assert.deepEqual(claims.filter((claim) => claim.kind === 'key_claim').map((claim) => claim.section), [
+      'Summary',
+      '官方定位与架构差异',
+      '官方定位与架构差异',
+    ]);
+    assert.ok(claims.some((claim) => claim.kind === 'evidence_entry'));
+    const metrics = calculateQualityMetrics(claims.map((claim) => ({
+      ...claim,
+      evidence: claim.kind === 'key_claim' ? evidence('supported') : [],
+      evaluation: buildClaimEvaluation({
+        ...claim,
+        evidence: claim.kind === 'key_claim' ? evidence('supported') : [],
+      }),
+    })));
+    assert.equal(metrics.evaluatedClaimCount, 3);
+    assert.equal(metrics.keyClaimCount, 3);
+    assert.ok(metrics.evidenceEntryCount >= 1);
+    assert.equal(metrics.rates.supportedRate, 1);
+    assert.equal(metrics.rates.supportedOrPartialRate, 1);
+  });
+
+  it('inherits trailing citations from the parent bullet after Chinese splits', () => {
+    const atoms = splitAtomicClaimTexts('MLX 使用统一内存。它减少数据复制并针对 Apple Silicon 优化 [5.1]。');
+    assert.equal(atoms.length, 2);
+    assert.ok(atoms.every((atom) => atom.citationKeys.includes('5.1')));
   });
 
   it('does not double-count a parent statement when child atoms exist', () => {
@@ -157,15 +201,18 @@ describe('quality metrics v3 verdict aggregation', () => {
     const metrics = calculateQualityMetrics(claims);
     const total = Object.values(metrics.claims).reduce((sum, count) => sum + count, 0);
     assert.equal(metrics.claimCount, 6);
-    assert.equal(metrics.evaluatedClaimCount, 5);
+    assert.equal(metrics.evaluatedClaimCount, 1);
+    assert.equal(metrics.supportingClaimCount, 4);
     assert.equal(total, metrics.evaluatedClaimCount);
     assert.deepEqual(metrics.claims, {
       supported: 1,
-      partiallySupported: 1,
-      unsupported: 1,
-      unverifiable: 1,
-      conflicting: 1,
+      partiallySupported: 0,
+      unsupported: 0,
+      unverifiable: 0,
+      conflicting: 0,
     });
+    assert.equal(metrics.rates.supportedRate, 1);
+    assert.equal(metrics.rates.supportedOrPartialRate, 1);
     assert.equal(metrics.caveatCount, 1);
   });
 
@@ -173,6 +220,7 @@ describe('quality metrics v3 verdict aggregation', () => {
     const metrics = calculateQualityMetrics([{ kind: 'caveat', evidence: [] }]);
     assert.equal(metrics.evaluatedClaimCount, 0);
     assert.equal(metrics.rates.supportedRate, null);
+    assert.equal(metrics.rates.supportedOrPartialRate, null);
     assert.equal(metrics.rates.keyClaimSupportedRate, null);
   });
 
@@ -184,6 +232,6 @@ describe('quality metrics v3 verdict aggregation', () => {
     assert.equal(qualityGateFromClaims([partial]), 'pass_with_warnings');
     assert.equal(qualityGateFromClaims([conflict]), 'fail');
     assert.equal(qualityGateFromClaims([]), 'fail');
-    assert.equal(qualityGateFromClaims([{ kind: 'caveat', evidence: [] }]), 'fail');
+    assert.equal(qualityGateFromClaims([{ kind: 'caveat', evidence: [] }]), 'pass_with_warnings');
   });
 });

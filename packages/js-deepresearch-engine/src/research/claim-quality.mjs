@@ -1,10 +1,10 @@
 import { parseCitations } from './citations.mjs';
 
-export const QUALITY_METRICS_VERSION = 2;
-export const CLAIM_EXTRACTION_VERSION = 3;
-export const CLAIM_EVALUATION_VERSION = 3;
+export const QUALITY_METRICS_VERSION = 3;
+export const CLAIM_EXTRACTION_VERSION = 4;
+export const CLAIM_EVALUATION_VERSION = 4;
 
-export const FACT_CLAIM_KINDS = new Set(['key_claim', 'supporting_claim']);
+export const FACT_CLAIM_KINDS = new Set(['key_claim']);
 export const CLAIM_VERDICTS = Object.freeze([
   'supported',
   'partially_supported',
@@ -18,7 +18,7 @@ const SECTION_ALIASES = Object.freeze({
     'summary', 'executive summary', 'key findings', 'findings', 'conclusion',
     '摘要', '总结', '概述', '关键发现', '核心发现', '主要发现', '核心结论', '结论',
   ],
-  supporting_claim: ['evidence', 'analysis', 'details', '证据', '分析', '详细信息'],
+  evidence_entry: ['evidence', 'analysis', 'details', '证据', '分析', '详细信息'],
   caveat: ['caveats', 'limitations', 'risks', '局限', '限制', '风险', '注意事项'],
   recommendation: ['recommendations', 'recommendation', 'next steps', '建议', '后续步骤'],
   source_entry: [
@@ -42,11 +42,25 @@ function matchesAlias(heading, aliases) {
   return aliases.some((alias) => normalized === alias || normalized.startsWith(`${alias}:`) || normalized.startsWith(`${alias}：`));
 }
 
-export function classifyClaimSection(section = '') {
+export function explicitClaimSectionKind(section = '') {
   for (const [kind, aliases] of Object.entries(SECTION_ALIASES)) {
     if (matchesAlias(section, aliases)) return kind;
   }
-  return 'supporting_claim';
+  return null;
+}
+
+export function classifyClaimSection(section = '') {
+  return explicitClaimSectionKind(section) || 'supporting_claim';
+}
+
+export function resolveClaimKindFromHeadingStack(heading, {
+  level = 2,
+  currentKind = 'supporting_claim',
+} = {}) {
+  const explicit = explicitClaimSectionKind(heading);
+  if (Number(level) === 1 && !explicit) return currentKind;
+  if (explicit) return explicit;
+  return currentKind;
 }
 
 function stripMarkdownDecorators(text = '') {
@@ -131,6 +145,7 @@ function mergeTrailingCitationAtoms(atoms = []) {
 export function splitAtomicClaimTexts(text = '') {
   const cleaned = String(text).trim();
   if (!cleaned) return [];
+  const parentCitations = parseCitations(cleaned);
   const atoms = [];
   for (const sentence of splitSentences(cleaned)) {
     for (const chunk of splitOnSemicolons(sentence)) {
@@ -139,13 +154,13 @@ export function splitAtomicClaimTexts(text = '') {
         const own = parseCitations(clause);
         atoms.push({
           text: clause,
-          citationKeys: own.length ? own : inherited,
+          citationKeys: own.length ? own : (parentCitations.length ? parentCitations : inherited),
         });
       }
     }
   }
   const merged = mergeTrailingCitationAtoms(atoms);
-  return merged.length ? merged : [{ text: cleaned, citationKeys: parseCitations(cleaned) }];
+  return merged.length ? merged : [{ text: cleaned, citationKeys: parentCitations }];
 }
 
 function isSkippableLine(line = '') {
@@ -161,6 +176,7 @@ function isSkippableLine(line = '') {
  * Deterministically extracts atomic, classified report statements.
  * Source entries and metadata are omitted. Compound Summary / Findings /
  * Evidence lines are split into independently verifiable atoms.
+ * Unknown subheadings inherit the nearest explicit section kind.
  */
 export function extractQualityClaims(report = '') {
   const lines = String(report).split(/\r?\n/);
@@ -191,10 +207,13 @@ export function extractQualityClaims(report = '') {
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
-    const heading = line.match(/^#{1,6}\s+(.+)$/);
+    const heading = line.match(/^(#{1,6})\s+(.+)$/);
     if (heading) {
-      section = heading[1].trim();
-      kind = classifyClaimSection(section);
+      section = heading[2].trim();
+      kind = resolveClaimKindFromHeadingStack(section, {
+        level: heading[1].length,
+        currentKind: kind,
+      });
       continue;
     }
     if (kind === 'source_entry' || kind === 'metadata' || isSkippableLine(line)) continue;
@@ -313,7 +332,7 @@ export function calculateQualityMetrics(claims = []) {
   const countable = selectCountableClaims(normalized);
   const facts = countable.filter((claim) => FACT_CLAIM_KINDS.has(claim.kind));
   const keyClaims = facts.filter((claim) => claim.kind === 'key_claim');
-  const supportingClaims = facts.filter((claim) => claim.kind === 'supporting_claim');
+  const supportingClaims = countable.filter((claim) => claim.kind === 'supporting_claim');
   const verdicts = Object.fromEntries(CLAIM_VERDICTS.map((verdict) => [verdict, 0]));
   for (const claim of facts) verdicts[claim.evaluation.verdict] += 1;
 
@@ -329,6 +348,7 @@ export function calculateQualityMetrics(claims = []) {
     evaluatedClaimCount: facts.length,
     keyClaimCount: keyClaims.length,
     supportingClaimCount: supportingClaims.length,
+    evidenceEntryCount: countable.filter((claim) => claim.kind === 'evidence_entry').length,
     caveatCount: countable.filter((claim) => claim.kind === 'caveat').length,
     recommendationCount: countable.filter((claim) => claim.kind === 'recommendation').length,
     claims: {
@@ -342,6 +362,7 @@ export function calculateQualityMetrics(claims = []) {
       evidenceCoverageRate: rate(withEvidence, facts.length),
       directEvidenceRate: rate(withDirectEvidence, facts.length),
       supportedRate: rate(verdicts.supported, facts.length),
+      supportedOrPartialRate: rate(verdicts.supported + verdicts.partially_supported, facts.length),
       partiallySupportedRate: rate(verdicts.partially_supported, facts.length),
       unsupportedRate: rate(verdicts.unsupported, facts.length),
       unverifiableRate: rate(verdicts.unverifiable, facts.length),
@@ -354,8 +375,7 @@ export function calculateQualityMetrics(claims = []) {
 export function qualityGateFromClaims(claims = []) {
   const normalized = selectCountableClaims(claims.map((claim) => normalizeClaim(claim)));
   const keyClaims = normalized.filter((claim) => claim.kind === 'key_claim');
-  const facts = normalized.filter((claim) => FACT_CLAIM_KINDS.has(claim.kind));
-  if (facts.length === 0) return 'fail';
+  if (normalized.length === 0) return 'fail';
   if (keyClaims.length === 0) return 'pass_with_warnings';
   if (keyClaims.some((claim) => ['unsupported', 'conflicting'].includes(claim.evaluation.verdict))) return 'fail';
   if (keyClaims.some((claim) => ['partially_supported', 'unverifiable'].includes(claim.evaluation.verdict))) return 'pass_with_warnings';

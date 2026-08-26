@@ -611,7 +611,7 @@ Agent 选型建议：
 
 预算、查询记忆、来源聚类、passage/claim 证据链与自适应停轮**默认已开启**（质量优先预设）。快速摸底可用 `--focused-fetch-mode disabled`、`--focused-evidence-passages false` 等 flag 单次关闭。`preReportGate` 与 LLM 相关性过滤仍默认关闭。专题/快速的次数预算是 `research.budget.maxSearchRequests`（默认 18）和 `maxSourceReads`（默认 16），可用 `--max-search-requests` / `--max-source-reads` 覆盖。探索性调研以 `research.exploratory.minLlmTokens`（默认 20000）为探索下限、`research.exploratory.maxLlmTokens`（默认 80000）为上限；这两项只约束探索，不含最终报告。搜索/阅读次数和 `maxSteps` 默认 `0`（不限制）。显式设了探索性次数上限时，用尽后立刻写报告，不再空转决策。仅当探索性与全局 token 硬上限都关闭时，才用 64 步安全阀防止廉价死循环。报告默认不截断；`research.budget.reserveReportTokens` 不再预留探索额度。
 
-Schema v3 在旧四件套之外写入 `gaps.json`、`passages.json`、`claims.json`、`quality.json`、`trace.json`。Intel Store 继续读取 v2；`intel import --upgrade-existing` 可从有正文的旧产物派生 passage/claim，不能从 snippet 伪造正文证据。Wiki 会为 v3 生成 `Evidence/` 与 `Open Questions/` 页面。
+Schema v3 在旧四件套之外写入 `gaps.json`、`passages.json`、`claims.json`、`quality.json`、`trace.json`。Intel Store 继续读取 v2；`intel import --upgrade-existing` 可从有正文的旧产物派生 passage/claim，不能从 snippet 伪造正文证据。Wiki 会为 v3 生成 `Evidence/` 与 `Open Questions/` 页面。主支持率 `supportedRate` 只统计 Summary / Key Findings 的原子事实（完全 supported / 全部分母）；`supportedOrPartialRate` 把 partial 也算进分子。Evidence / Sources / Caveats 不进这个分母。对比旧 run 时看 `qualityMetricsVersion` 与 `claimExtractionVersion`，不要直接比口径变更前后的百分比。已引用且有正文、规则尚未明确 supported/unsupported 的 key claim，默认再走 `research.quality.entailment=rules_then_llm` 做蕴含判定；设为 `rules` 可关掉。snippet-only 与无引用不能靠 LLM 洗白。
 
 ### Focused 深度阅读（可选）
 
