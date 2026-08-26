@@ -97,6 +97,7 @@ describe('exploratory budget snapshot and sufficiency', () => {
     const state = new ResearchState({ query: 'open topic space', maxSteps: 8 });
     state.addCandidates([{ url: 'https://open-a.test', title: 'A' }], 'gap-1');
     state.readSourceIds.add('https://open-a.test');
+    state.observations.push({ type: 'search_result', query: 'open topic space', resultCount: 1 });
     state.lastAction = 'read';
     assert.equal(state.validate({ action: 'reflect', gapQuestion: 'What is an open topic space?' }), 'repeat_gap');
     assert.equal(state.validate({ action: 'reflect', gapQuestion: 'What deployment constraint is orthogonal?' }), null);

@@ -31,9 +31,9 @@ export function similarQuestions(left, right, threshold = 0.7) {
 
 export function extractComparisonSubjects(query) {
   const text = String(query || '').trim();
-  const compareAnd = text.match(/(?:compare|对比|比较)\s+(.+?)\s+(?:and|与|和|以及)\s+(.+?)(?:\s+(?:for|in|on|regarding|的)\b|[?.!]|$)/i);
+  const compareAnd = text.match(/(?:compare|对比|比较)\s+(.+?)\s+(?:and|与|和|以及)\s+(.+?)(?:\s+(?:for|in|on|regarding|的)\b|[?!]|$)/i);
   if (compareAnd) return [compareAnd[1], compareAnd[2]].map(cleanSubject).filter(Boolean);
-  const versus = text.match(/(.+?)\s+(?:vs\.?|versus|compared to|compared with)\s+(.+?)(?:\s+(?:for|in|on|regarding)\b|[?.!]|$)/i);
+  const versus = text.match(/(.+?)\s+(?:vs\.?|versus|compared to|compared with)\s+(.+?)(?:\s+(?:for|in|on|regarding)\b|[?!]|$)/i);
   if (versus) return [versus[1], versus[2]].map(cleanSubject).filter(Boolean);
   return [];
 }
@@ -41,7 +41,7 @@ export function extractComparisonSubjects(query) {
 function cleanSubject(value) {
   return String(value || '')
     .replace(/^(?:compare|对比|比较)\s+/i, '')
-    .replace(/[?.!]+$/g, '')
+    .replace(/[?!]+$/g, '')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -126,9 +126,12 @@ export function evaluateExploratorySufficiency({
     return gap.priority === 'critical' && !covered;
   });
 
-  const bodySourceCount = resolvedFindings.reduce((count, finding) => (
-    count + (finding.sources || []).filter(sourceHasBody).length
-  ), 0);
+  const bodySourceCount = new Set(
+    resolvedFindings.flatMap((finding) => (finding.sources || [])
+      .filter(sourceHasBody)
+      .map((source) => source.url || source.id)
+      .filter(Boolean)),
+  ).size;
 
   let sufficient = false;
   let inconclusive = false;
@@ -138,8 +141,6 @@ export function evaluateExploratorySufficiency({
     sufficient = missingSubjects.length === 0 && criticalOpen.length === 0;
   } else if (shape.kind === 'definitional') {
     sufficient = criticalOpen.length === 0;
-  } else if (flags.includes('primary_source_missing')) {
-    sufficient = false;
   } else if (bodySourceCount < 2) {
     inconclusive = true;
   } else {

@@ -235,18 +235,23 @@ export class ResearchState {
         if (!unread.length) return 'repeat_action';
       }
     }
-    if (action.action === this.lastAction && !['answer', 'stop', 'read'].includes(action.action)) {
-      const lastSearch = [...this.observations].reverse().find((observation) => observation.type === 'search_result');
-      const emptySearchRetry = action.action === 'search' && lastSearch?.resultCount === 0;
-      if (!emptySearchRetry) return 'repeat_action';
+    if (action.action === this.lastAction && !['answer', 'stop', 'read', 'search'].includes(action.action)) {
+      return 'repeat_action';
     }
     if (action.action === 'answer' && this.lastAction === 'search' && !this.hasBodyEvidence()) {
       return 'answer_after_search';
     }
     if (action.action === 'search') {
       const queries = Array.isArray(action.queries) ? action.queries : [];
-      const primary = String(action.query || queries[0] || '').trim();
+      const merged = [String(action.query || '').trim(), ...queries.map((query) => String(query || '').trim())].filter(Boolean);
+      const primary = merged[0];
       if (!primary) return 'missing_query';
+      if (this.lastAction === 'search') {
+        const lastSearch = [...this.observations].reverse().find((observation) => observation.type === 'search_result');
+        const emptySearchRetry = lastSearch?.resultCount === 0;
+        const sameQuery = lastSearch && merged.includes(lastSearch.query);
+        if (!emptySearchRetry && sameQuery) return 'repeat_action';
+      }
     }
     if (action.action === 'reflect') {
       const question = String(action.gapQuestion || '').trim();

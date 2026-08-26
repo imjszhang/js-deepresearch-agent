@@ -32,7 +32,8 @@ describe('exploratory agent loop', () => {
     state.addCandidates([{ url: 'https://a.test', title: 'A' }], 'gap-1');
     state.lastAction = 'search';
     state.observations.push({ type: 'search_result', query: 'topic', resultCount: 1 });
-    assert.equal(state.validate({ action: 'search', query: 'another query' }), 'repeat_action');
+    assert.equal(state.validate({ action: 'search', query: 'topic' }), 'repeat_action');
+    assert.equal(state.validate({ action: 'search', query: 'another query' }), null);
     assert.equal(state.validate({ action: 'answer' }), 'answer_after_search');
     assert.equal(state.validate({ action: 'read', sourceIds: ['https://a.test'] }), null);
 
@@ -192,7 +193,7 @@ describe('exploratory agent loop', () => {
   it('rejects a repeated action and falls back to reading gathered evidence', async () => {
     const decisions = [
       { action: 'search', query: 'gated topic', gapId: 'gap-1', reasonCode: 'search' },
-      { action: 'search', query: 'gated topic variation', gapId: 'gap-1', reasonCode: 'search_again' },
+      { action: 'search', query: 'gated topic', gapId: 'gap-1', reasonCode: 'search_again' },
       { action: 'answer', reasonCode: 'done' },
     ];
     const result = await new ResearchRunner().run({
@@ -219,7 +220,7 @@ describe('exploratory agent loop', () => {
     const result = await new ResearchRunner().run({
       query: 'duplicate query topic',
       settings: { llm: {}, search: {}, research: {
-        strategy: 'exploratory', exploratory: { maxSteps: 8, maxEvaluationRetries: 0 },
+        strategy: 'exploratory', exploratory: { maxSteps: 8, maxEvaluationRetries: 0, autoReadTopK: 0, targetLlmTokens: 0 },
         focused: { fetchMode: 'disabled' },
       } },
       search: { async search() { return [{ title: 'D', url: 'https://dupquery.test', content: 'Duplicate query topic evidence from a selected source.', fetchStatus: 'ok' }]; } },

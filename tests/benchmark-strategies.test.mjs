@@ -183,13 +183,32 @@ describe('extract run stats', () => {
     assert.equal(stats.targetLlmTokens, 20000);
     assert.equal(stats.actualLlmTokens, 12000);
     assert.equal(stats.unusedBudgetTokens, 8000);
-    assert.match(formatStrategyCompareMarkdown({
+    const markdown = formatStrategyCompareMarkdown({
       query: 'What is Ollama?',
       comparedAt: '2026-08-26T00:00:00.000Z',
       warnings: [],
-      runs: [stats],
+      runs: [{
+        ...stats,
+        benchmark: {
+          metrics: {
+            rates: {
+              supportedRate: null,
+              partiallySupportedRate: null,
+              unsupportedRate: null,
+              unverifiableRate: null,
+              evidenceCoverageRate: null,
+              directEvidenceRate: null,
+              keyClaimSupportedRate: null,
+            },
+          },
+        },
+      }],
       deltas: [],
-    }), /target tokens: 20000/);
+    });
+    assert.match(markdown, /target tokens: 20000/);
+    assert.match(markdown, /actual tokens: 12000/);
+    assert.match(markdown, /unused budget: 8000/);
+    assert.match(markdown, /stop reason: evidence_sufficient/);
   });
 });
 
