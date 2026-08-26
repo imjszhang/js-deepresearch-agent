@@ -89,6 +89,18 @@ describe('CLI utilities', () => {
     assert.equal(settings.research.focused.fetchBackend, 'js-eyes');
   });
 
+  it('defaults quick research to a single iteration unless --iterations is set', () => {
+    const implied = applyResearchFlags({ research: { iterations: 2 } }, { strategy: 'quick' });
+    assert.equal(implied.research.strategy, 'quick');
+    assert.equal(implied.research.iterations, 1);
+
+    const explicit = applyResearchFlags({ research: { iterations: 2 } }, { strategy: 'quick', iterations: '3' });
+    assert.equal(explicit.research.iterations, 3);
+
+    const focused = applyResearchFlags({ research: { iterations: 2 } }, { strategy: 'focused' });
+    assert.equal(focused.research.iterations, 2);
+  });
+
   it('rejects retired strategy IDs with a migration hint', () => {
     assert.throws(
       () => applyResearchFlags({ research: {} }, { strategy: 'source-based' }),

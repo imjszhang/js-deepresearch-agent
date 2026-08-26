@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { loadArtifacts } from '../benchmark/load-artifacts.mjs';
 import { archiveResearchResult } from '../../src/storage/intel-store.mjs';
-import { buildEvidenceArtifacts, matchesStrategyFilter } from 'js-deepresearch-engine';
+import { buildEvidenceArtifacts, matchesStrategyFilter, sessionMatchesStrategyFilter } from 'js-deepresearch-engine';
 
 const REQUIRED_FILES = ['report.md', 'findings.json', 'sources.json', 'meta.json'];
 const SESSION_DIR_PATTERN = /^\d{4}-\d{2}-\d{2}_\d{6}$/;
@@ -44,15 +44,38 @@ export function discoverWorkDirSessions({ root, strategyFilter = null }) {
 
     for (const timestamp of timestamps) {
       if (!SESSION_DIR_PATTERN.test(timestamp)) continue;
+      const sessionDir = path.join(strategyDir, timestamp);
+      const { meta, trace } = readSessionStrategyContext(sessionDir);
+      if (!sessionMatchesStrategyFilter({ directoryName: strategy, meta, trace }, strategyFilter)) {
+        continue;
+      }
       sessions.push({
         strategy,
         timestamp,
-        sessionDir: path.join(strategyDir, timestamp),
+        sessionDir,
       });
     }
   }
 
   return sessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+}
+
+function readSessionStrategyContext(sessionDir) {
+  const meta = readJsonIfPresent(path.join(sessionDir, 'meta.json'));
+  const trace = readJsonIfPresent(path.join(sessionDir, 'trace.json'));
+  return {
+    meta: meta && typeof meta === 'object' && !Array.isArray(meta) ? meta : {},
+    trace: Array.isArray(trace) ? trace : undefined,
+  };
+}
+
+function readJsonIfPresent(filePath) {
+  if (!fs.existsSync(filePath)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch {
+    return null;
+  }
 }
 
 /**

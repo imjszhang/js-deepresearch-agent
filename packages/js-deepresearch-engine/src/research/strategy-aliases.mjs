@@ -9,7 +9,7 @@ export const DEPRECATED_STRATEGY_HINTS = Object.freeze({
 
 const HISTORICAL_DIRECTORY_GROUPS = Object.freeze({
   quick: Object.freeze(['quick', 'rapid', 'parallel']),
-  focused: Object.freeze(['focused', 'source-based']),
+  focused: Object.freeze(['focused', 'source-based', 'adaptive']),
   exploratory: Object.freeze(['exploratory', 'adaptive']),
 });
 
@@ -66,9 +66,37 @@ export function historicalDirectoriesFor(strategyOrFilter) {
   return [...new Set([strategyOrFilter, mapped, ...group])];
 }
 
-export function matchesStrategyFilter(directoryName, filter) {
+export function matchesStrategyFilter(directoryName, filter, context = {}) {
   if (!filter) return true;
-  return historicalDirectoriesFor(filter).includes(directoryName);
+  const liveFilter = isLiveStrategyId(filter) ? filter : mapHistoricalStrategy(filter, context);
+  if (!historicalDirectoriesFor(liveFilter).includes(directoryName) && directoryName !== liveFilter) {
+    return false;
+  }
+  if (directoryName !== 'adaptive') return true;
+  if (!hasAdaptiveLoopHint(context)) return true;
+  return mapHistoricalStrategy(directoryName, context) === liveFilter;
+}
+
+function hasAdaptiveLoopHint(context = {}) {
+  return resolveLegacyLoopVersion(context) != null || traceLooksLikeAdaptiveV2(context.trace);
+}
+
+/**
+ * Filter a work_dir session after reading meta/trace. Adaptive v1 maps to
+ * focused; Adaptive v2 maps to exploratory.
+ */
+export function sessionMatchesStrategyFilter({ directoryName, meta, trace } = {}, filter) {
+  if (!filter) return true;
+  const context = {
+    meta,
+    trace,
+    settings: meta?.settings,
+    loopVersion: meta?.settings?.adaptive?.loopVersion
+      ?? meta?.settings?.research?.adaptive?.loopVersion
+      ?? meta?.adaptive?.loopVersion,
+  };
+  return matchesStrategyFilter(directoryName, filter, context)
+    && mapHistoricalStrategy(directoryName, context) === (isLiveStrategyId(filter) ? filter : mapHistoricalStrategy(filter, context));
 }
 
 function migrateFocusedBlock(raw = {}) {

@@ -277,8 +277,8 @@ npm exec --package=. -- jdr config set research.iterations 3
   "research": {
     "strategy": "focused",
     "iterations": 2,
-    "questionsPerIteration": 3,
-    "concurrency": 2,
+    "questionsPerIteration": 2,
+    "concurrency": 1,
     "workDir": "work_dir"
   }
 }
@@ -482,8 +482,8 @@ History / Results 中 completed 调研可直达 `/wiki.html?researchId=<id>`；�
 离线评估已保存调研产物，**不会**重新执行 `research` 或搜索。入口为独立脚本（**未**并入主 CLI `jdr`）。
 
 ```bash
-# 从 work_dir 会话目录
-node scripts/benchmark-research.mjs work_dir/source-based/2026-05-26_043125
+# 从 work_dir 会话目录（新产物在 work_dir/focused|quick|exploratory/；source-based 等为历史目录，仍可读）
+node scripts/benchmark-research.mjs work_dir/focused/2026-05-26_043125
 node scripts/benchmark-research.mjs work_dir/source-based/2026-05-26_043125 --no-llm --json
 
 # 从 intel store（需先 archive 或 intel import）
@@ -593,8 +593,8 @@ npm run benchmark:strategies -- \
 
 Agent 选型建议：
 
-- 用户要**快速答案** → `--strategy quick`（单轮可加 `--iterations 1`）
-- 用户要**引用与深度** → `--strategy focused`（默认）
+- 用户要**快速答案** → `--strategy quick`（默认单轮；`--iterations` 未指定时不会沿用专题调研的轮次）
+- 用户要**引用与深度** → `--strategy focused`（默认；轮次由 `iterationControl` 管，`--iterations` 仅在关闭早停时生效）
 - 用户要**开放探索** → `--strategy exploratory`
 
 旧 ID（`rapid`、`parallel`、`source-based`、`adaptive`）不再注册。CLI 传入旧值会报迁移错误。历史 `work_dir` / Intel / SQLite 记录仍可读取。
@@ -613,7 +613,7 @@ Schema v3 在旧四件套之外写入 `gaps.json`、`passages.json`、`claims.js
 |---|---|---|
 | `research.focused.fetchMode` / `--focused-fetch-mode` | `summary` | `disabled` 仅 snippet；`full` 抓取正文 |
 | `research.focused.fetchBackend` / `--focused-fetch-backend` | `auto` | `js-eyes` 强制浏览器读取；`http` 仅 HTTP fetch |
-| `research.focused.maxUrlsTotal` / `--focused-max-urls` | `24` | 全局 enrich URL 上限 |
+| `research.focused.maxUrlsTotal` / `--focused-max-urls` | `12` | 全局 enrich URL 上限 |
 | `research.focused.enableRelevanceFilter` / `--focused-enable-filter` | `false` | LLM 相关性过滤 |
 | `research.focused.maxSourcesForReport` / `--focused-max-sources` | `30` | 过滤后保留来源数 |
 

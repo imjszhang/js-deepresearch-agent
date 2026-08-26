@@ -29,6 +29,7 @@ export {
   isLiveStrategyId,
   mapHistoricalStrategy,
   matchesStrategyFilter,
+  sessionMatchesStrategyFilter,
   migrateResearchSettings,
   researchSettingsNeedMigration,
 } from './research/strategy-aliases.mjs';

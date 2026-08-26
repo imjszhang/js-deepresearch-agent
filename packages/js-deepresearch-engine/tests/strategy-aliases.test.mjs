@@ -4,6 +4,7 @@ import {
   deprecatedStrategyError,
   mapHistoricalStrategy,
   matchesStrategyFilter,
+  sessionMatchesStrategyFilter,
   migrateResearchSettings,
   researchSettingsNeedMigration,
 } from '../src/research/strategy-aliases.mjs';
@@ -25,9 +26,20 @@ describe('strategy aliases', () => {
     assert.equal(matchesStrategyFilter('rapid', 'quick'), true);
     assert.equal(matchesStrategyFilter('parallel', 'quick'), true);
     assert.equal(matchesStrategyFilter('source-based', 'focused'), true);
+    assert.equal(matchesStrategyFilter('adaptive', 'focused'), true);
     assert.equal(matchesStrategyFilter('adaptive', 'exploratory'), true);
+    assert.equal(matchesStrategyFilter('adaptive', 'focused', { loopVersion: 'v2' }), false);
+    assert.equal(matchesStrategyFilter('adaptive', 'exploratory', { loopVersion: 'v2' }), true);
     assert.equal(matchesStrategyFilter('focused', 'focused'), true);
     assert.equal(matchesStrategyFilter('quick', 'focused'), false);
+  });
+
+  it('classifies adaptive work_dir sessions by loop version or trace', () => {
+    assert.equal(sessionMatchesStrategyFilter({ directoryName: 'adaptive', meta: { settings: { adaptive: { loopVersion: 'v1' } } } }, 'focused'), true);
+    assert.equal(sessionMatchesStrategyFilter({ directoryName: 'adaptive', meta: { settings: { adaptive: { loopVersion: 'v2' } } } }, 'focused'), false);
+    assert.equal(sessionMatchesStrategyFilter({ directoryName: 'adaptive', meta: { settings: { adaptive: { loopVersion: 'v2' } } } }, 'exploratory'), true);
+    assert.equal(sessionMatchesStrategyFilter({ directoryName: 'adaptive', trace: [{ reasonCode: 'agent_loop_v2' }] }, 'exploratory'), true);
+    assert.equal(sessionMatchesStrategyFilter({ directoryName: 'source-based' }, 'focused'), true);
   });
 
   it('migrates nested research settings to live keys', () => {

@@ -161,6 +161,10 @@ export function applyResearchFlags(settings, flags) {
     throw deprecatedStrategyError(String(flags.strategy));
   }
 
+  if (String(flags.strategy || '') === 'quick' && flags.iterations === undefined) {
+    setDeepValue(settings, 'research.iterations', 1);
+  }
+
   for (const [flag, key] of Object.entries(mappings)) {
     if (flags[flag] !== undefined) {
       setDeepValue(settings, key, flags[flag]);
