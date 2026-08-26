@@ -57,7 +57,7 @@ export function buildCitationMap(findings = [], { sourceIdFor } = {}) {
         sourceIndex: sourceIndex + 1,
         question: finding?.question || '',
         source,
-        sourceId: source?.id || sourceIdFor?.(source) || null,
+        sourceId: sourceIdFor?.(source) || source?.id || null,
       });
     });
   });
