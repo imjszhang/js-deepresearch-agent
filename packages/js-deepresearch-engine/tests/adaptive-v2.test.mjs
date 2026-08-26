@@ -19,7 +19,7 @@ function llmFor(decisions, { onEvaluation = () => report(), onDecompose = () => 
   };
 }
 
-describe('adaptive v2 agent loop', () => {
+describe('exploratory agent loop', () => {
   it('enforces action preconditions without encoding research policy', () => {
     const state = new ResearchState({ query: 'topic', maxSteps: 3 });
     assert.equal(state.validate({ action: 'read', sourceIds: ['missing'] }), 'unknown_source');
@@ -151,10 +151,10 @@ describe('adaptive v2 agent loop', () => {
       settings: {
         llm: {}, search: {},
         research: {
-          strategy: 'adaptive',
-          adaptive: { loopVersion: 'v2', maxSteps: 5, maxEvaluationRetries: 0, autoReadTopK: 0 },
+          strategy: 'exploratory',
+          exploratory: { maxSteps: 5, maxEvaluationRetries: 0, autoReadTopK: 0 },
           providers: { embedding: { provider: 'disabled' }, rerank: { provider: 'rules' } },
-          sourceBased: { fetchMode: 'disabled', evidencePassages: { enabled: true, claimAlignment: true } },
+          focused: { fetchMode: 'disabled', evidencePassages: { enabled: true, claimAlignment: true } },
           budget: { maxSearchRequests: 3, maxSourceReads: 0, maxLlmTokens: 0 },
         },
       },
@@ -180,9 +180,9 @@ describe('adaptive v2 agent loop', () => {
     const result = await new ResearchRunner().run({
       query: 'fallback topic',
       settings: { llm: {}, search: {}, research: {
-        strategy: 'adaptive',
-        adaptive: { loopVersion: 'v2', maxSteps: 5, maxEvaluationRetries: 0 },
-        sourceBased: { fetchMode: 'disabled' },
+        strategy: 'exploratory',
+        exploratory: { maxSteps: 5, maxEvaluationRetries: 0 },
+        focused: { fetchMode: 'disabled' },
       } },
       search: { async search() { return [{ title: 'S', url: 'https://source.test', content: 'Fallback topic evidence from a selected source.', fetchStatus: 'ok' }]; } },
       llm: llmFor(decisions),
@@ -200,8 +200,8 @@ describe('adaptive v2 agent loop', () => {
     const result = await new ResearchRunner().run({
       query: 'gated topic',
       settings: { llm: {}, search: {}, research: {
-        strategy: 'adaptive', adaptive: { loopVersion: 'v2', maxSteps: 6, maxEvaluationRetries: 0, autoReadTopK: 0 },
-        sourceBased: { fetchMode: 'disabled' },
+        strategy: 'exploratory', exploratory: { maxSteps: 6, maxEvaluationRetries: 0, autoReadTopK: 0 },
+        focused: { fetchMode: 'disabled' },
       } },
       search: { async search() { return [{ title: 'G', url: 'https://gated.test', content: 'Gated topic evidence from a selected source.', fetchStatus: 'ok' }]; } },
       llm: llmFor(decisions),
@@ -221,8 +221,8 @@ describe('adaptive v2 agent loop', () => {
     const result = await new ResearchRunner().run({
       query: 'duplicate query topic',
       settings: { llm: {}, search: {}, research: {
-        strategy: 'adaptive', adaptive: { loopVersion: 'v2', maxSteps: 8, maxEvaluationRetries: 0 },
-        sourceBased: { fetchMode: 'disabled' },
+        strategy: 'exploratory', exploratory: { maxSteps: 8, maxEvaluationRetries: 0 },
+        focused: { fetchMode: 'disabled' },
       } },
       search: { async search() { return [{ title: 'D', url: 'https://dupquery.test', content: 'Duplicate query topic evidence from a selected source.', fetchStatus: 'ok' }]; } },
       llm: llmFor(decisions),
@@ -247,8 +247,8 @@ describe('adaptive v2 agent loop', () => {
     const result = await new ResearchRunner().run({
       query: 'quality topic',
       settings: { llm: {}, search: {}, research: {
-        strategy: 'adaptive', adaptive: { loopVersion: 'v2', maxSteps: 8, maxEvaluationRetries: 1, autoReadTopK: 0 },
-        sourceBased: { fetchMode: 'disabled' },
+        strategy: 'exploratory', exploratory: { maxSteps: 8, maxEvaluationRetries: 1, autoReadTopK: 0 },
+        focused: { fetchMode: 'disabled' },
       } },
       search: { async search() { return searches.shift() || []; } },
       llm: llmFor(decisions),
@@ -279,8 +279,8 @@ describe('adaptive v2 agent loop', () => {
     const result = await new ResearchRunner().run({
       query: 'gate topic',
       settings: { llm: {}, search: {}, research: {
-        strategy: 'adaptive', adaptive: { loopVersion: 'v2', maxSteps: 10, maxEvaluationRetries: 2, autoReadTopK: 0 },
-        sourceBased: { fetchMode: 'disabled' },
+        strategy: 'exploratory', exploratory: { maxSteps: 10, maxEvaluationRetries: 2, autoReadTopK: 0 },
+        focused: { fetchMode: 'disabled' },
       } },
       search: { async search() { return searches.shift() || []; } },
       llm: llmFor(decisions, { onEvaluation: () => evaluations.shift() || JSON.stringify({ pass: true, missingAspect: '' }) }),
@@ -301,8 +301,8 @@ describe('adaptive v2 agent loop', () => {
     const result = await new ResearchRunner().run({
       query: 'compare ollama and llama.cpp',
       settings: { llm: {}, search: {}, research: {
-        strategy: 'adaptive', adaptive: { loopVersion: 'v2', maxSteps: 6, maxEvaluationRetries: 0, maxQueriesPerStep: 3 },
-        sourceBased: { fetchMode: 'disabled' },
+        strategy: 'exploratory', exploratory: { maxSteps: 6, maxEvaluationRetries: 0, maxQueriesPerStep: 3 },
+        focused: { fetchMode: 'disabled' },
       } },
       search: { async search(query) {
         searchedQueries.push(query);
@@ -334,8 +334,8 @@ describe('adaptive v2 agent loop', () => {
     const result = await new ResearchRunner().run({
       query: 'serp topic',
       settings: { llm: {}, search: {}, research: {
-        strategy: 'adaptive', adaptive: { loopVersion: 'v2', maxSteps: 6, maxEvaluationRetries: 0 },
-        sourceBased: { fetchMode: 'disabled' },
+        strategy: 'exploratory', exploratory: { maxSteps: 6, maxEvaluationRetries: 0 },
+        focused: { fetchMode: 'disabled' },
       } },
       search: { async search() { return [{ title: 'Serp title', url: 'https://serp.test', snippet: 'useful snippet', content: 'Serp topic evidence from a selected source.', fetchStatus: 'ok' }]; } },
       llm: { async complete({ purpose, messages }) {
@@ -362,8 +362,8 @@ describe('adaptive v2 agent loop', () => {
     const result = await new ResearchRunner().run({
       query: 'auto topic',
       settings: { llm: {}, search: {}, research: {
-        strategy: 'adaptive', adaptive: { loopVersion: 'v2', maxSteps: 6, maxEvaluationRetries: 0 },
-        sourceBased: { fetchMode: 'disabled' },
+        strategy: 'exploratory', exploratory: { maxSteps: 6, maxEvaluationRetries: 0 },
+        focused: { fetchMode: 'disabled' },
       } },
       search: { async search() { return [
         { title: 'A', url: 'https://auto-a.test/page', content: 'Auto topic evidence from a selected source.', fetchStatus: 'ok' },
@@ -398,9 +398,9 @@ describe('adaptive v2 agent loop', () => {
     const result = await new ResearchRunner().run({
       query: 'extract topic',
       settings: { llm: {}, search: {}, research: {
-        strategy: 'adaptive',
-        adaptive: { loopVersion: 'v2', maxSteps: 6, maxEvaluationRetries: 0, autoReadTopK: 0 },
-        sourceBased: { fetchMode: 'extract', fetchBackend: 'auto' },
+        strategy: 'exploratory',
+        exploratory: { maxSteps: 6, maxEvaluationRetries: 0, autoReadTopK: 0 },
+        focused: { fetchMode: 'extract', fetchBackend: 'auto' },
         providers: {
           embedding: {
             async embedDocuments(texts) {
@@ -433,8 +433,8 @@ describe('adaptive v2 agent loop', () => {
     const result = await new ResearchRunner().run({
       query: 'budget read topic',
       settings: { llm: {}, search: {}, research: {
-        strategy: 'adaptive', adaptive: { loopVersion: 'v2', maxSteps: 6, maxEvaluationRetries: 0 },
-        sourceBased: { fetchMode: 'disabled' },
+        strategy: 'exploratory', exploratory: { maxSteps: 6, maxEvaluationRetries: 0 },
+        focused: { fetchMode: 'disabled' },
         budget: { maxSourceReads: 1 },
       } },
       search: { async search() { return [
@@ -460,8 +460,8 @@ describe('adaptive v2 agent loop', () => {
     const result = await new ResearchRunner().run({
       query: 'parallel topic',
       settings: { llm: {}, search: {}, research: {
-        strategy: 'adaptive', adaptive: { loopVersion: 'v2', maxSteps: 6, maxEvaluationRetries: 0, maxQueriesPerStep: 3, autoReadTopK: 0 },
-        sourceBased: { fetchMode: 'disabled' },
+        strategy: 'exploratory', exploratory: { maxSteps: 6, maxEvaluationRetries: 0, maxQueriesPerStep: 3, autoReadTopK: 0 },
+        focused: { fetchMode: 'disabled' },
         budget: { maxSearchRequests: 2 },
       } },
       search: { async search(query) {
@@ -487,8 +487,8 @@ describe('adaptive v2 agent loop', () => {
     const result = await new ResearchRunner().run({
       query: 'forced topic',
       settings: { llm: {}, search: {}, research: {
-        strategy: 'adaptive', adaptive: { loopVersion: 'v2', maxSteps: 2, maxEvaluationRetries: 1 },
-        sourceBased: { fetchMode: 'disabled' },
+        strategy: 'exploratory', exploratory: { maxSteps: 2, maxEvaluationRetries: 1 },
+        focused: { fetchMode: 'disabled' },
       } },
       search: { async search() { return [{ title: 'F', url: 'https://forced.test', content: 'Forced topic evidence from a selected source.', fetchStatus: 'ok' }]; } },
       llm: llmFor(decisions),
@@ -506,8 +506,8 @@ describe('adaptive v2 agent loop', () => {
     const result = await new ResearchRunner().run({
       query: 'budget topic',
       settings: { llm: {}, search: {}, research: {
-        strategy: 'adaptive', adaptive: { loopVersion: 'v2', maxSteps: 6, maxEvaluationRetries: 0 },
-        sourceBased: { fetchMode: 'disabled' }, budget: { maxSearchRequests: 1 },
+        strategy: 'exploratory', exploratory: { maxSteps: 6, maxEvaluationRetries: 0 },
+        focused: { fetchMode: 'disabled' }, budget: { maxSearchRequests: 1 },
       } },
       search: { async search() { return [{ title: 'First', url: 'https://first.test', snippet: 'gathered evidence' }]; } },
       llm: llmFor(decisions),

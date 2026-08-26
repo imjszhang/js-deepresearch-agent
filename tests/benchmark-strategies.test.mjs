@@ -29,7 +29,7 @@ afterEach(() => {
 });
 
 function createFixture({
-  strategy = 'source-based',
+  strategy = 'focused',
   query = 'llm wiki',
   trace = [],
   quality = null,
@@ -85,17 +85,16 @@ describe('strategy presets', () => {
     assert.deepEqual(presets.map((preset) => preset.label), DEFAULT_STRATEGY_COMPARE_ORDER);
   });
 
-  it('applies adaptive loop version to cloned settings', () => {
-    const settings = { research: { strategy: 'source-based', adaptive: { maxSteps: 4 } } };
-    const v2 = applyStrategyPreset(settings, { label: 'adaptive-v2', strategy: 'adaptive', loopVersion: 'v2' });
-    assert.equal(v2.research.strategy, 'adaptive');
-    assert.equal(v2.research.adaptive.loopVersion, 'v2');
-    assert.equal(settings.research.strategy, 'source-based');
+  it('applies a live strategy preset to cloned settings', () => {
+    const settings = { research: { strategy: 'focused', exploratory: { maxSteps: 4 } } };
+    const exploratory = applyStrategyPreset(settings, { label: 'exploratory', strategy: 'exploratory' });
+    assert.equal(exploratory.research.strategy, 'exploratory');
+    assert.equal(settings.research.strategy, 'focused');
   });
 });
 
 describe('extract run stats', () => {
-  it('labels adaptive v2 from trace reason code', () => {
+  it('labels historical adaptive v2 as exploratory', () => {
     const dir = createFixture({
       strategy: 'adaptive',
       trace: [{ reasonCode: 'agent_loop_v2', createdAt: '2026-07-13T05:00:00.000Z' }],
@@ -109,7 +108,7 @@ describe('extract run stats', () => {
       findings: [],
       report: '',
     };
-    assert.equal(resolveStrategyLabel(artifacts), 'adaptive-v2');
+    assert.equal(resolveStrategyLabel(artifacts), 'exploratory');
   });
 
   it('derives duration from trace timestamps', () => {
@@ -122,7 +121,7 @@ describe('extract run stats', () => {
   });
 
   it('extracts cost and counts from quality budget', () => {
-    const dir = createFixture({ strategy: 'source-based' });
+    const dir = createFixture({ strategy: 'focused' });
     const artifacts = {
       workDir: dir,
       meta: JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8')),
@@ -135,7 +134,7 @@ describe('extract run stats', () => {
       passages: [],
     };
     const stats = extractRunStats(artifacts, { wallClockDurationMs: 91000 });
-    assert.equal(stats.strategyLabel, 'source-based');
+    assert.equal(stats.strategyLabel, 'focused');
     assert.equal(stats.durationMs, 91000);
     assert.equal(stats.cost.llmTokens, 12000);
     assert.equal(stats.counts.sourceCount, 1);
@@ -145,7 +144,7 @@ describe('extract run stats', () => {
 describe('compare strategy sessions', () => {
   it('compares two offline sessions with deltas', async () => {
     const sourceBased = createFixture({
-      strategy: 'source-based',
+      strategy: 'focused',
       quality: {
         schemaVersion: 3,
         gate: 'pass',
@@ -202,10 +201,10 @@ describe('compare strategy sessions', () => {
     });
 
     assert.equal(comparison.runs.length, 2);
-    assert.equal(comparison.runs[0].strategyLabel, 'source-based');
-    assert.equal(comparison.runs[1].strategyLabel, 'adaptive-v2');
+    assert.equal(comparison.runs[0].strategyLabel, 'focused');
+    assert.equal(comparison.runs[1].strategyLabel, 'exploratory');
     assert.equal(comparison.deltas[0].llmTokens, 20000);
     assert.match(formatStrategyCompareMarkdown(comparison), /Strategy Benchmark Comparison/);
-    assert.match(formatStrategyCompareJson(comparison), /"strategyLabel": "adaptive-v2"/);
+    assert.match(formatStrategyCompareJson(comparison), /"strategyLabel": "exploratory"/);
   });
 });

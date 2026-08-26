@@ -45,12 +45,12 @@ describe('work output', () => {
     const date = new Date('2026-05-25T17:38:28.455Z');
     const sessionDir = createWorkSessionDir({
       settings,
-      strategy: 'rapid',
+      strategy: 'quick',
       cwd,
       date,
     });
 
-    assert.equal(sessionDir, path.join(cwd, 'work_dir', 'rapid', '2026-05-25_173828'));
+    assert.equal(sessionDir, path.join(cwd, 'work_dir', 'quick', '2026-05-25_173828'));
     assert.equal(fs.existsSync(sessionDir), true);
   });
 
@@ -66,7 +66,7 @@ describe('work output', () => {
 
     const artifacts = saveResearchToWorkDir({
       settings,
-      strategy: 'source-based',
+      strategy: 'focused',
       query: 'What is TypeScript?',
       result,
       researchId: 'research-123',
@@ -76,7 +76,7 @@ describe('work output', () => {
 
     assert.equal(
       artifacts.sessionDir,
-      path.join(cwd, 'work_dir', 'source-based', '2026-05-25_173828'),
+      path.join(cwd, 'work_dir', 'focused', '2026-05-25_173828'),
     );
     assert.equal(fs.readFileSync(artifacts.reportPath, 'utf8'), result.report);
     assert.deepEqual(JSON.parse(fs.readFileSync(artifacts.findingsPath, 'utf8')), result.findings);
@@ -84,7 +84,7 @@ describe('work output', () => {
 
     const meta = JSON.parse(fs.readFileSync(artifacts.metaPath, 'utf8'));
     assert.equal(meta.query, 'What is TypeScript?');
-    assert.equal(meta.strategy, 'source-based');
+    assert.equal(meta.strategy, 'focused');
     assert.equal(meta.researchId, 'research-123');
     assert.equal(meta.settings.iterations, 1);
     assert.equal(meta.settings.questionsPerIteration, 2);

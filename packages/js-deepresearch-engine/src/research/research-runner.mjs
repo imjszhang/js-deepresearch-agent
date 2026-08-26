@@ -8,7 +8,7 @@ import { BudgetManager, BudgetExceededError, wrapProvidersWithBudget } from './b
 import { QueryMemory } from './query-memory.mjs';
 import { buildEvidenceArtifacts } from './evidence-chain.mjs';
 import { evaluatePreReport } from './quality-gates.mjs';
-import { resolveSourceBasedSettings } from './source-based-settings.mjs';
+import { resolveFocusedSettings } from './focused-settings.mjs';
 import { createResearchProviders } from './research-providers.mjs';
 import { calculateQualityMetrics, qualityGateFromClaims } from './claim-quality.mjs';
 
@@ -17,7 +17,7 @@ export class ResearchRunner {
     const proxiedFetch = createHttpFetch(settings?.http?.proxy);
     const rawLlm = providedLlm || createLlmProvider(settings);
     const rawSearch = providedSearch || createSearchEngine(settings);
-    const strategy = settings.research.strategy || 'source-based';
+    const strategy = settings.research.strategy || 'focused';
     const emit = createProgressEmitter(onProgress);
     const trace = [];
     const budget = new BudgetManager(settings, emit);
@@ -36,7 +36,7 @@ export class ResearchRunner {
         emit({ stage: event.status === 'started' ? 'llm_call_started' : 'llm_call_finished', ...event });
       },
     });
-    const sourceBased = resolveSourceBasedSettings(settings);
+    const focused = resolveFocusedSettings(settings);
     const researchProviders = createResearchProviders(settings?.research?.providers || {}, {
       budget,
       fetch: proxiedFetch,
@@ -46,7 +46,7 @@ export class ResearchRunner {
       },
     });
     const queryMemory = new QueryMemory({
-      ...sourceBased.queryMemory,
+      ...focused.queryMemory,
       similarityProvider: researchProviders.similarity,
       onSkip: (event) => trace.push({ step: trace.length + 1, action: 'query_skipped_duplicate', ...event, createdAt: new Date().toISOString() }),
     });
@@ -61,7 +61,7 @@ export class ResearchRunner {
       trace.push({ step: trace.length + 1, action: 'research_stopped', reasonCode: 'budget_exhausted', kind: error.kind, createdAt: new Date().toISOString() });
     }
 
-    const tracksGaps = strategy === 'adaptive' || strategy === 'source-based';
+    const tracksGaps = strategy === 'exploratory' || strategy === 'focused';
     let gaps = tracksGaps ? buildGapsFromFindings(findings, query) : [];
     const preReport = evaluatePreReport({ findings, gaps, query });
     const budgetBeforeReport = budget.snapshot();
@@ -76,7 +76,7 @@ export class ResearchRunner {
       ...(budgetLimitation ? [budgetLimitation] : []),
       ...(degradedLimitation ? [degradedLimitation] : []),
     ];
-    if (sourceBased.preReportGate.blockUnsupportedClaims && preReport.gate === 'fail') {
+    if (focused.preReportGate.blockUnsupportedClaims && preReport.gate === 'fail') {
       const error = new Error(`Research quality gate failed: ${preReport.flags.join(', ')}`);
       error.name = 'ResearchQualityError';
       throw error;
@@ -98,9 +98,9 @@ export class ResearchRunner {
         if (event.status === 'invalid') emit({ stage: 'report_retrying', ...event });
       },
     });
-    const evidenceOptions = strategy === 'adaptive'
-      ? { ...sourceBased.evidencePassages, enabled: true, claimAlignment: true }
-      : sourceBased.evidencePassages;
+    const evidenceOptions = strategy === 'exploratory'
+      ? { ...focused.evidencePassages, enabled: true, claimAlignment: true }
+      : focused.evidencePassages;
     if (evidenceOptions.enabled) emit({ stage: 'extracting_passages' });
     const evidence = buildEvidenceArtifacts({ query, findings, report, options: evidenceOptions });
     findings = evidence.findings;
@@ -160,7 +160,7 @@ export class ResearchRunner {
       trace: [
         ...trace,
         { step: trace.length + 1, action: 'finalize', reasonCode: 'completed', budgetAfter: budget.snapshot(), createdAt: new Date().toISOString() },
-        ...(strategy === 'adaptive' ? [{ step: trace.length + 2, action: 'stop', reasonCode: budget.stopReason || 'research_sufficient', budgetAfter: budget.snapshot(), createdAt: new Date().toISOString() }] : []),
+        ...(strategy === 'exploratory' ? [{ step: trace.length + 2, action: 'stop', reasonCode: budget.stopReason || 'research_sufficient', budgetAfter: budget.snapshot(), createdAt: new Date().toISOString() }] : []),
       ],
     };
   }

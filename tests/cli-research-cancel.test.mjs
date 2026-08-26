@@ -42,7 +42,7 @@ describe('CLI research cancellation', () => {
     await assert.rejects(
       () => runCliResearch({
         query: 'deep research',
-        settings: { research: { strategy: 'rapid' } },
+        settings: { research: { strategy: 'quick' } },
         flags: {},
         services: { researchRepository, sourceRepository },
         runner: {
@@ -73,7 +73,7 @@ describe('CLI research cancellation', () => {
 
     await runCliResearch({
       query: 'hello',
-      settings: { research: { strategy: 'rapid' } },
+      settings: { research: { strategy: 'quick' } },
       flags: { json: true, 'no-work-dir': true },
       services: { researchRepository, sourceRepository },
       runner: {
@@ -108,7 +108,7 @@ describe('CLI research cancellation', () => {
     const logs = [];
     await runCliResearch({
       query: 'observable run',
-      settings: { research: { strategy: 'rapid' } },
+      settings: { research: { strategy: 'quick' } },
       flags: { json: true, 'no-save': true, 'no-work-dir': true },
       services: { researchRepository: new ResearchRepository(db), sourceRepository: new SourceRepository(db) },
       runner: {
@@ -133,7 +133,7 @@ describe('CLI research cancellation', () => {
     error.code = 'REPORT_OUTPUT_INVALID';
     await assert.rejects(() => runCliResearch({
       query: 'empty report',
-      settings: { research: { strategy: 'source-based' } },
+      settings: { research: { strategy: 'focused' } },
       flags: {},
       services: { researchRepository, sourceRepository: new SourceRepository(db) },
       runner: { run: async () => { throw error; } },

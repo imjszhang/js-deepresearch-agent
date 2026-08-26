@@ -154,4 +154,21 @@ describe('intel store import', () => {
     assert.equal(sources.length, 1);
     assert.equal(sources[0].sourceIndex, 1);
   });
+
+  it('matches historical strategy directories when filtering by live IDs', () => {
+    const root = makeTempRoot();
+    writeSession(root, 'source-based', '2026-05-26_065414');
+    writeSession(root, 'rapid', '2026-05-26_070000');
+    writeSession(root, 'adaptive', '2026-05-26_080000');
+    writeSession(root, 'focused', '2026-05-26_090000');
+
+    const focused = discoverWorkDirSessions({ root, strategyFilter: 'focused' });
+    assert.deepEqual(focused.map((session) => session.strategy).sort(), ['focused', 'source-based']);
+
+    const quick = discoverWorkDirSessions({ root, strategyFilter: 'quick' });
+    assert.deepEqual(quick.map((session) => session.strategy), ['rapid']);
+
+    const exploratory = discoverWorkDirSessions({ root, strategyFilter: 'exploratory' });
+    assert.deepEqual(exploratory.map((session) => session.strategy), ['adaptive']);
+  });
 });

@@ -3,7 +3,7 @@ import { searchQuestions } from '../search-executor.mjs';
 import { resolveStrategyConcurrency, uniqueQuestionCount } from '../strategy-utils.mjs';
 
 /**
- * Shared iterative research pipeline used by source-based and parallel strategies.
+ * Shared iterative research pipeline used by multi-round quick research.
  *
  * @param {import('../../types.mjs').StrategyContext} context
  */

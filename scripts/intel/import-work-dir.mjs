@@ -58,7 +58,7 @@ Usage:
 
 Options:
   --root <dir>         Work directory root (default: work_dir)
-  --strategy <name>    Only import one strategy (e.g. source-based)
+  --strategy <name>    Only import one strategy (e.g. focused; also matches historical source-based)
   --intel-dir <dir>    Intel store base dir (default: data/intel or JDR_INTEL_STORE_DIR)
   --dry-run            List sessions that would be imported
   --force              Re-import even if run already exists (updates run metadata; may append findings)
@@ -68,7 +68,7 @@ Options:
 
 Examples:
   npm run intel:import -- --dry-run
-  npm run intel:import -- --strategy source-based
+  npm run intel:import -- --strategy focused
   npm run intel:import -- --json
 `);
 }

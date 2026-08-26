@@ -1,10 +1,12 @@
+import { mapHistoricalStrategy } from 'js-deepresearch-engine';
+
 export function resolveStrategyLabel(artifacts) {
   const strategy = artifacts.meta?.strategy || 'unknown';
-  if (strategy !== 'adaptive') return strategy;
-
-  const trace = Array.isArray(artifacts.trace) ? artifacts.trace : [];
-  const isV2 = trace.some((entry) => entry.reasonCode === 'agent_loop_v2');
-  return isV2 ? 'adaptive-v2' : 'adaptive-v1';
+  return mapHistoricalStrategy(strategy, {
+    meta: artifacts.meta,
+    trace: artifacts.trace,
+    settings: artifacts.meta?.settings,
+  });
 }
 
 export function durationFromTrace(trace = []) {

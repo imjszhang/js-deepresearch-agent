@@ -1,5 +1,5 @@
 import { fetchUrlContent } from './content-fetcher.mjs';
-import { resolveSourceBasedSettings } from './source-based-settings.mjs';
+import { resolveFocusedSettings } from './focused-settings.mjs';
 
 /** @type {Array<(url: string, context: ContentFetchContext) => Promise<ContentFetchResult>>} */
 const handlers = [];
@@ -53,7 +53,7 @@ function truncateResult(result, maxChars) {
  */
 export async function resolveUrlContent(url, context = {}) {
   const { settings, signal, maxChars } = context;
-  const { fetchBackend } = resolveSourceBasedSettings(settings);
+  const { fetchBackend } = resolveFocusedSettings(settings);
 
   if (fetchBackend === 'http') {
     return fetchUrlContent(url, { signal, maxChars });

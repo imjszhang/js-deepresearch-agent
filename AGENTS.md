@@ -113,16 +113,16 @@ npm exec --package=. -- jdr research "Explain the current state of local-first A
 | `--js-eyes-max-pages` | `search.provider.maxPages` | 兼容别名 |
 | `--search-timeout-ms` | `search.provider.timeoutMs` | JS Eyes 单次搜索超时（毫秒） |
 | `--js-eyes-timeout-ms` | `search.provider.timeoutMs` | 兼容别名 |
-| `--strategy` | `research.strategy` | `source-based` \| `rapid` \| `parallel` |
+| `--strategy` | `research.strategy` | `focused` \| `quick` \| `exploratory` |
 | `--iterations` | `research.iterations` | 迭代轮数 |
 | `--questions` | `research.questionsPerIteration` | 每轮生成问题数 |
 | `--concurrency` | `research.concurrency` | 并发搜索数 |
 | `--work-dir` | `research.workDir` | 产物根目录（相对 cwd 或绝对路径） |
-| `--source-fetch-mode` | `research.sourceBased.fetchMode` | `summary`（默认）\| `disabled` \| `full`；抓取 URL 正文或 LLM 摘要 |
-| `--source-fetch-backend` | `research.sourceBased.fetchBackend` | `auto`（默认）\| `http` \| `js-eyes`；知乎来源优先走 js-eyes 浏览器读取 |
-| `--source-max-urls` | `research.sourceBased.maxUrlsTotal` | 单次调研最多 enrich 的 URL 数 |
-| `--source-enable-filter` | `research.sourceBased.enableRelevanceFilter` | 是否启用 LLM 来源相关性过滤 |
-| `--source-max-sources` | `research.sourceBased.maxSourcesForReport` | 过滤后保留的最大来源数 |
+| `--focused-fetch-mode` | `research.focused.fetchMode` | `summary`（默认）\| `disabled` \| `full`；抓取 URL 正文或 LLM 摘要 |
+| `--focused-fetch-backend` | `research.focused.fetchBackend` | `auto`（默认）\| `http` \| `js-eyes`；知乎来源优先走 js-eyes 浏览器读取 |
+| `--focused-max-urls` | `research.focused.maxUrlsTotal` | 单次调研最多 enrich 的 URL 数 |
+| `--focused-enable-filter` | `research.focused.enableRelevanceFilter` | 是否启用 LLM 来源相关性过滤 |
+| `--focused-max-sources` | `research.focused.maxSourcesForReport` | 过滤后保留的最大来源数 |
 | `--rerank-provider` | `research.providers.rerank.provider` | `rules`（默认、本地）\| `disabled` \| `jina`（显式启用） |
 | `--rerank-model` | `research.providers.rerank.model` | 可选 rerank 模型名 |
 | `--rerank-base-url` | `research.providers.rerank.baseUrl` | 可选 rerank API 地址 |
@@ -131,7 +131,9 @@ npm exec --package=. -- jdr research "Explain the current state of local-first A
 | `--http-proxy` | `http.proxy` | SOCKS5/HTTP 代理 URL；仅 LLM / embedding / rerank 走代理，搜索与正文抓取直连 |
 | `--max-rerank-requests` | `research.budget.maxRerankRequests` | 外部 rerank 请求上限，`0` 不限制 |
 | `--max-rerank-tokens` | `research.budget.maxRerankTokens` | provider 可观测 rerank token 上限，`0` 不限制 |
-| `--adaptive-loop-version` | `research.adaptive.loopVersion` | `v1`（兼容默认）\| `v2`（实验 Agent Loop） |
+| `--exploratory-max-steps` | `research.exploratory.maxSteps` | 探索性调研最大步数 |
+| `--exploratory-max-reads-per-step` | `research.exploratory.maxReadsPerStep` | 探索性调研每步阅读数 |
+| `--focused-iteration-control` | `research.focused.iterationControl.enabled` | 专题调研规则早停 |
 | `--output <file>` | — | 额外将 report 写入指定文件 |
 | `--json` | — | stdout 输出 JSON（含 `artifacts` 路径） |
 | `--no-save` | — | 不写入 SQLite 历史 |
@@ -145,7 +147,7 @@ npm exec --package=. -- jdr research "Compare SearXNG and Brave Search APIs" \
   --model gpt-4o-mini \
   --base-url https://api.openai.com/v1 \
   --search-base-url http://127.0.0.1:8080 \
-  --strategy source-based \
+  --strategy focused \
   --iterations 2 \
   --questions 3 \
   --concurrency 2 \
@@ -156,7 +158,7 @@ npm exec --package=. -- jdr research "openclaw" \
   --search js-eyes \
   --search-skills js-reddit-ops-skill \
   --search-server-url ws://localhost:18080 \
-  --strategy rapid
+  --strategy quick --iterations 1
 ```
 
 ### 输出行为
@@ -172,7 +174,7 @@ npm exec --package=. -- jdr research "openclaw" \
 
 `--json` 模式下进度只走 stderr，stdout 仅为 JSON，便于 Agent 解析。
 
-报告生成有硬校验：默认至少 200 字符且包含 Markdown 标题，空内容或过短内容会自动重试一次；仍无有效报告时任务标记为 `failed`，不写 `work_dir`、report 或 Intel 半成品。进度会记录 LLM 阶段、耗时、输出字符数和安全的响应元数据，但不会记录 prompt、推理文本或密钥。`source-based` 会为缺失的原始问题/官方证据保留 gap 与 limitation；只有成功读取的正文才能生成 direct-evidence passage，snippet 只能标记为 `search_snippet`。
+报告生成有硬校验：默认至少 200 字符且包含 Markdown 标题，空内容或过短内容会自动重试一次；仍无有效报告时任务标记为 `failed`，不写 `work_dir`、report 或 Intel 半成品。进度会记录 LLM 阶段、耗时、输出字符数和安全的响应元数据，但不会记录 prompt、推理文本或密钥。`focused` 会为缺失的原始问题/官方证据保留 gap 与 limitation；只有成功读取的正文才能生成 direct-evidence passage，snippet 只能标记为 `search_snippet`。
 
 ### 取消调研（Ctrl+C）
 
@@ -244,7 +246,7 @@ npm exec --package=. -- jdr config get research.strategy
 ```bash
 npm exec --package=. -- jdr config set llm.apiKey "YOUR_API_KEY"
 npm exec --package=. -- jdr config set search.baseUrl "http://127.0.0.1:8080"
-npm exec --package=. -- jdr config set research.strategy "rapid"
+npm exec --package=. -- jdr config set research.strategy "quick"
 npm exec --package=. -- jdr config set research.iterations 3
 ```
 
@@ -273,7 +275,7 @@ npm exec --package=. -- jdr config set research.iterations 3
     "jsEyesTimeoutMs": 120000
   },
   "research": {
-    "strategy": "source-based",
+    "strategy": "focused",
     "iterations": 2,
     "questionsPerIteration": 3,
     "concurrency": 2,
@@ -335,7 +337,7 @@ npm exec --package=. -- jdr intel findings <researchId> --limit 10
 
 # 从 work_dir 历史回填 intel store
 npm exec --package=. -- jdr intel import --dry-run
-npm exec --package=. -- jdr intel import --strategy source-based
+npm exec --package=. -- jdr intel import --strategy focused
 npm exec --package=. -- jdr intel import --force --json
 ```
 
@@ -371,7 +373,7 @@ npm exec --package=. -- jdr intel import --force --json
 等价 npm script：
 
 ```bash
-npm run intel:import -- --dry-run --strategy source-based
+npm run intel:import -- --dry-run --strategy focused
 npm run intel:inspect -- list
 ```
 
@@ -510,12 +512,12 @@ node scripts/benchmark-research.mjs --research-id imported__source-based__2026-0
 
 ### 策略对比 benchmark（`benchmark-strategies`）
 
-横向比较 **source-based**、**adaptive v1**、**adaptive v2** 的质量、耗时与成本（LLM tokens、搜索次数、source reads、rerank 次数）。支持离线对比已有 `work_dir` 会话，或对同一 query 依次跑三种策略。
+横向比较 **quick**、**focused**、**exploratory** 的质量、耗时与成本（LLM tokens、搜索次数、source reads、rerank 次数）。支持离线对比已有 `work_dir` 会话，或对同一 query 依次跑三种策略。
 
 ```bash
 # 离线对比已有会话（推荐，不重新调研）
 npm run benchmark:strategies -- \
-  --sessions work_dir/source-based/2026-07-13_051140,work_dir/adaptive/2026-07-13_051626 \
+  --sessions work_dir/focused/2026-07-13_051140,work_dir/exploratory/2026-07-13_051626 \
   --no-llm --output tmp/strategy-compare.md
 
 # 从 intel store 对比
@@ -524,7 +526,7 @@ npm run benchmark:strategies -- --research-ids <id1>,<id2> --no-llm --json
 # 对同一 query 依次跑三种策略（会调用 LLM + 搜索）
 npm run benchmark:strategies -- \
   --run "Ollama vs llama.cpp for local LLM deployment" \
-  --strategies source-based,adaptive-v1,adaptive-v2 \
+  --strategies quick,focused,exploratory \
   --no-llm
 ```
 
@@ -533,7 +535,7 @@ npm run benchmark:strategies -- \
 | `--sessions <paths>` | 逗号分隔的 `work_dir` 会话；可用 `adaptive-v2=path` 显式标注 |
 | `--research-ids <ids>` | 从 intel store 加载 |
 | `--run <query>` | 依次执行多种策略后自动对比 |
-| `--strategies <list>` | `--run` 时指定预设，默认 `source-based,adaptive-v1,adaptive-v2` |
+| `--strategies <list>` | `--run` 时指定预设，默认 `quick,focused,exploratory` |
 | `--output <file>` | 写入 Markdown/JSON 报告 |
 | `--no-llm` | 质量评估复用 schema v3 归档 verdict |
 
@@ -583,37 +585,37 @@ npm run benchmark:strategies -- \
 
 ## 调研策略选择
 
-| ID | 速度 | 深度 | 适用场景 |
-|---|---|---|---|
-| `rapid` | 快 | 浅 | 快速概览；不支持多轮 `iterations` |
-| `source-based` | 均衡 | 深 | **默认**；基于来源迭代追问；可选 URL 正文/摘要 enrichment |
-| `parallel` | 快 | 广 | 大量并行子问题，覆盖面广 |
-| `adaptive` | 可变 | 深 | **实验性**；受预算与最大步数约束的 gap 驱动状态机 |
+| ID | 中文 | 速度 | 深度 | 适用场景 |
+|---|---|---|---|---|
+| `quick` | 快速调研 | 快 | 浅 | 快速了解主题、发现方向；不承诺正文级证据。1 轮 = 原 Rapid，多轮 = 原 Parallel |
+| `focused` | 专题调研 | 均衡 | 深 | **默认**；针对明确问题阅读来源并形成有依据的报告 |
+| `exploratory` | 探索性调研 | 可变 | 深 | 复杂、开放或多主体问题，在研究过程中动态发现并补齐缺口 |
 
 Agent 选型建议：
 
-- 用户要**快速答案** → `--strategy rapid`
-- 用户要**引用与深度** → `--strategy source-based`（默认）
-- 用户要**广泛扫描** → `--strategy parallel`，可适当提高 `--concurrency`
-- 用户要**实验性自适应研究** → `--strategy adaptive`；默认策略仍为 `source-based`
+- 用户要**快速答案** → `--strategy quick`（单轮可加 `--iterations 1`）
+- 用户要**引用与深度** → `--strategy focused`（默认）
+- 用户要**开放探索** → `--strategy exploratory`
+
+旧 ID（`rapid`、`parallel`、`source-based`、`adaptive`）不再注册。CLI 传入旧值会报迁移错误。历史 `work_dir` / Intel / SQLite 记录仍可读取。
 
 ### 研究控制与 Schema v3
 
-预算、查询记忆、来源聚类、passage/claim 证据链与自适应停轮**默认已开启**（质量优先预设）。快速摸底可用 `--source-fetch-mode disabled`、`--source-evidence-passages false` 等 flag 单次关闭。`preReportGate` 与 LLM 相关性过滤仍默认关闭。单次实验也可用 `--max-llm-tokens`、`--max-search-requests`、`--max-source-reads` 等覆盖预算。
+预算、查询记忆、来源聚类、passage/claim 证据链与自适应停轮**默认已开启**（质量优先预设）。快速摸底可用 `--focused-fetch-mode disabled`、`--focused-evidence-passages false` 等 flag 单次关闭。`preReportGate` 与 LLM 相关性过滤仍默认关闭。单次实验也可用 `--max-llm-tokens`、`--max-search-requests`、`--max-source-reads` 等覆盖预算。
 
 Schema v3 在旧四件套之外写入 `gaps.json`、`passages.json`、`claims.json`、`quality.json`、`trace.json`。Intel Store 继续读取 v2；`intel import --upgrade-existing` 可从有正文的旧产物派生 passage/claim，不能从 snippet 伪造正文证据。Wiki 会为 v3 生成 `Evidence/` 与 `Open Questions/` 页面。
 
-### Source-Based 深度阅读（可选）
+### Focused 深度阅读（可选）
 
 默认 `fetchMode: summary`：每轮搜索后抓取 URL 并用 LLM 压缩摘要；报告阶段优先使用 `summary || content || snippet` 作为 Evidence。快速模式可设为 `disabled`（仅 snippet）。
 
 | 配置键 / Flag | 默认 | 说明 |
 |---|---|---|
-| `research.sourceBased.fetchMode` / `--source-fetch-mode` | `summary` | `disabled` 仅 snippet；`full` 抓取正文 |
-| `research.sourceBased.fetchBackend` / `--source-fetch-backend` | `auto` | `js-eyes` 强制浏览器读取；`http` 仅 HTTP fetch |
-| `research.sourceBased.maxUrlsTotal` / `--source-max-urls` | `24` | 全局 enrich URL 上限 |
-| `research.sourceBased.enableRelevanceFilter` / `--source-enable-filter` | `false` | LLM 相关性过滤 |
-| `research.sourceBased.maxSourcesForReport` / `--source-max-sources` | `30` | 过滤后保留来源数 |
+| `research.focused.fetchMode` / `--focused-fetch-mode` | `summary` | `disabled` 仅 snippet；`full` 抓取正文 |
+| `research.focused.fetchBackend` / `--focused-fetch-backend` | `auto` | `js-eyes` 强制浏览器读取；`http` 仅 HTTP fetch |
+| `research.focused.maxUrlsTotal` / `--focused-max-urls` | `24` | 全局 enrich URL 上限 |
+| `research.focused.enableRelevanceFilter` / `--focused-enable-filter` | `false` | LLM 相关性过滤 |
+| `research.focused.maxSourcesForReport` / `--focused-max-sources` | `30` | 过滤后保留来源数 |
 
 示例（知乎 + 摘要模式）：
 
@@ -621,13 +623,13 @@ Schema v3 在旧四件套之外写入 `gaps.json`、`passages.json`、`claims.js
 npm exec --package=. -- jdr research "llm wiki" \
   --search js-eyes \
   --search-skills js-zhihu-ops-skill \
-  --strategy source-based \
-  --source-fetch-mode summary \
-  --source-fetch-backend js-eyes \
-  --source-max-urls 12
+  --strategy focused \
+  --focused-fetch-mode summary \
+  --focused-fetch-backend js-eyes \
+  --focused-max-urls 12
 ```
 
-`parallel` / `rapid` 不受 `sourceBased` 配置影响。
+`quick` 不受 `research.focused` 配置影响，始终只使用搜索 snippet。
 
 ---
 
@@ -698,7 +700,7 @@ js-eyes skill run js-reddit-ops-skill search "openclaw" --limit 3 --read-mode ap
 
 各 skill 串行查询；单 skill 失败时仍返回其他 skill 结果（**AbortError 除外**，取消会立即停止后续 skill）；全部失败才报错。浏览器-backed skill 会自动将问题并发限制为 1。
 
-**取消与 js-eyes**：每次搜索可能触发浏览器 `open_url`（如 Reddit）。`source-based` 默认约 2 轮 ×（原问题 + 2 子问题）≈ 6 次搜索，并可能额外抓取最多 12 个 URL；取消后不再调度新搜索，但已打开的标签页需手动关闭。
+**取消与 js-eyes**：每次搜索可能触发浏览器 `open_url`（如 Reddit）。`focused` 默认约 2 轮 ×（原问题 + 2 子问题）≈ 6 次搜索，并可能额外抓取最多 12 个 URL；取消后不再调度新搜索，但已打开的标签页需手动关闭。
 
 ---
 
@@ -717,7 +719,7 @@ npm exec --package=. -- jdr config get search.baseUrl
 
 ```bash
 npm exec --package=. -- jdr research "用户的问题" \
-  --strategy source-based \
+  --strategy focused \
   --json \
   --output tmp/report.md
 ```
@@ -735,7 +737,7 @@ npm exec --package=. -- jdr history show <id>
 
 ```bash
 # 历史 work_dir 回填 intel（首次或补数据）
-npm exec --package=. -- jdr intel import --strategy source-based
+npm exec --package=. -- jdr intel import --strategy focused
 
 # 确认 researchId
 npm exec --package=. -- jdr intel list --limit 5

@@ -29,7 +29,7 @@ const settings = mergeSettings({
     baseUrl: 'http://127.0.0.1:8080',
   },
   research: {
-    strategy: 'source-based',
+    strategy: 'focused',
     iterations: 2,
     questionsPerIteration: 3,
     concurrency: 2,
@@ -120,7 +120,7 @@ import { defaultSettings, mergeSettings } from 'js-deepresearch-engine';
 const settings = mergeSettings({
   llm: { model: 'gpt-4o' },
   search: { maxResults: 10 },
-  research: { strategy: 'rapid' },
+  research: { strategy: 'quick', iterations: 1 },
 });
 ```
 
@@ -128,18 +128,17 @@ The engine does not read `.env` files or persist settings. Callers are responsib
 
 ## Built-in Strategies
 
-- `rapid` — original query plus a few fast follow-up searches
-- `source-based` — iterative, source-informed follow-up questions (default)
-- `parallel` — broad coverage with controlled concurrency
-- `adaptive` — experimental, budgeted gap-driven state machine with structured trace output
+- `quick` — snippet-only scan. One iteration is original query plus a few follow-ups; more than one iteration uses the shared iterative loop. It does not enrich URL bodies.
+- `focused` — default topic research: source-informed follow-ups, optional URL enrichment, source selection, evidence chain, and iteration/evidence early-stop
+- `exploratory` — Agent Loop that chooses structured `search`, `read`, `reflect`, `answer`, or `stop` actions per step. Runtime rules enforce action preconditions, cancellation, budgets, and step limits.
 
-Adaptive v1 remains the compatibility default. Set `research.adaptive.loopVersion: 'v2'` to opt into the bounded Agent Loop experiment. In v2 the LLM chooses one structured `search`, `read`, `reflect`, `answer`, or `stop` action per step. Runtime rules enforce only action preconditions, cancellation, budgets, and step limits. Rerank scores—when enabled—are included as candidate observations, but the agent may select any candidate. The loop works with rerank disabled and without embeddings.
+Custom strategies can still be added with `registerStrategy()`. Historical IDs (`rapid`, `parallel`, `source-based`, `adaptive`) are not registered.
 
 ## Research Controls and Schema v3
 
-`source-based` defaults to a quality-oriented preset: `fetchMode: summary`, enabled `queryMemory`, `sourceSelection`, `evidencePassages` (with `claimAlignment`), and `adaptiveControl`, plus soft budgets (`maxSearchRequests: 10`, `maxSourceReads: 8`). Set `fetchMode: disabled` or turn individual controls off when embedding the engine in latency-sensitive paths. `preReportGate` and LLM relevance filtering stay disabled by default.
+`focused` defaults to a quality-oriented preset: `fetchMode: summary`, enabled `queryMemory`, `sourceSelection`, `evidencePassages` (with `claimAlignment`), and `iterationControl`, plus soft budgets (`maxSearchRequests: 18`, `maxSourceReads: 16`). Set `fetchMode: disabled` or turn individual controls off when embedding the engine in latency-sensitive paths. `preReportGate` and LLM relevance filtering stay disabled by default.
 
-Schema v3 results retain `report`, `findings`, and `sources` and add `gaps`, `passages`, `claims`, `quality`, and a structured `trace`. Passage and claim generation run when `evidencePassages` is enabled (default for `source-based`). Semantic helpers use pluggable research providers and deterministic local fallbacks.
+Schema v3 results retain `report`, `findings`, and `sources` and add `gaps`, `passages`, `claims`, `quality`, and a structured `trace`. Passage and claim generation run when `evidencePassages` is enabled (default for `focused`). Semantic helpers use pluggable research providers and deterministic local fallbacks.
 
 Reranking is optional. `research.providers.rerank.provider` defaults to `rules`, which performs deterministic Unicode token-overlap scoring without network access. Set it to `jina` and provide an API key to opt into Jina reranking; failures degrade to rules, while cancellation and budget exhaustion continue to propagate. Embeddings are not required and no remote embedding provider is enabled by default.
 

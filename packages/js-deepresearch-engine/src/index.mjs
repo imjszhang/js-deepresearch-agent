@@ -22,6 +22,18 @@ export {
   resetSearchEngines,
 } from './search/search-factory.mjs';
 export { defaultSettings, mergeSettings } from './config/defaults.mjs';
+export {
+  LIVE_STRATEGY_IDS,
+  deprecatedStrategyError,
+  isDeprecatedStrategyId,
+  isLiveStrategyId,
+  mapHistoricalStrategy,
+  matchesStrategyFilter,
+  migrateResearchSettings,
+  researchSettingsNeedMigration,
+} from './research/strategy-aliases.mjs';
+export { getSourceEvidence, resolveFocusedSettings } from './research/focused-settings.mjs';
+export { resolveExploratorySettings } from './research/exploratory-settings.mjs';
 export { createHttpFetch, resetHttpFetchCache } from './http/create-http-fetch.mjs';
 export {
   createWorkSessionDir,

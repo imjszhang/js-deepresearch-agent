@@ -54,9 +54,9 @@ npm exec --package=. -- jdr history list
 Evaluate whether a saved research report is supported by its cited sources. The benchmark reads artifacts from a work session directory and does not rerun search or research.
 
 ```bash
-npm run benchmark -- work_dir/source-based/2026-05-26_043125
-npm run benchmark -- work_dir/source-based/2026-05-26_043125 --no-llm --json
-npm run benchmark -- work_dir/source-based/2026-05-26_043125 --strict-platform js-eyes:zhihu
+npm run benchmark -- work_dir/focused/2026-05-26_043125
+npm run benchmark -- work_dir/focused/2026-05-26_043125 --no-llm --json
+npm run benchmark -- work_dir/focused/2026-05-26_043125 --strict-platform js-eyes:zhihu
 node scripts/benchmark-research.mjs --compare <researchIdA>,<researchIdB> --json
 ```
 
@@ -75,7 +75,7 @@ Report output is validated before a run can complete. The engine requires a Mark
 
 Qwen models used through an OpenAI-compatible endpoint automatically request `reasoning_effort: none`; this prevents small summary/report token budgets from being consumed entirely by a hidden `reasoning` field while final `content` remains empty.
 
-For `source-based` research, official documentation, repositories, specifications, and papers receive a primary-source boost. Missing primary evidence opens a focused follow-up query and is preserved as a quality limitation. Direct-evidence passages are created only from successfully fetched source bodies; search snippets remain `search_snippet` evidence.
+For `focused` research, official documentation, repositories, specifications, and papers receive a primary-source boost. Missing primary evidence opens a focused follow-up query and is preserved as a quality limitation. Direct-evidence passages are created only from successfully fetched source bodies; search snippets remain `search_snippet` evidence.
 
 You can also override settings for one run:
 
@@ -85,7 +85,7 @@ npm exec --package=. -- jdr research "Compare SearXNG and Brave Search APIs" \
   --model gpt-4o-mini \
   --base-url https://api.openai.com/v1 \
   --search-base-url http://127.0.0.1:8080 \
-  --strategy source-based \
+  --strategy focused \
   --iterations 2 \
   --questions 3 \
   --concurrency 2
@@ -94,18 +94,19 @@ npm exec --package=. -- jdr research "Compare SearXNG and Brave Search APIs" \
 npm exec --package=. -- jdr research "openclaw" \
   --search js-eyes \
   --search-skills js-reddit-ops-skill \
-  --strategy rapid
+  --strategy quick \
+  --iterations 1
 
-# Source-based deep reading: fetch page content or LLM summaries before report synthesis
+# Focused deep reading: fetch page content or LLM summaries before report synthesis
 npm exec --package=. -- jdr research "llm wiki" \
   --search js-eyes \
   --search-skills js-zhihu-ops-skill \
-  --strategy source-based \
-  --source-fetch-mode summary \
-  --source-fetch-backend js-eyes \
-  --source-max-urls 12 \
-  --source-enable-filter true \
-  --source-max-sources 30
+  --strategy focused \
+  --focused-fetch-mode summary \
+  --focused-fetch-backend js-eyes \
+  --focused-max-urls 12 \
+  --focused-enable-filter true \
+  --focused-max-sources 30
 ```
 
 ## Configuration
@@ -117,7 +118,7 @@ Runtime settings are stored in the local SQLite database under `data/`. Values f
 - LLM base URL: `https://api.openai.com/v1`
 - Search engine: `searxng`
 - Search base URL: `http://127.0.0.1:8080`
-- Research strategy: `source-based`
+- Research strategy: `focused`
 - Research iterations: `2`
 - Research questions per iteration: `3`
 - Research concurrency: `2`
@@ -176,14 +177,13 @@ For Xiaohongshu-only search, set `JS_EYES_SKILL=js-xiaohongshu-ops-skill`. On Li
 
 Available research strategies are exposed through `/api/strategies` and shared by the web UI:
 
-- `rapid`: fast research that searches the original query plus a few follow-up questions.
-- `source-based`: default iterative research that generates source-informed follow-up questions. Default URL enrichment uses `research.sourceBased.fetchMode: summary` (LLM-compressed page summaries before report synthesis). Use `disabled` for snippet-only fast runs; relevance filtering stays off by default.
-- `parallel`: broad research that runs generated questions with controlled concurrency.
-- `adaptive`: experimental gap-driven research with bounded steps, shared budgets, structured progress, and evidence evaluation.
+- `quick` (快速调研): snippet-only scan. One iteration is the former Rapid path (original query plus a few follow-ups). More than one iteration reuses the former Parallel iterative loop. It does not promise body-level evidence.
+- `focused` (专题调研, default): read sources and produce a cited report for a well-bounded question. Default URL enrichment uses `research.focused.fetchMode: summary`. Use `disabled` for snippet-only runs; relevance filtering stays off by default.
+- `exploratory` (探索性调研): the former Adaptive v2 Agent Loop. The model chooses structured search/read/reflect/answer actions while the runtime guards legality, cancellation, budgets, and maximum steps.
 
-`adaptive` keeps its existing v1 behavior unless `--adaptive-loop-version v2` is passed. The v2 experiment is a bounded Agent Loop: the model chooses structured search/read/reflect/answer actions, while the runtime only guards legality, cancellation, budgets, and maximum steps. Optional rerank scores are observations rather than source-selection commands, and embeddings are not required.
+`focused` defaults to a quality preset: `fetchMode: summary`, query memory, source clustering, passage/claim evidence, iteration/evidence early-stop, and soft budgets (`maxSearchRequests: 18`, `maxSourceReads: 16`). Override per run with CLI flags such as `--focused-fetch-mode disabled` or `config set` / Web UI settings. `preReportGate` and LLM relevance filtering remain off by default.
 
-`source-based` defaults to a quality preset: `fetchMode: summary`, query memory, source clustering, passage/claim evidence, adaptive early-stop, and soft budgets (`maxSearchRequests: 10`, `maxSourceReads: 8`). Override per run with CLI flags such as `--source-fetch-mode disabled` or `config set` / Web UI settings. `preReportGate` and LLM relevance filtering remain off by default.
+Historical `work_dir/rapid|parallel|source-based|adaptive/` sessions remain readable. New runs write `work_dir/quick|focused|exploratory/`.
 
 Semantic reranking is an optional observation, not a prerequisite or automatic source selector. The default `rules` provider is local and deterministic; `--rerank-provider jina` opts into Jina for that run and requires `--rerank-api-key` (or `JINA_API_KEY`). Provider errors fall back to rules, while cancellation and budget limits remain hard stops. Embeddings are disabled by default and are not needed by any current strategy.
 

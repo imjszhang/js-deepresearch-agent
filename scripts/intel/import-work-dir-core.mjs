@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { loadArtifacts } from '../benchmark/load-artifacts.mjs';
 import { archiveResearchResult } from '../../src/storage/intel-store.mjs';
-import { buildEvidenceArtifacts } from 'js-deepresearch-engine';
+import { buildEvidenceArtifacts, matchesStrategyFilter } from 'js-deepresearch-engine';
 
 const REQUIRED_FILES = ['report.md', 'findings.json', 'sources.json', 'meta.json'];
 const SESSION_DIR_PATTERN = /^\d{4}-\d{2}-\d{2}_\d{6}$/;
@@ -34,7 +34,7 @@ export function discoverWorkDirSessions({ root, strategyFilter = null }) {
   const strategies = fs.readdirSync(resolvedRoot, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
     .map((entry) => entry.name)
-    .filter((name) => !strategyFilter || name === strategyFilter);
+    .filter((name) => matchesStrategyFilter(name, strategyFilter));
 
   for (const strategy of strategies) {
     const strategyDir = path.join(resolvedRoot, strategy);

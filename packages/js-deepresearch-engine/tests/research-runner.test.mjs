@@ -7,7 +7,7 @@ function validReport(marker = 'test report') {
 }
 
 describe('ResearchRunner', () => {
-  it('runs rapid research with injected LLM and search adapters', async () => {
+  it('runs quick research with injected LLM and search adapters', async () => {
     const runner = new ResearchRunner();
     const events = [];
     const searchedQuestions = [];
@@ -28,7 +28,8 @@ describe('ResearchRunner', () => {
           maxResults: 2,
         },
         research: {
-          strategy: 'rapid',
+          strategy: 'quick',
+          iterations: 1,
           questionsPerIteration: 2,
           concurrency: 2,
         },
@@ -54,23 +55,22 @@ describe('ResearchRunner', () => {
     assert.deepEqual(searchedQuestions, ['test topic', 'follow up one', 'follow up two']);
     assert.equal(result.sources.length, 3);
     assert.equal(events[0].message, 'Research started');
-    assert.ok(events.some((event) => event.message === 'Generating rapid follow-up questions'));
-    assert.ok(events.some((event) => event.message === 'Running 3 rapid searches'));
+    assert.ok(events.some((event) => event.message === 'Generating quick follow-up questions'));
+    assert.ok(events.some((event) => event.message === 'Running 3 quick searches'));
     assert.equal(events.at(-1).message, 'Research complete');
     assert.equal(events.at(-1).progress, 100);
   });
 
   it('exposes available research strategies as metadata', () => {
     assert.deepEqual(strategyMetadata.map((strategy) => strategy.id), [
-      'rapid',
-      'source-based',
-      'parallel',
-      'adaptive',
+      'quick',
+      'focused',
+      'exploratory',
     ]);
     assert.equal(strategyMetadata[0].supportsConcurrency, true);
   });
 
-  it('runs source-based research across configured iterations', async () => {
+  it('runs focused research across configured iterations', async () => {
     const searchedQuestions = [];
     const runner = new ResearchRunner();
 
@@ -80,13 +80,13 @@ describe('ResearchRunner', () => {
         llm: {},
         search: {},
         research: {
-          strategy: 'source-based',
+          strategy: 'focused',
           iterations: 2,
           questionsPerIteration: 1,
           concurrency: 1,
-          sourceBased: {
+          focused: {
             fetchMode: 'disabled',
-            adaptiveControl: { enabled: false },
+            iterationControl: { enabled: false },
           },
         },
       },
@@ -103,7 +103,7 @@ describe('ResearchRunner', () => {
               ? JSON.stringify(['second iteration question'])
               : JSON.stringify(['first iteration question']);
           }
-          return validReport('source-based report');
+          return validReport('focused report');
         },
       },
     });
@@ -125,28 +125,37 @@ describe('ResearchRunner', () => {
     );
   });
 
-  it('runs the experimental adaptive strategy with structured trace and gaps', async () => {
+  it('runs exploratory research with the agent loop', async () => {
     const events = [];
+    const decisions = [
+      { action: 'search', query: 'exploratory topic', gapId: 'gap-1', reasonCode: 'find_sources' },
+      { action: 'read', sourceIds: ['https://example.com/exploratory%20topic'], gapId: 'gap-1', reasonCode: 'read' },
+      { action: 'answer', reasonCode: 'evidence_sufficient' },
+    ];
     const runner = new ResearchRunner();
     const result = await runner.run({
-      query: 'adaptive topic',
+      query: 'exploratory topic',
       settings: {
         llm: {}, search: {},
         research: {
-          strategy: 'adaptive', concurrency: 2,
+          strategy: 'exploratory', concurrency: 2,
           budget: { maxSearchRequests: 5, maxSourceReads: 0, maxLlmTokens: 0 },
-          adaptive: { maxSteps: 10, maxOpenGaps: 3, maxQueriesPerStep: 2, plannerParallelism: 2 },
-          sourceBased: { fetchMode: 'disabled', sourceSelection: { enabled: true, maxPerHostname: 2 } },
+          exploratory: { maxSteps: 6, maxOpenGaps: 3, maxQueriesPerStep: 2, maxEvaluationRetries: 0, autoReadTopK: 0 },
+          focused: { fetchMode: 'disabled', sourceSelection: { enabled: true, maxPerHostname: 2 } },
         },
       },
       onProgress: (event) => events.push(event.message),
-      search: { async search(question) { return [{ title: question, url: `https://example.com/${encodeURIComponent(question)}`, snippet: 'evidence' }]; } },
-      llm: { async complete({ messages }) { return messages[0].content.includes('research planner') ? JSON.stringify(['gap two']) : validReport('adaptive evidence report'); } },
+      search: { async search(question) { return [{ title: question, url: `https://example.com/${encodeURIComponent(question)}`, snippet: 'evidence', content: 'usable evidence', fetchStatus: 'ok' }]; } },
+      llm: {
+        async complete({ purpose }) {
+          if (purpose === 'agent_decision') return JSON.stringify(decisions.shift());
+          if (purpose === 'gap_decomposition') return '{"subQuestions":["gap two"]}';
+          return validReport('exploratory evidence report');
+        },
+      },
     });
-    assert.ok(result.gaps.length >= 2);
-    assert.ok(result.trace.some((entry) => entry.action === 'plan'));
-    assert.ok(result.trace.some((entry) => entry.action === 'evaluate_gap'));
-    assert.ok(result.trace.filter((entry) => !['llm_call', 'draft'].includes(entry.action)).length <= 10);
+    assert.ok(result.gaps.length >= 1);
+    assert.ok(result.trace.some((entry) => entry.action === 'search' || entry.reasonCode === 'agent_loop_v2'));
     assert.equal(result.trace.at(-1).action, 'stop');
     assert.ok(events.includes('Assessing research query'));
   });
@@ -155,7 +164,7 @@ describe('ResearchRunner', () => {
     let calls = 0;
     const result = await new ResearchRunner().run({
       query: 'budgeted topic',
-      settings: { llm: {}, search: {}, research: { strategy: 'rapid', questionsPerIteration: 2, concurrency: 2, budget: { maxSearchRequests: 1 } } },
+      settings: { llm: {}, search: {}, research: { strategy: 'quick', iterations: 1, questionsPerIteration: 2, concurrency: 2, budget: { maxSearchRequests: 1 } } },
       search: { async search(question) { calls += 1; return [{ title: question, url: 'https://example.test', snippet: 'x' }]; } },
       llm: { async complete({ messages }) { return messages[0].content.includes('research planner') ? JSON.stringify(['q1', 'q2']) : validReport('budgeted report'); } },
     });
@@ -169,7 +178,7 @@ describe('ResearchRunner', () => {
     const events = [];
     const result = await new ResearchRunner().run({
       query: 'retry topic',
-      settings: { llm: {}, search: {}, research: { strategy: 'rapid', questionsPerIteration: 0 } },
+      settings: { llm: {}, search: {}, research: { strategy: 'quick', iterations: 1, questionsPerIteration: 0 } },
       search: { async search() { return [{ title: 'S', url: 'https://example.test', snippet: 'evidence' }]; } },
       llm: { async complete({ purpose }) {
         if (purpose === 'question_generation') return '[]';
@@ -189,7 +198,7 @@ describe('ResearchRunner', () => {
     await assert.rejects(
       new ResearchRunner().run({
         query: 'empty report topic',
-        settings: { llm: {}, search: {}, research: { strategy: 'rapid', questionsPerIteration: 0 } },
+        settings: { llm: {}, search: {}, research: { strategy: 'quick', iterations: 1, questionsPerIteration: 0 } },
         search: { async search() { return [{ title: 'S', url: 'https://example.test', snippet: 'evidence' }]; } },
         llm: { async complete({ purpose }) { return purpose === 'question_generation' ? '[]' : ''; } },
       }),
@@ -197,12 +206,12 @@ describe('ResearchRunner', () => {
     );
   });
 
-  it('records source-based critical gaps and evidence limitations', async () => {
+  it('records focused critical gaps and evidence limitations', async () => {
     const result = await new ResearchRunner().run({
       query: 'compare open source framework architecture',
       settings: { llm: {}, search: {}, research: {
-        strategy: 'source-based', iterations: 1, questionsPerIteration: 1, concurrency: 1,
-        sourceBased: { fetchMode: 'disabled', adaptiveControl: { enabled: false } },
+        strategy: 'focused', iterations: 1, questionsPerIteration: 1, concurrency: 1,
+        focused: { fetchMode: 'disabled', iterationControl: { enabled: false } },
       } },
       search: { async search(question) {
         return question === 'compare open source framework architecture'
@@ -210,7 +219,7 @@ describe('ResearchRunner', () => {
           : [{ title: 'Secondary article', url: 'https://blog.csdn.net/secondary', snippet: 'overview' }];
       } },
       llm: { async complete({ purpose }) {
-        return purpose === 'question_generation' ? JSON.stringify(['secondary comparison']) : validReport('limited source-based report');
+        return purpose === 'question_generation' ? JSON.stringify(['secondary comparison']) : validReport('limited focused report');
       } },
     });
     assert.equal(result.gaps[0].priority, 'critical');
@@ -222,13 +231,13 @@ describe('ResearchRunner', () => {
     assert.equal(result.quality.gate, 'pass_with_warnings');
   });
 
-  it('deduplicates repeated source-based gaps and reports the remaining open count', async () => {
+  it('deduplicates repeated focused gaps and reports the remaining open count', async () => {
     const result = await new ResearchRunner().run({
       query: 'duplicate gap topic',
       settings: { llm: {}, search: {}, research: {
-        strategy: 'source-based', iterations: 2, questionsPerIteration: 1, concurrency: 1,
+        strategy: 'focused', iterations: 2, questionsPerIteration: 1, concurrency: 1,
         budget: { maxSourceReads: 1 },
-        sourceBased: { fetchMode: 'disabled', adaptiveControl: { enabled: false } },
+        focused: { fetchMode: 'disabled', iterationControl: { enabled: false } },
       } },
       search: { async search() { return []; } },
       llm: { async complete({ purpose }) { return purpose === 'question_generation' ? JSON.stringify(['same unresolved question']) : validReport('duplicate gap report'); } },

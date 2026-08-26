@@ -1,4 +1,4 @@
-import { getSourceEvidence } from './source-based-settings.mjs';
+import { getSourceEvidence } from './focused-settings.mjs';
 
 export function formatSourcesForResearchContext(findings = [], {
   limit = 30,

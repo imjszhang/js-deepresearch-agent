@@ -180,12 +180,12 @@ Usage:
 
 Modes:
   --sessions <paths>       Compare existing work_dir sessions (comma-separated)
-                           Optional label prefix: adaptive-v2=work_dir/adaptive/...
+                           Optional label prefix: exploratory=work_dir/exploratory/...
   --research-ids <ids>     Compare archived intel store runs
   --run <query>            Run multiple strategies on the same query, then compare
 
 Strategy presets (--strategies, for --run only):
-  source-based, adaptive-v1, adaptive-v2
+  quick, focused, exploratory
   Default: ${DEFAULT_STRATEGY_COMPARE_ORDER.join(',')}
 
 Options:
@@ -200,12 +200,12 @@ Research flags (for --run):
 
 Examples:
   node scripts/benchmark-strategies.mjs \\
-    --sessions work_dir/source-based/2026-07-13_051140,work_dir/adaptive/2026-07-13_051626 \\
+    --sessions work_dir/focused/2026-07-13_051140,work_dir/exploratory/2026-07-13_051626 \\
     --no-llm --output tmp/strategy-compare.md
 
   node scripts/benchmark-strategies.mjs \\
     --run "Ollama vs llama.cpp for local LLM deployment" \\
-    --strategies source-based,adaptive-v1,adaptive-v2 \\
+    --strategies quick,focused,exploratory \\
     --no-llm --json
 `);
 }

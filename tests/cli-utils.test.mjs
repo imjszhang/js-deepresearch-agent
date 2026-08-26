@@ -10,9 +10,9 @@ import {
 
 describe('CLI utilities', () => {
   it('parses positional args and flags', () => {
-    const parsed = parseArgs(['hello', 'world', '--strategy', 'rapid', '--json']);
+    const parsed = parseArgs(['hello', 'world', '--strategy', 'quick', '--json']);
     assert.deepEqual(parsed.args, ['hello', 'world']);
-    assert.equal(parsed.flags.strategy, 'rapid');
+    assert.equal(parsed.flags.strategy, 'quick');
     assert.equal(parsed.flags.json, true);
   });
 
@@ -67,26 +67,41 @@ describe('CLI utilities', () => {
     assert.deepEqual(settings.search.provider.skills, ['a', 'b']);
   });
 
-  it('maps source-based enrichment flags into research settings', () => {
+  it('maps focused enrichment flags into research settings', () => {
     const settings = applyResearchFlags({ research: {} }, {
-      'source-fetch-mode': 'summary',
-      'source-max-urls': '12',
-      'source-enable-filter': 'true',
-      'source-max-sources': '20',
+      'focused-fetch-mode': 'summary',
+      'focused-max-urls': '12',
+      'focused-enable-filter': 'true',
+      'focused-max-sources': '20',
     });
 
-    assert.equal(settings.research.sourceBased.fetchMode, 'summary');
-    assert.equal(settings.research.sourceBased.maxUrlsTotal, 12);
-    assert.equal(settings.research.sourceBased.enableRelevanceFilter, true);
-    assert.equal(settings.research.sourceBased.maxSourcesForReport, 20);
+    assert.equal(settings.research.focused.fetchMode, 'summary');
+    assert.equal(settings.research.focused.maxUrlsTotal, 12);
+    assert.equal(settings.research.focused.enableRelevanceFilter, true);
+    assert.equal(settings.research.focused.maxSourcesForReport, 20);
   });
 
-  it('maps source fetch backend flag into research settings', () => {
+  it('maps focused fetch backend flag into research settings', () => {
     const settings = applyResearchFlags({ research: {} }, {
-      'source-fetch-backend': 'js-eyes',
+      'focused-fetch-backend': 'js-eyes',
     });
 
-    assert.equal(settings.research.sourceBased.fetchBackend, 'js-eyes');
+    assert.equal(settings.research.focused.fetchBackend, 'js-eyes');
+  });
+
+  it('rejects retired strategy IDs with a migration hint', () => {
+    assert.throws(
+      () => applyResearchFlags({ research: {} }, { strategy: 'source-based' }),
+      /Strategy "source-based" is no longer supported.*focused/,
+    );
+    assert.throws(
+      () => applyResearchFlags({ research: {} }, { strategy: 'rapid' }),
+      /Strategy "rapid" is no longer supported.*quick/,
+    );
+    assert.throws(
+      () => applyResearchFlags({ research: {} }, { 'adaptive-loop-version': 'v2' }),
+      /--adaptive-loop-version has been removed/,
+    );
   });
 
   it('maps other search runtime flags for one-off research runs', () => {
@@ -107,24 +122,24 @@ describe('CLI utilities', () => {
 
   it('maps budget and Schema v3 feature flags with explicit booleans', () => {
     const settings = applyResearchFlags({ search: {}, research: {} }, {
-      strategy: 'adaptive',
+      strategy: 'exploratory',
       'max-search-requests': '12',
       'max-source-reads': '5',
-      'source-adaptive-control': 'true',
-      'source-query-memory': 'false',
-      'source-cluster-results': 'true',
-      'source-evidence-passages': 'true',
-      'source-claim-alignment': 'true',
-      'source-pre-report-gate': 'true',
+      'focused-iteration-control': 'true',
+      'focused-query-memory': 'false',
+      'focused-cluster-results': 'true',
+      'focused-evidence-passages': 'true',
+      'focused-claim-alignment': 'true',
+      'focused-pre-report-gate': 'true',
     });
-    assert.equal(settings.research.strategy, 'adaptive');
+    assert.equal(settings.research.strategy, 'exploratory');
     assert.equal(settings.research.budget.maxSearchRequests, 12);
     assert.equal(settings.research.budget.maxSourceReads, 5);
-    assert.equal(settings.research.sourceBased.adaptiveControl.enabled, true);
-    assert.equal(settings.research.sourceBased.queryMemory.enabled, false);
-    assert.equal(settings.research.sourceBased.sourceSelection.enabled, true);
-    assert.equal(settings.research.sourceBased.evidencePassages.claimAlignment, true);
-    assert.equal(settings.research.sourceBased.preReportGate.enabled, true);
+    assert.equal(settings.research.focused.iterationControl.enabled, true);
+    assert.equal(settings.research.focused.queryMemory.enabled, false);
+    assert.equal(settings.research.focused.sourceSelection.enabled, true);
+    assert.equal(settings.research.focused.evidencePassages.claimAlignment, true);
+    assert.equal(settings.research.focused.preReportGate.enabled, true);
   });
 
   it('maps optional rerank flags without persisting them', () => {
@@ -136,7 +151,7 @@ describe('CLI utilities', () => {
       'rerank-base-url': 'https://rerank.example/v1',
       'rerank-api-key': 'one-run-key',
       'rerank-timeout-ms': '1234',
-      'adaptive-loop-version': 'v2',
+      'exploratory-max-steps': '12',
     });
     assert.equal(settings.research.budget.maxRerankRequests, 3);
     assert.equal(settings.research.budget.maxRerankTokens, 900);
@@ -147,7 +162,7 @@ describe('CLI utilities', () => {
       apiKey: 'one-run-key',
       timeoutMs: 1234,
     });
-    assert.equal(settings.research.adaptive.loopVersion, 'v2');
+    assert.equal(settings.research.exploratory.maxSteps, 12);
   });
 
   it('maps embedding and extract fetch mode flags', () => {
@@ -156,7 +171,7 @@ describe('CLI utilities', () => {
       'embedding-base-url': 'http://127.0.0.1:18789',
       'embedding-model': 'openclaw/default',
       'embedding-api-key': 'gateway-token',
-      'source-fetch-mode': 'extract',
+      'focused-fetch-mode': 'extract',
     });
     assert.deepEqual(settings.research.providers.embedding, {
       provider: 'openai-compatible',
@@ -164,7 +179,7 @@ describe('CLI utilities', () => {
       model: 'openclaw/default',
       apiKey: 'gateway-token',
     });
-    assert.equal(settings.research.sourceBased.fetchMode, 'extract');
+    assert.equal(settings.research.focused.fetchMode, 'extract');
   });
 
   it('maps http-proxy flag without persisting it', () => {
