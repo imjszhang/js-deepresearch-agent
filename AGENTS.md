@@ -545,17 +545,33 @@ npm run benchmark:strategies -- \
 | `--run <query>` | 依次执行多种策略后自动对比 |
 | `--strategies <list>` | `--run` 时指定预设，默认 `quick,focused,exploratory` |
 | `--output <file>` | 写入 Markdown/JSON 报告 |
-| `--no-llm` | 质量评估复用 schema v3 归档 verdict |
+| `--no-llm` | 官方对比路径：只跑确定性审计。归档 verdict / `--llm` 仅进入文末 **optional / non-official** 语义层，不写入 `status` |
 
-对比报告除花费与支持率外，还有 **Strategy Effectiveness**：按策略承诺看主体覆盖、主体×方面格子、每个主体是否读到正文、官方来源、叙事支持率和合同检查。`quick` 不要求正文；`focused` 要求每个主体都有正文/摘要；`exploratory` 还要求比较题的主体×方面格子基本填满。同一道题的离线对比：
+对比报告的官方结果是 **Strategy Audit**，只回答「这次 run 是否满足已发布的确定性证据合同」，不回答「报告好不好 / 真不真」。`--no-llm` 是官方 compare 路径。
+
+审计输出 `status`：`ready` / `not_ready` / `invalid`。没有加权总分、没有 A/B/good 评级。五组硬检查：
+
+| 组 | 含义 |
+|---|---|
+| `processContract` | 按策略检查过程（quick 必须 snippet-only 且 `sourceReads=0`；focused 必须有真实正文/摘要并完成所有 `required` slot；exploratory 必须达到探索 token 下限或留下 hard stop，且 `critical` slot 不得 `missing`） |
+| `reportIntegrity` | 标题、非空 Summary/Key Findings、无空列表项、叙事不低于 200 字符 |
+| `citationIntegrity` | `[n.m]` / `citedSourceId` 必须能解析到 findings/sources |
+| `evidenceProvenance` | 真实抓取正文；WAF/Cloudflare/过短壳页不算 body |
+| `requiredSlotCompletion` | 由 `scripts/benchmark/query-battery.mjs` 的 slot catalog 决定，不是主体×方面笛卡尔积 |
+
+Battery 用 **required slots** 替代旧的 subject×aspect 格子。官方 host 写在每个 battery 的 `sourcePolicies` 里（精确 hostname + 可选 `pathPrefix`），不再使用全局 Apple-only 列表。Query 未命中 battery 时，slot 组为 `not_applicable`，不因此判 focused/exploratory 覆盖失败；过程、引用、报告检查仍生效。
+
+`quality.json` / `claims.json` 里的 `supported` / `partially_supported`、规则重叠率、LLM entailment **不得**喂给 `processContract.pass`、`status` 或官方 delta。Markdown 里的 Supported rate 表标为 **optional / non-official semantic analysis**。成本拆出 `explorationTokens` / `reportTokens` / `evaluationTokens`（能拆时），官方效率 **不**除以 supported claim 数。
+
+同一道题的离线对比：
 
 ```bash
 npm run benchmark:strategies -- \
   --sessions quick=work_dir/quick/<timestamp>,focused=work_dir/focused/<timestamp>,exploratory=work_dir/exploratory/<timestamp> \
-  --no-llm --output tmp/strategy-effectiveness.md
+  --no-llm --output tmp/strategy-audit.md
 ```
 
-耗时取自 `--run` 墙钟时间，或从 `trace.json` 时间戳/`durationMs` 推算；成本取自 `quality.json` 的 `budget.usage`。
+耗时取自 `--run` 墙钟时间，或从 `trace.json` 时间戳/`durationMs` 推算；成本取自 `quality.json` 的 `budget.usage`，并尽量按 `trace.json` 的 `llm_call` purpose 拆分。
 
 ---
 

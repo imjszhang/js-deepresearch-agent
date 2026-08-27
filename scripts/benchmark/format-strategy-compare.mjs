@@ -11,6 +11,16 @@ function formatDelta(value, { percent = false, suffix = '' } = {}) {
   return `${sign}${value}${suffix}`;
 }
 
+function formatPass(value) {
+  return value ? 'pass' : 'fail';
+}
+
+function slotSummary(audit) {
+  const slots = audit?.requiredSlotCompletion?.slots || [];
+  const completed = slots.filter((slot) => slot.status === 'completed').length;
+  return slots.length ? `${completed}/${slots.length}` : 'n/a';
+}
+
 export function formatStrategyCompareMarkdown(comparison) {
   const lines = [
     '# Strategy Benchmark Comparison',
@@ -41,9 +51,69 @@ export function formatStrategyCompareMarkdown(comparison) {
     );
   }
 
+  if (comparison.runs.some((run) => run.audit)) {
+    lines.push(
+      '',
+      '## Strategy Audit',
+      '',
+      'Official result is `ready` / `not_ready` / `invalid`. This is a deterministic evidence contract, not a quality or truth grade. `--no-llm` is the official compare path.',
+      '',
+      '| Strategy | Status | Process | Report | Citations | Provenance | Required slots |',
+      '| --- | --- | --- | --- | --- | --- | ---: |',
+    );
+    for (const run of comparison.runs) {
+      const audit = run.audit;
+      if (!audit) continue;
+      lines.push(
+        `| ${run.strategyLabel} | ${audit.status} | ${formatPass(audit.processContract.pass)} | ${formatPass(audit.reportIntegrity.pass)} | ${formatPass(audit.citationIntegrity.pass)} | ${formatPass(audit.evidenceProvenance.pass)} | ${slotSummary(audit)} |`,
+      );
+    }
+
+    for (const run of comparison.runs) {
+      const slots = run.audit?.requiredSlotCompletion?.slots || [];
+      if (!slots.length) continue;
+      lines.push('', `### ${run.strategyLabel} slots`);
+      for (const slot of slots) {
+        const failed = slot.checks.filter((item) => !item.pass).map((item) => item.id);
+        lines.push(`- \`${slot.id}\`: ${slot.status}${failed.length ? ` (${failed.join(', ')})` : ''}`);
+      }
+    }
+
+    for (const run of comparison.runs) {
+      const failed = (run.audit?.processContract?.checks || []).filter((item) => !item.pass);
+      if (!failed.length) continue;
+      lines.push('', `### ${run.strategyLabel} process gaps`);
+      for (const item of failed) {
+        lines.push(`- ${item.id}: ${item.detail}`);
+      }
+    }
+  }
+
+  if (comparison.deltas?.length) {
+    const baseline = comparison.runs[0]?.strategyLabel || 'baseline';
+    lines.push('', `## Official deltas vs ${baseline}`, '');
+    for (const delta of comparison.deltas) {
+      lines.push(`### ${delta.strategyLabel}`);
+      lines.push(`- Duration: ${formatDelta(delta.durationMs, { suffix: 'ms' })} (${formatDurationMs(delta.durationMs)})`);
+      lines.push(`- LLM tokens: ${formatDelta(delta.llmTokens)}`);
+      lines.push(`- Search requests: ${formatDelta(delta.searchRequests)}`);
+      lines.push(`- Source reads: ${formatDelta(delta.sourceReads)}`);
+      lines.push(`- Rerank requests: ${formatDelta(delta.rerankRequests)}`);
+      lines.push(`- Completed slots: ${formatDelta(delta.completedSlots)}`);
+      lines.push(`- Resolved citations: ${formatDelta(delta.resolvedCitations)}`);
+      lines.push(`- Real bodies: ${formatDelta(delta.realBodies)}`);
+      lines.push(`- Process contract: ${formatDelta(delta.processContractPass)}`);
+      lines.push(`- Status: ${delta.status || 'n/a'} (baseline ${delta.baselineStatus || 'n/a'})`);
+      lines.push(`- Sources: ${formatDelta(delta.sourceCount)}`);
+      lines.push('');
+    }
+  }
+
   lines.push(
     '',
-    '## Quality Metrics',
+    '## Optional semantic analysis (non-official)',
+    '',
+    'Stored or runtime claim verdicts and overlap rates are **not** part of the official contract. They must not be read as `ready` / `not_ready`.',
     '',
     '| Strategy | Supported | At least partial | Partial | Unsupported | Unverifiable | Evidence cov. | Direct ev. | Key claim sup. |',
     '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |',
@@ -56,29 +126,7 @@ export function formatStrategyCompareMarkdown(comparison) {
     );
   }
 
-  if (comparison.deltas?.length) {
-    const baseline = comparison.runs[0]?.strategyLabel || 'baseline';
-    lines.push('', `## Deltas vs ${baseline}`, '');
-    for (const delta of comparison.deltas) {
-      lines.push(`### ${delta.strategyLabel}`);
-      lines.push(`- Duration: ${formatDelta(delta.durationMs, { suffix: 'ms' })} (${formatDurationMs(delta.durationMs)})`);
-      lines.push(`- LLM tokens: ${formatDelta(delta.llmTokens)}`);
-      lines.push(`- Search requests: ${formatDelta(delta.searchRequests)}`);
-      lines.push(`- Source reads: ${formatDelta(delta.sourceReads)}`);
-      lines.push(`- Rerank requests: ${formatDelta(delta.rerankRequests)}`);
-      lines.push(`- Supported rate: ${formatDelta(delta.supportedRate, { percent: true })}`);
-      lines.push(`- Narrative at least partial: ${formatDelta(delta.supportedOrPartialRate, { percent: true })}`);
-      lines.push(`- Subject coverage: ${formatDelta(delta.subjectRate, { percent: true })}`);
-      lines.push(`- Aspect coverage: ${formatDelta(delta.aspectRate, { percent: true })}`);
-      lines.push(`- Subject × aspect cells: ${formatDelta(delta.cellRate, { percent: true })}`);
-      lines.push(`- Bodies per subject: ${formatDelta(delta.subjectBodyRate, { percent: true })}`);
-      lines.push(`- Evidence coverage: ${formatDelta(delta.evidenceCoverageRate, { percent: true })}`);
-      lines.push(`- Sources: ${formatDelta(delta.sourceCount)}`);
-      lines.push('');
-    }
-  }
-
-  lines.push('## Session Paths', '');
+  lines.push('', '## Session Paths', '');
   for (const run of comparison.runs) {
     lines.push(`- **${run.strategyLabel}**: ${run.workDir || run.researchId || '(unknown)'}`);
     if (run.qualityFlags.length > 0) {
@@ -95,34 +143,6 @@ export function formatStrategyCompareMarkdown(comparison) {
     }
     if (run.unusedBudgetTokens != null) {
       lines.push(`  - unused budget: ${run.unusedBudgetTokens}`);
-    }
-  }
-
-  if (comparison.runs.some((run) => run.effectiveness)) {
-    lines.push(
-      '',
-      '## Strategy Effectiveness',
-      '',
-      'Coverage and contract scores are promise-aware: quick is a snippet scan, focused should read bodies, exploratory should cover every named subject and aspect.',
-      '',
-      '| Strategy | Subjects | Cells | Body/subject | Official | Key claims | Narrative supported | At least partial | Tokens / supported | Contract |',
-      '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |',
-    );
-    for (const run of comparison.runs) {
-      const effect = run.effectiveness;
-      if (!effect) continue;
-      lines.push(
-        `| ${run.strategyLabel} | ${formatPercent(effect.coverage.subjectRate)} | ${formatPercent(effect.coverage.cellRate)} | ${formatPercent(effect.evidence.subjectBodyRate)} | ${formatPercent(effect.evidence.officialSubjectRate ?? effect.evidence.officialRate)} | ${effect.narrative.keyClaimCount} | ${formatPercent(effect.narrative.supportedRate)} | ${formatPercent(effect.narrative.supportedOrPartialRate)} | ${effect.efficiency.tokensPerSupportedClaim ?? 'n/a'} | ${effect.contract.pass ? 'pass' : 'fail'} |`,
-      );
-    }
-
-    for (const run of comparison.runs) {
-      const failed = (run.effectiveness?.contract.checks || []).filter((check) => !check.pass);
-      if (!failed.length) continue;
-      lines.push('', `### ${run.strategyLabel} contract gaps`);
-      for (const check of failed) {
-        lines.push(`- ${check.id}: ${check.detail}`);
-      }
     }
   }
 

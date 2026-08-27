@@ -1,7 +1,7 @@
 import { loadArtifacts, loadArtifactsByResearchId } from './load-artifacts.mjs';
 import { runBenchmark } from './run-benchmark.mjs';
 import { extractRunStats } from './extract-run-stats.mjs';
-import { scoreStrategyEffectiveness } from './strategy-effectiveness.mjs';
+import { auditStrategyRun } from './strategy-effectiveness.mjs';
 
 function collectWarnings(runs) {
   const warnings = [];
@@ -19,6 +19,18 @@ function collectWarnings(runs) {
   return warnings;
 }
 
+function completedSlotCount(audit) {
+  return (audit?.requiredSlotCompletion?.slots || []).filter((slot) => slot.status === 'completed').length;
+}
+
+function resolvedCitationCount(audit) {
+  return audit?.citationIntegrity?.counts?.resolved ?? 0;
+}
+
+function realBodyCount(audit) {
+  return audit?.evidenceProvenance?.counts?.realBodies ?? 0;
+}
+
 function buildDeltas(runs) {
   if (runs.length < 2) return null;
 
@@ -33,15 +45,15 @@ function buildDeltas(runs) {
     searchRequests: run.cost.searchRequests - baseline.cost.searchRequests,
     sourceReads: run.cost.sourceReads - baseline.cost.sourceReads,
     rerankRequests: run.cost.rerankRequests - baseline.cost.rerankRequests,
-    supportedRate: run.benchmark.metrics.rates.supportedRate - baseline.benchmark.metrics.rates.supportedRate,
-    supportedOrPartialRate: (run.effectiveness?.narrative.supportedOrPartialRate ?? 0)
-      - (baseline.effectiveness?.narrative.supportedOrPartialRate ?? 0),
-    evidenceCoverageRate: run.benchmark.metrics.rates.evidenceCoverageRate - baseline.benchmark.metrics.rates.evidenceCoverageRate,
     sourceCount: run.counts.sourceCount - baseline.counts.sourceCount,
-    subjectRate: (run.effectiveness?.coverage.subjectRate ?? 0) - (baseline.effectiveness?.coverage.subjectRate ?? 0),
-    aspectRate: (run.effectiveness?.coverage.aspectRate ?? 0) - (baseline.effectiveness?.coverage.aspectRate ?? 0),
-    cellRate: (run.effectiveness?.coverage.cellRate ?? 0) - (baseline.effectiveness?.coverage.cellRate ?? 0),
-    subjectBodyRate: (run.effectiveness?.evidence.subjectBodyRate ?? 0) - (baseline.effectiveness?.evidence.subjectBodyRate ?? 0),
+    completedSlots: completedSlotCount(run.audit) - completedSlotCount(baseline.audit),
+    resolvedCitations: resolvedCitationCount(run.audit) - resolvedCitationCount(baseline.audit),
+    realBodies: realBodyCount(run.audit) - realBodyCount(baseline.audit),
+    processContractPass: Boolean(run.audit?.processContract?.pass) === Boolean(baseline.audit?.processContract?.pass)
+      ? 0
+      : (run.audit?.processContract?.pass ? 1 : -1),
+    status: run.audit?.status || null,
+    baselineStatus: baseline.audit?.status || null,
   }));
 }
 
@@ -89,17 +101,24 @@ export async function compareStrategySessions({
       llmEnabled,
     });
 
+    const audit = auditStrategyRun({
+      query: artifacts.meta?.query || stats.query,
+      strategy: stats.strategyLabel,
+      report: artifacts.report,
+      findings: artifacts.findings,
+      sources: artifacts.sources,
+      claims: artifacts.claims,
+      passages: artifacts.passages,
+      quality: artifacts.quality,
+      trace: artifacts.trace,
+      meta: artifacts.meta,
+      usage: artifacts.quality?.budget?.usage || stats.cost,
+    });
+
     runs.push({
       ...stats,
-      effectiveness: scoreStrategyEffectiveness({
-        query: artifacts.meta?.query || stats.query,
-        strategy: stats.strategyLabel,
-        report: artifacts.report,
-        findings: artifacts.findings,
-        sources: artifacts.sources,
-        claims: artifacts.claims,
-        usage: artifacts.quality?.budget?.usage || stats.cost,
-      }),
+      audit,
+      effectiveness: audit,
       benchmark: {
         evaluation: benchmark.evaluation,
         metrics: benchmark.metrics,
