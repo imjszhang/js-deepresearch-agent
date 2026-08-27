@@ -427,9 +427,8 @@ function evaluateSlot(slot, context) {
     ));
   }
 
-  let numbersPass = true;
   if (slot.requiresNumbers) {
-    numbersPass = linkedClaims.some((claim) => (
+    const numbersPass = linkedClaims.some((claim) => (
       auditClaim(claim, { citationMap, sources, passages, meta, slot, sourcePolicies: battery.sourcePolicies }).numbers_match === true
     )) || hitWindows.some((window) => {
       const numbers = extractClaimNumbers(window.text);

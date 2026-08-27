@@ -42,7 +42,7 @@ const OFFICIAL_BODIES = [
     id: 's1',
     title: 'llama.cpp',
     url: 'https://github.com/ggml-org/llama.cpp',
-    content: 'llama.cpp is a first-class Metal backend. Throughput is about 40 tok/s on Apple Silicon.',
+    content: 'llama.cpp is a first-class Metal backend for local inference. Throughput is about 40 tok/s on Apple Silicon.',
     fetchStatus: 'ok',
     contentOrigin: 'fetched',
   },
@@ -50,7 +50,7 @@ const OFFICIAL_BODIES = [
     id: 's2',
     title: 'MLX',
     url: 'https://github.com/ml-explore/mlx',
-    content: 'MLX is Apple native. Throughput is 30% faster than llama.cpp on unified memory.',
+    content: 'MLX is Apple native on unified memory. Throughput is 30% faster than llama.cpp in official docs.',
     fetchStatus: 'ok',
     contentOrigin: 'fetched',
   },
@@ -58,7 +58,7 @@ const OFFICIAL_BODIES = [
     id: 's3',
     title: 'Ollama',
     url: 'https://ollama.com',
-    content: 'Ollama is a beginner-friendly wrapper. Switching backends is 20% faster with mlx-lm.',
+    content: 'Ollama is a beginner-friendly local wrapper. Switching backends is 20% faster with mlx-lm.',
     fetchStatus: 'ok',
     contentOrigin: 'fetched',
   },
@@ -232,7 +232,7 @@ llama.cpp、MLX 与 Ollama 都出现在本地推理讨论里，本文比较它�
       id: 'media',
       title: 'Blog',
       url: 'https://news.example.com/llama-cpp',
-      content: 'llama.cpp is a first-class Metal backend. Throughput is about 40 tok/s on Apple Silicon.',
+      content: 'llama.cpp is a first-class Metal backend for local inference. Throughput is about 40 tok/s on Apple Silicon.',
       fetchStatus: 'ok',
       contentOrigin: 'fetched',
     }, OFFICIAL_BODIES[1], OFFICIAL_BODIES[2]];
@@ -281,11 +281,12 @@ ${'llama.cpp 定位为跨平台底层引擎 [1.1]。这篇长报告重复说明�
       citationKeys: ['1.2'],
       evaluation: { verdict: 'supported', method: 'llm' },
     }];
-    const audit = auditStrategyRun(appleInput({ claims }));
+    const report = REPORT.replace('快 30%', '快 99%');
+    const audit = auditStrategyRun(appleInput({ claims, report }));
     const claim = audit.claimChecks.find((item) => item.text.includes('99%'));
     assert.equal(claim.numbers_match, false);
     assert.equal(audit.status, 'not_ready');
-    assert.equal(audit.requiredSlotCompletion.slots.find((slot) => slot.id === 'mlx.performance').status !== 'completed', true);
+    assert.notEqual(audit.requiredSlotCompletion.slots.find((slot) => slot.id === 'mlx.performance').status, 'completed');
   });
 
   it('marks ready when focused satisfies the published Apple contract', () => {

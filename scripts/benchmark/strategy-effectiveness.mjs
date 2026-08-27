@@ -150,7 +150,6 @@ export function auditEvidenceProvenance(sources = []) {
 }
 
 export function evaluateProcessContract(strategy, {
-  battery,
   usage = {},
   cost = {},
   quality = {},
