@@ -170,6 +170,8 @@ Reserved metadata entries exist for future adapters (`anthropic`, `google`, `ope
 
 Additional search engines can be registered at runtime via `registerSearchEngine()`. The js-deepresearch-agent app registers `js-eyes` locally from `src/search-providers/`; that adapter is **not** bundled in this npm package.
 
+`createSearchEngine()` keeps the existing `search.engine` path when `search.mode` / `search.backends` are unset. `search.mode: "fanout"` creates a composite that calls each enabled backend, merges results by round-robin and normalized URL, applies the top-level `maxResults`, and preserves real engine labels. Do not register `composite` as a virtual engine id. `searchRequests` remains a logical query count; `research.budget.maxSearchBackendRequests` optionally caps real backend calls. Question concurrency is the minimum of child `maxQuestionConcurrency` values.
+
 ## Progress Events
 
 Built-in strategies emit structured progress events internally. `ResearchRunner` maps them to the public callback shape:
@@ -212,7 +214,7 @@ const artifacts = saveResearchToWorkDir({
 | `createSearchEngine`, `searchEngineMetadata`, `registerSearchEngine` | Search registry |
 | `defaultSettings`, `mergeSettings` | Settings schema |
 | `saveResearchToWorkDir`, `saveResearchArtifacts`, `createWorkSessionDir` | Artifact writers |
-| `normalizeSearchConfig`, `resolveSearchConcurrency` | Generic search config helpers |
+| `normalizeSearchConfig`, `resolveSearchConcurrency`, `resolveSearchMode`, `mergeSearchResults` | Search config, fan-out mode, and result merge helpers |
 | `createResearchProviders`, `RulesRerankProvider`, `JinaRerankProvider` | Optional semantic provider composition and rerank adapters |
 
 ## Requirements

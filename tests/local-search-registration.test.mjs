@@ -16,6 +16,30 @@ describe('local search engine registration', () => {
     assert.equal(entry.maxQuestionConcurrency, 1);
   });
 
+  it('creates a fan-out composite from searxng and js-eyes backends', () => {
+    const engine = createSearchEngine({
+      search: {
+        mode: 'fanout',
+        maxResults: 12,
+        backends: [
+          { id: 'web', engine: 'searxng', enabled: true, settings: { baseUrl: 'http://searx.local', maxResults: 6 } },
+          {
+            id: 'community',
+            engine: 'js-eyes',
+            enabled: true,
+            settings: { maxResults: 5, provider: { skills: ['js-zhihu-ops-skill'] } },
+          },
+        ],
+      },
+    });
+
+    assert.equal(engine.kind, 'composite');
+    assert.equal(engine.backends.length, 2);
+    assert.equal(engine.backends[0].instance.config.baseUrl, 'http://searx.local');
+    assert.equal(engine.backends[1].instance.capabilities.maxQuestionConcurrency, 1);
+    assert.equal(engine.capabilities.maxQuestionConcurrency, 1);
+  });
+
   it('creates the registered js-eyes engine through the factory', async () => {
     const engine = createSearchEngine({
       search: {

@@ -4,6 +4,8 @@ import { applyExploratoryBudget, effectiveExploratoryMaxSteps, resolveExplorator
 import { decideAdaptiveAction, fallbackAdaptiveAction, evaluateAnswerReadiness, decomposeQuery, pickUnreadCandidates } from '../adaptive/agent-policy.mjs';
 import { ResearchState, hostnameOf } from '../adaptive/research-state.mjs';
 import { classifyResearchQuery } from '../adaptive/exploratory-sufficiency.mjs';
+import { resolveStrategyConcurrency } from '../strategy-utils.mjs';
+import { mapLimit } from '../search-executor.mjs';
 
 const STOP_REASONS = {
   evidenceSufficient: 'evidence_sufficient',
@@ -42,12 +44,15 @@ function countCapsExhausted(budget) {
   if (!budget) return false;
   const searchLimit = Number(budget.limits?.searchRequests) || 0;
   const readLimit = Number(budget.limits?.sourceReads) || 0;
+  const backendLimit = Number(budget.limits?.searchBackendRequests) || 0;
   if (searchLimit > 0 && !budget.canClaim('searchRequests')) return true;
+  if (backendLimit > 0 && !budget.canClaim('searchBackendRequests')) return true;
   if (readLimit > 0 && !budget.canClaim('sourceReads')) return true;
   return Boolean(
     budget.exhaustedKinds?.has?.('searchRequests')
     || budget.exhaustedKinds?.has?.('sourceReads')
     || budget.stopReason === 'searchRequests'
+    || budget.stopReason === 'searchBackendRequests'
     || budget.stopReason === 'sourceReads',
   );
 }
@@ -291,11 +296,16 @@ export async function runAdaptiveV2(context) {
           total: allowedQueries.length,
         });
         const candidatesBefore = state.candidates.size;
-        const searchResults = await Promise.all(allowedQueries.map(async (searchQuery) => {
-          abort(signal);
-          const results = await search.search(searchQuery, { signal });
-          return { searchQuery, results };
-        }));
+        const searchResults = await mapLimit(
+          allowedQueries,
+          resolveStrategyConcurrency(search, allowedQueries.length, allowedQueries.length),
+          async (searchQuery) => {
+            abort(signal);
+            const results = await search.search(searchQuery, { signal });
+            return { searchQuery, results };
+          },
+          signal,
+        );
         let totalResults = 0;
         for (const { searchQuery, results } of searchResults) {
           totalResults += results.length;

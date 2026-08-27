@@ -378,9 +378,11 @@ function printHelp() {
 js-deepresearch-agent
 
 Commands:
-  research "query" [--search js-eyes|searxng] [--search-skills skillA,skillB] [--search-server-url ws://localhost:18080] [--strategy focused|quick|exploratory] [--iterations 1] [--questions 2] [--concurrency 1] [--max-search-requests 0] [--max-source-reads 0] [--focused-iteration-control true|false] [--focused-query-memory true|false] [--focused-evidence-passages true|false] [--focused-claim-alignment true|false] [--focused-pre-report-gate true|false] [--work-dir work_dir] [--output report.md] [--json] [--no-save] [--no-work-dir]
+  research "query" [--search js-eyes|searxng] [--search-mode single|fanout] [--search-engines searxng,js-eyes] [--search-skills skillA,skillB] [--search-server-url ws://localhost:18080] [--strategy focused|quick|exploratory] [--iterations 1] [--questions 2] [--concurrency 1] [--max-search-requests 0] [--max-search-backend-requests 0] [--max-source-reads 0] [--focused-iteration-control true|false] [--focused-query-memory true|false] [--focused-evidence-passages true|false] [--focused-claim-alignment true|false] [--focused-pre-report-gate true|false] [--work-dir work_dir] [--output report.md] [--json] [--no-save] [--no-work-dir]
     Strategies: focused (default, 专题调研) | quick (快速调研, default 1 iteration) | exploratory (探索性调研)
-    Budgets (focused/quick counts): --max-llm-tokens 0 --max-search-requests 0 --max-source-reads 0 --max-rerank-requests 0 --max-rerank-tokens 0
+    Search: --search sets a single engine. --search-mode fanout --search-engines searxng,js-eyes runs those backends in parallel. Partial backend failures return the rest; all-fail throws. Abort cancels every in-flight backend.
+    Budgets (focused/quick counts): --max-llm-tokens 0 --max-search-requests 0 --max-search-backend-requests 0 --max-source-reads 0 --max-rerank-requests 0 --max-rerank-tokens 0
+    --max-search-requests counts logical queries. --max-search-backend-requests caps real backend calls (0 = unlimited).
     Report: --report-max-output-tokens 0 (0 = no app cap; --reserve-report-tokens is a deprecated alias)
     Optional total fuse: --max-total-llm-tokens 0 (exploration + report; default unlimited)
     Optional rerank: --rerank-provider rules|disabled|jina|http|local --rerank-model <name> --rerank-base-url <url> --rerank-api-key <key> --rerank-timeout-ms 30000

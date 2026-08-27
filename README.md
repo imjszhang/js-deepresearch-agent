@@ -97,6 +97,13 @@ npm exec --package=. -- jdr research "openclaw" \
   --strategy quick \
   --iterations 1
 
+# Fan-out the same query across registered search engines
+npm exec --package=. -- jdr research "openclaw" \
+  --search-mode fanout \
+  --search-engines searxng,js-eyes \
+  --search-skills js-zhihu-ops-skill \
+  --strategy focused
+
 # Focused deep reading: fetch page content or LLM summaries before report synthesis
 npm exec --package=. -- jdr research "llm wiki" \
   --search js-eyes \
@@ -116,7 +123,7 @@ Runtime settings are stored in the local SQLite database under `data/`. Values f
 - LLM provider: `openai-compatible`
 - LLM model: `gpt-4o-mini`
 - LLM base URL: `https://api.openai.com/v1`
-- Search engine: `searxng`
+- Search engine: `searxng` (single-engine default; set `search.mode: fanout` plus `search.backends` to query multiple registered engines in parallel)
 - Search base URL: `http://127.0.0.1:8080`
 - Research strategy: `focused`
 - Research iterations: `2` (focused fallback when iteration control is off; `--strategy quick` defaults to 1)
@@ -173,6 +180,28 @@ Legacy `--js-eyes-skill` and `JS_EYES_*` env vars remain supported.
 
 Each configured skill is queried serially through the unified JS Eyes search command. Results are interleaved across skills, deduplicated by URL, and capped by the global `maxResults` setting. If one skill fails, the provider returns results from the skills that succeeded; the search only fails when every configured skill fails. Browser-backed providers automatically cap question concurrency to 1.
 
+### Multi-engine fan-out
+
+Leave `search.mode` / `search.backends` unset to keep the existing `search.engine` path. Set `search.mode: fanout` to run enabled `search.backends` in parallel for the same query. Strategies still call one `search.search(query, { signal })`; the search factory composes the backends.
+
+```json
+{
+  "search": {
+    "mode": "fanout",
+    "maxResults": 12,
+    "backends": [
+      { "id": "web", "engine": "searxng", "enabled": true, "settings": { "baseUrl": "http://127.0.0.1:8080", "maxResults": 8 } },
+      { "id": "community", "engine": "js-eyes", "enabled": true, "settings": { "maxResults": 8, "provider": { "skills": ["js-zhihu-ops-skill"] } } }
+    ],
+    "fanout": { "failurePolicy": "partial", "merge": "round-robin", "maxParallelBackends": 2 }
+  }
+}
+```
+
+CLI: `--search-mode fanout --search-engines searxng,js-eyes`. `--search` remains a single-engine override. Env: `SEARCH_MODE` and `SEARCH_ENGINES`, plus the existing SearXNG / JS Eyes variables. The Web UI can switch single/multi-source, pick engines, and edit per-engine settings before starting research.
+
+Results merge by deterministic round-robin, then normalized-URL dedupe, then the top-level `maxResults` cap. Sources keep real engine tags such as `searxng` or `js-eyes:zhihu`. Snippets without a URL are kept. Default `failurePolicy: partial` returns successful backends and records diagnostics; if every backend fails, the composite throws an aggregate error with backend ids and safe summaries. `AbortError` is not a partial failure and is forwarded to every in-flight backend. `searchRequests` still counts logical queries; `searchBackendRequests` counts real backend calls and can be capped with `--max-search-backend-requests`. Question concurrency is the minimum of the child engines' `maxQuestionConcurrency`, so including JS Eyes does not run multiple JS Eyes question searches in parallel.
+
 For Xiaohongshu-only search, set `JS_EYES_SKILL=js-xiaohongshu-ops-skill`. On Linux and macOS, leave `JS_EYES_CLI=js-eyes` when the CLI is on `PATH`. On Windows, the provider resolves npm global shims such as `js-eyes.cmd` automatically; set `JS_EYES_CLI` to an absolute path only when the CLI is installed outside `PATH`. Prefer `ws://localhost:18080` over `127.0.0.1` if your local JS Eyes server binds to localhost. Common failures usually mean the CLI is not on `PATH`, the skill is not enabled, the server or extension is disconnected, the site login expired, policy/egress blocked navigation, or the target site triggered a risk check. Use `js-eyes doctor --json` and the JS Eyes skill records for diagnosis.
 
 Available research strategies are exposed through `/api/strategies` and shared by the web UI:
@@ -200,6 +229,8 @@ Supported `.env` keys:
 - `OPENAI_BASE_URL`
 - `OLLAMA_BASE_URL`
 - `SEARCH_ENGINE`
+- `SEARCH_MODE` (`single` or `fanout`)
+- `SEARCH_ENGINES` (comma-separated real engine ids, e.g. `searxng,js-eyes`)
 - `SEARCH_BASE_URL`
 - `SEARCH_API_KEY`
 - `JS_EYES_CLI`

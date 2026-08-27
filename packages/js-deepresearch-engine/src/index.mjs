@@ -44,8 +44,19 @@ export {
   saveResearchToWorkDir,
 } from './research/work-output.mjs';
 export { normalizeSearchConfig } from './search/normalize-search-config.mjs';
-export { resolveSearchConcurrency } from './search/search-capabilities.mjs';
-export { BudgetManager, BudgetExceededError } from './research/budget-manager.mjs';
+export { resolveSearchConcurrency, resolveCompositeQuestionConcurrency } from './search/search-capabilities.mjs';
+export {
+  DEFAULT_FANOUT_OPTIONS,
+  resolveSearchMode,
+  parseSearchEngineList,
+  buildFanoutBackendsFromEngines,
+  resolveEnabledBackends,
+  resolveFanoutOptions,
+  mergeBackendSettings,
+} from './search/fanout-config.mjs';
+export { mergeSearchResults } from './search/merge-search-results.mjs';
+export { CompositeSearchEngine, FanoutSearchError, createFanoutSearchEngine } from './search/fanout-engine.mjs';
+export { BudgetManager, BudgetExceededError, wrapProvidersWithBudget } from './research/budget-manager.mjs';
 export { QueryMemory, normalizeQuery, querySimilarity } from './research/query-memory.mjs';
 export { normalizeSourceUrl, selectDiverseSources, SourceCandidatePool, isPrimarySource } from './research/source-candidates.mjs';
 export {

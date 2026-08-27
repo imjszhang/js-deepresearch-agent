@@ -38,6 +38,23 @@ export class ResearchRunner {
         });
         emit({ stage: event.status === 'started' ? 'llm_call_started' : 'llm_call_finished', ...event });
       },
+      onSearchEvent: (event) => {
+        if (event?.type !== 'backend') return;
+        trace.push({
+          step: trace.length + 1,
+          action: 'search_backend',
+          reasonCode: event.status,
+          query: event.query,
+          backendId: event.backendId,
+          engine: event.engine,
+          status: event.status,
+          resultCount: event.resultCount ?? 0,
+          durationMs: event.durationMs ?? null,
+          errorName: event.errorName || null,
+          errorMessage: event.errorMessage || null,
+          createdAt: new Date().toISOString(),
+        });
+      },
     });
     const focused = resolveFocusedSettings(settings);
     const researchProviders = createResearchProviders(settings?.research?.providers || {}, {

@@ -1,10 +1,17 @@
 import '../styles.css';
 import { apiGet, apiSend } from './api.mjs';
 import { renderNav } from './nav.mjs';
+import {
+  availableSearchEngines,
+  backendSettingsFor,
+  buildSearchSettings,
+  selectedBackendIds,
+} from './search-settings-form.mjs';
 
 const app = document.querySelector('#app');
 let loadedSettings = null;
 let loadedStrategies = [];
+let loadedSearchEngines = [];
 
 main().catch((error) => {
   app.innerHTML = `<main class="shell"><p>${error.message}</p></main>`;
@@ -19,6 +26,7 @@ async function main() {
   ]);
   loadedSettings = settings;
   loadedStrategies = strategies;
+  loadedSearchEngines = availableSearchEngines(searchEngines);
 
   const focused = settings.research.focused || {};
   const exploratory = settings.research.exploratory || {};
@@ -53,6 +61,24 @@ async function main() {
 
         <div class="grid">
           <div>
+            <label for="searchMode">Search mode</label>
+            <select id="searchMode">
+              <option value="single" ${settings.search.mode === 'fanout' ? '' : 'selected'}>Single source</option>
+              <option value="fanout" ${settings.search.mode === 'fanout' ? 'selected' : ''}>Multiple sources (fan-out)</option>
+            </select>
+          </div>
+          <div>
+            <label for="searchMaxResults">Max merged results</label>
+            <input id="searchMaxResults" type="number" min="1" max="40" value="${settings.search.maxResults ?? 8}" />
+          </div>
+          <div>
+            <label for="strategy">Strategy</label>
+            <select id="strategy">${options(strategies, settings.research.strategy)}</select>
+          </div>
+        </div>
+
+        <div id="singleSearchFields" class="grid strategy-panel">
+          <div>
             <label for="searchEngine">Search engine</label>
             <select id="searchEngine">${options(searchEngines, settings.search.engine)}</select>
           </div>
@@ -60,9 +86,22 @@ async function main() {
             <label for="searchBaseUrl">Search base URL</label>
             <input id="searchBaseUrl" value="${escapeAttr(settings.search.baseUrl)}" />
           </div>
-          <div>
-            <label for="strategy">Strategy</label>
-            <select id="strategy">${options(strategies, settings.research.strategy)}</select>
+        </div>
+
+        <div id="fanoutSearchFields" class="strategy-panel">
+          <div class="grid">
+            <div>
+              <label for="maxParallelBackends">Max parallel backends (0 = all)</label>
+              <input id="maxParallelBackends" type="number" min="0" max="8" value="${settings.search.fanout?.maxParallelBackends ?? 0}" />
+            </div>
+            <div>
+              <label for="maxSearchBackendRequests">Max backend requests (0 = unlimited)</label>
+              <input id="maxSearchBackendRequests" type="number" min="0" value="${settings.research.budget?.maxSearchBackendRequests ?? 0}" />
+            </div>
+          </div>
+          <p class="muted">Select two or more registered engines. Each backend keeps its own timeout; results merge by round-robin and normalized URL.</p>
+          <div id="fanoutBackends" class="backend-list">
+            ${renderFanoutBackends(searchEngines, settings.search)}
           </div>
         </div>
         <p id="strategyHelp" class="muted strategy-help"></p>
@@ -156,7 +195,10 @@ async function main() {
 
   document.querySelector('#research-form').addEventListener('submit', submitResearch);
   document.querySelector('#strategy').addEventListener('change', syncStrategyPanels);
+  document.querySelector('#searchMode').addEventListener('change', syncSearchMode);
+  document.querySelector('#fanoutBackends')?.addEventListener('change', syncFanoutBackendFields);
   syncStrategyPanels();
+  syncSearchMode();
 }
 
 async function submitResearch(event) {
@@ -183,11 +225,7 @@ function collectSettings() {
       baseUrl: value('#baseUrl'),
       apiKey: value('#apiKey'),
     },
-    search: {
-      ...(loadedSettings?.search || {}),
-      engine: value('#searchEngine'),
-      baseUrl: value('#searchBaseUrl'),
-    },
+    search: collectSearchSettings(),
     research: {
       ...(loadedSettings?.research || {}),
       strategy,
@@ -197,6 +235,7 @@ function collectSettings() {
       budget: {
         ...currentResearchBudget(),
         ...(loadedSettings?.research?.budget || {}),
+        maxSearchBackendRequests: Number(value('#maxSearchBackendRequests') || loadedSettings?.research?.budget?.maxSearchBackendRequests || 0),
         ...(strategy === 'focused' ? {
           maxSearchRequests: Number(value('#maxSearchRequests') || 0),
           maxSourceReads: Number(value('#maxSourceReads') || 0),
@@ -233,6 +272,104 @@ function collectSettings() {
       },
     },
   };
+}
+
+function collectSearchSettings() {
+  const mode = value('#searchMode') || 'single';
+  const selected = mode === 'fanout'
+    ? loadedSearchEngines
+      .map((engine) => engine.id)
+      .filter((engineId) => document.querySelector(`#backend-${engineId}`)?.checked)
+    : [value('#searchEngine')].filter(Boolean);
+  const backendConfigs = {};
+  for (const engineId of selected) {
+    backendConfigs[engineId] = {
+      baseUrl: optionalValue(`#backend-${engineId}-baseUrl`),
+      maxResults: optionalNumber(`#backend-${engineId}-maxResults`),
+      provider: {
+        ...(engineId === 'js-eyes' ? {
+          skills: optionalValue(`#backend-${engineId}-skills`)
+            ? optionalValue(`#backend-${engineId}-skills`).split(/[,;]/).map((item) => item.trim()).filter(Boolean)
+            : undefined,
+          serverUrl: optionalValue(`#backend-${engineId}-serverUrl`),
+        } : {}),
+      },
+    };
+  }
+  return buildSearchSettings({
+    mode,
+    engine: value('#searchEngine') || selected[0],
+    baseUrl: value('#searchBaseUrl'),
+    maxResults: Number(value('#searchMaxResults') || 8),
+    maxParallelBackends: Number(value('#maxParallelBackends') || 0),
+    selectedEngines: selected,
+    backendConfigs,
+    previous: loadedSettings?.search || {},
+  });
+}
+
+function renderFanoutBackends(searchEngines, search) {
+  const selected = new Set(selectedBackendIds(search, availableSearchEngines(searchEngines)));
+  return availableSearchEngines(searchEngines).map((engine) => {
+    const settings = backendSettingsFor(search, engine.id);
+    const checked = selected.has(engine.id);
+    return `
+      <fieldset class="backend-card" data-engine="${escapeAttr(engine.id)}">
+        <label class="backend-toggle">
+          <input id="backend-${escapeAttr(engine.id)}" type="checkbox" value="${escapeAttr(engine.id)}" ${checked ? 'checked' : ''} />
+          ${escapeHtml(engine.label || engine.id)}
+        </label>
+        <div class="grid backend-fields" ${checked ? '' : 'hidden'}>
+          <div>
+            <label for="backend-${escapeAttr(engine.id)}-maxResults">Backend max results</label>
+            <input id="backend-${escapeAttr(engine.id)}-maxResults" type="number" min="1" max="40" value="${settings.maxResults ?? search.maxResults ?? 8}" />
+          </div>
+          ${engine.supportsBaseUrl || engine.id === 'searxng' ? `
+          <div>
+            <label for="backend-${escapeAttr(engine.id)}-baseUrl">Base URL</label>
+            <input id="backend-${escapeAttr(engine.id)}-baseUrl" value="${escapeAttr(settings.baseUrl || search.baseUrl || '')}" />
+          </div>` : ''}
+          ${engine.supportsServerUrl || engine.id === 'js-eyes' ? `
+          <div>
+            <label for="backend-${escapeAttr(engine.id)}-serverUrl">JS Eyes server URL</label>
+            <input id="backend-${escapeAttr(engine.id)}-serverUrl" value="${escapeAttr(settings.provider?.serverUrl || search.provider?.serverUrl || search.jsEyesServerUrl || '')}" />
+          </div>
+          <div>
+            <label for="backend-${escapeAttr(engine.id)}-skills">JS Eyes skills</label>
+            <input id="backend-${escapeAttr(engine.id)}-skills" value="${escapeAttr((settings.provider?.skills || search.provider?.skills || search.jsEyesSkills || []).join(','))}" placeholder="js-zhihu-ops-skill,js-reddit-ops-skill" />
+          </div>` : ''}
+        </div>
+      </fieldset>
+    `;
+  }).join('');
+}
+
+function syncSearchMode() {
+  const mode = value('#searchMode') || 'single';
+  togglePanel('#singleSearchFields', mode !== 'fanout');
+  togglePanel('#fanoutSearchFields', mode === 'fanout');
+  syncFanoutBackendFields();
+}
+
+function syncFanoutBackendFields() {
+  for (const card of document.querySelectorAll('.backend-card')) {
+    const engineId = card.getAttribute('data-engine');
+    const checked = document.querySelector(`#backend-${engineId}`)?.checked;
+    const fields = card.querySelector('.backend-fields');
+    if (fields) fields.hidden = !checked;
+  }
+}
+
+function optionalValue(selector) {
+  const node = document.querySelector(selector);
+  return node ? node.value.trim() : undefined;
+}
+
+function optionalNumber(selector) {
+  const raw = optionalValue(selector);
+  if (raw === undefined || raw === '') return undefined;
+  const number = Number(raw);
+  return Number.isFinite(number) ? number : undefined;
 }
 
 function syncStrategyPanels() {

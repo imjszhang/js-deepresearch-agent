@@ -92,6 +92,35 @@ button.secondary {
   display: none !important;
 }
 
+.backend-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.backend-card {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  background: #0b1220;
+}
+
+.backend-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+
+.backend-toggle input {
+  width: auto;
+}
+
+.backend-fields[hidden] {
+  display: none !important;
+}
+
 .progress {
   height: 16px;
   overflow: hidden;

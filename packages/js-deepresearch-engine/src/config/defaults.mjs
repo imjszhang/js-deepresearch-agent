@@ -21,6 +21,11 @@ export const defaultSettings = Object.freeze({
     language: 'en',
     safeSearch: true,
     options: {},
+    fanout: {
+      failurePolicy: 'partial',
+      merge: 'round-robin',
+      maxParallelBackends: 0,
+    },
   },
   research: {
     strategy: 'focused',
@@ -43,6 +48,7 @@ export const defaultSettings = Object.freeze({
       maxLlmTokens: 0,
       maxTotalLlmTokens: 0,
       maxSearchRequests: 18,
+      maxSearchBackendRequests: 0,
       maxSourceReads: 16,
       maxRerankRequests: 0,
       maxRerankTokens: 0,
@@ -142,7 +148,15 @@ export function mergeSettings(overrides = {}) {
   const merged = {
     http: { ...defaultSettings.http, ...(overrides.http || {}) },
     llm: { ...defaultSettings.llm, ...(overrides.llm || {}) },
-    search: { ...defaultSettings.search, ...searchOverrides },
+    search: {
+      ...defaultSettings.search,
+      ...searchOverrides,
+      fanout: {
+        ...defaultSettings.search.fanout,
+        ...(searchOverrides.fanout && typeof searchOverrides.fanout === 'object' ? searchOverrides.fanout : {}),
+      },
+      ...(Array.isArray(searchOverrides.backends) ? { backends: searchOverrides.backends } : {}),
+    },
     research: {
       ...defaultSettings.research,
       ...researchOverrides,

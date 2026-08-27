@@ -141,7 +141,7 @@ export async function runFocusedPipeline(context) {
       emit({ stage: 'evaluating_evidence', iteration, iterations: iterationLimit, decision: gate.decision, flags: gate.flags });
       if (gate.decision === 'stop' && focused.iterationControl.earlyStop) break;
       if (gate.criticalGaps.length && !focused.iterationControl.continueOnCriticalGaps) break;
-      if (budget && !budget.canClaim('searchRequests') && iteration < iterationLimit) break;
+      if (budget && (!budget.canClaim('searchRequests') || !budget.canClaim('searchBackendRequests')) && iteration < iterationLimit) break;
     }
   }
 
