@@ -15,6 +15,8 @@ function countBound(raw, fallback = 0) {
 }
 
 export const EXPLORATORY_SAFETY_MAX_STEPS = 64;
+export const DEFAULT_EXPLORATORY_MIN_LLM_TOKENS = 60000;
+export const DEFAULT_EXPLORATORY_MAX_LLM_TOKENS = 200000;
 
 export function effectiveExploratoryMaxSteps(exploratory = {}, tokenCeiling) {
   const configured = countBound(exploratory.maxSteps, 0);
@@ -30,8 +32,11 @@ export function resolveExploratorySettings(settings = {}) {
   const hasTarget = raw.targetLlmTokens !== undefined && raw.targetLlmTokens !== null && raw.targetLlmTokens !== '';
   let minLlmTokens = hasMin
     ? tokenBound(raw.minLlmTokens, 0)
-    : (hasTarget ? tokenBound(raw.targetLlmTokens, 0) : 20000);
-  const maxLlmTokens = tokenBound(raw.maxLlmTokens, raw.maxLlmTokens === undefined || raw.maxLlmTokens === null ? 80000 : 0);
+    : (hasTarget ? tokenBound(raw.targetLlmTokens, 0) : DEFAULT_EXPLORATORY_MIN_LLM_TOKENS);
+  const maxLlmTokens = tokenBound(
+    raw.maxLlmTokens,
+    raw.maxLlmTokens === undefined || raw.maxLlmTokens === null ? DEFAULT_EXPLORATORY_MAX_LLM_TOKENS : 0,
+  );
   if (minLlmTokens > 0 && maxLlmTokens > 0 && minLlmTokens > maxLlmTokens) {
     minLlmTokens = maxLlmTokens;
   }

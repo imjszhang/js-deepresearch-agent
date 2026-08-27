@@ -118,11 +118,11 @@ async function main() {
           </div>
           <div>
             <label for="exploratoryMinTokens">Min LLM tokens (keep exploring until this)</label>
-            <input id="exploratoryMinTokens" type="number" min="0" value="${exploratory.minLlmTokens ?? exploratory.targetLlmTokens ?? 20000}" />
+            <input id="exploratoryMinTokens" type="number" min="0" value="${exploratory.minLlmTokens ?? exploratory.targetLlmTokens ?? 60000}" />
           </div>
           <div>
             <label for="exploratoryMaxTokens">Max LLM tokens (0 = unlimited)</label>
-            <input id="exploratoryMaxTokens" type="number" min="0" value="${exploratory.maxLlmTokens ?? 80000}" />
+            <input id="exploratoryMaxTokens" type="number" min="0" value="${exploratory.maxLlmTokens ?? 200000}" />
           </div>
           <div>
             <label><input id="answerGate" type="checkbox" ${exploratory.answerGate !== false ? 'checked' : ''} /> Answer gate</label>

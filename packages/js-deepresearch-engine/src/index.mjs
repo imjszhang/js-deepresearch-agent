@@ -34,7 +34,11 @@ export {
   researchSettingsNeedMigration,
 } from './research/strategy-aliases.mjs';
 export { getSourceEvidence, getSourceEvidenceClass, sourceHasFetchedBody, resolveFocusedSettings } from './research/focused-settings.mjs';
-export { resolveExploratorySettings } from './research/exploratory-settings.mjs';
+export {
+  resolveExploratorySettings,
+  DEFAULT_EXPLORATORY_MIN_LLM_TOKENS,
+  DEFAULT_EXPLORATORY_MAX_LLM_TOKENS,
+} from './research/exploratory-settings.mjs';
 export { createHttpFetch, resetHttpFetchCache } from './http/create-http-fetch.mjs';
 export {
   createWorkSessionDir,

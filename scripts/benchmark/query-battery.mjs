@@ -27,6 +27,20 @@ export const QUERY_BATTERIES = [
     ],
   }),
   battery({
+    id: 'zhipu-equity-investment',
+    match: (query) => /智谱|zhipu/i.test(query) && /投资|估值|融资/.test(query),
+    subjects: [
+      { id: 'company', label: '智谱公司', patterns: [/智谱/, /zhipu/i, /智谱华章/] },
+      { id: 'product', label: 'GLM / 产品', patterns: [/\bglm\b/i, /chatglm/i, /清言/, /大模型/] },
+      { id: 'financing', label: '融资估值', patterns: [/融资/, /估值/, /轮次/, /股权/, /投资方/, /billion/i] },
+    ],
+    aspects: [
+      { id: 'commercial', label: '商业化', patterns: [/收入/, /营收/, /商业化/, /客户/, /arr/i, /合同/, /定价/] },
+      { id: 'competition', label: '竞争格局', patterns: [/竞争/, /深度求索/, /deepseek/i, /月之暗面/, /moonshot/i, /阿里/, /字节/] },
+      { id: 'risk', label: '风险与监管', patterns: [/风险/, /监管/, /备案/, /合规/, /亏损/, /不确定/] },
+    ],
+  }),
+  battery({
     id: 'definitional-single-subject',
     match: (query) => /^what is \w+/i.test(String(query || '').trim()),
     subjects: [

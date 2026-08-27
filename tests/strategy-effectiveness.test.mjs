@@ -40,6 +40,13 @@ describe('query battery', () => {
     assert.equal(battery.id, 'apple-silicon-local-llm');
     assert.equal(battery.subjects.length, 3);
   });
+
+  it('matches a Zhipu equity-investment query', () => {
+    const battery = matchQueryBattery('全面研究智谱这家公司，决定上亿资金是否投资智谱');
+    assert.equal(battery.id, 'zhipu-equity-investment');
+    assert.equal(battery.subjects.length, 3);
+    assert.equal(battery.aspects.length, 3);
+  });
 });
 
 describe('strategy effectiveness', () => {
