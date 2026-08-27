@@ -1,3 +1,23 @@
+export async function mapLimit(items, concurrency, iteratee, signal) {
+  const list = Array.isArray(items) ? items : [];
+  if (list.length === 0) return [];
+  const results = new Array(list.length);
+  let nextIndex = 0;
+  const maxConcurrency = normalizeConcurrency(concurrency, list.length);
+
+  async function worker() {
+    while (nextIndex < list.length) {
+      throwIfAborted(signal);
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await iteratee(list[index], index);
+    }
+  }
+
+  await Promise.all(Array.from({ length: maxConcurrency }, () => worker()));
+  return results;
+}
+
 export async function searchQuestion({ question, search, signal, queryMemory, gapId = null, onSkip = () => {} }) {
   const duplicate = await queryMemory?.findDuplicate(question, gapId);
   if (duplicate) {

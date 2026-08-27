@@ -9,8 +9,24 @@
  */
 
 /**
+ * @typedef {Object} SearchBackendSettings
+ * @property {string} id
+ * @property {string} engine
+ * @property {boolean} [enabled]
+ * @property {Record<string, unknown>} [settings]
+ */
+
+/**
+ * @typedef {Object} SearchFanoutSettings
+ * @property {'partial'} [failurePolicy]
+ * @property {'round-robin'} [merge]
+ * @property {number} [maxParallelBackends]
+ */
+
+/**
  * @typedef {Object} SearchSettings
  * @property {string} engine
+ * @property {'single'|'fanout'} [mode]
  * @property {string} [baseUrl]
  * @property {string} [apiKey]
  * @property {number} [maxResults]
@@ -18,6 +34,8 @@
  * @property {boolean} [safeSearch]
  * @property {Record<string, unknown>} [options]
  * @property {Record<string, unknown>} [provider]
+ * @property {SearchBackendSettings[]} [backends]
+ * @property {SearchFanoutSettings} [fanout]
  */
 
 /**
@@ -121,6 +139,8 @@
  * @typedef {Object} SearchEngine
  * @property {(query: string, options?: { signal?: AbortSignal }) => Promise<Source[]>} search
  * @property {SearchCapabilities} [capabilities]
+ * @property {string} [id]
+ * @property {'single'|'composite'} [kind]
  */
 
 /**

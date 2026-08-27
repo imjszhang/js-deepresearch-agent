@@ -98,7 +98,10 @@ npm exec --package=. -- jdr research "Explain the current state of local-first A
 | `--model` | `llm.model` | 模型名 |
 | `--base-url` | `llm.baseUrl` | LLM API 地址 |
 | `--api-key` | `llm.apiKey` | API Key（优先用 `.env`，避免在 shell 历史中泄露） |
-| `--search` | `search.engine` | `searxng` 或 `js-eyes` |
+| `--search` | `search.engine` | `searxng` 或 `js-eyes`；单引擎语义不变。单独使用时会把本次运行设为 `search.mode=single` |
+| `--search-mode` | `search.mode` | `single`（默认）或 `fanout` |
+| `--search-engines` | `search.backends` | 逗号分隔的真实引擎 ID，例如 `searxng,js-eyes`。未写 `--search-mode` 时隐含 `fanout` |
+| `--search-max-parallel-backends` | `search.fanout.maxParallelBackends` | 同一 query 下并行 backend 数；`0` 表示全部启用 |
 | `--search-base-url` | `search.baseUrl` | SearXNG 等服务地址 |
 | `--searxng-url` | `search.baseUrl` | `--search-base-url` 别名 |
 | `--search-api-key` | `search.apiKey` | 搜索 API Key |
@@ -131,7 +134,8 @@ npm exec --package=. -- jdr research "Explain the current state of local-first A
 | `--http-proxy` | `http.proxy` | SOCKS5/HTTP 代理 URL；仅 LLM / embedding / rerank 走代理，搜索与正文抓取直连 |
 | `--max-rerank-requests` | `research.budget.maxRerankRequests` | 外部 rerank 请求上限，`0` 不限制 |
 | `--max-rerank-tokens` | `research.budget.maxRerankTokens` | provider 可观测 rerank token 上限，`0` 不限制 |
-| `--max-search-requests` | `research.budget.maxSearchRequests` | 专题/快速搜索次数上限（默认 18）。`--strategy exploratory` 时同时写入 `research.exploratory.maxSearchRequests` |
+| `--max-search-requests` | `research.budget.maxSearchRequests` | 专题/快速**逻辑 query**次数上限（默认 18）。`--strategy exploratory` 时同时写入 `research.exploratory.maxSearchRequests` |
+| `--max-search-backend-requests` | `research.budget.maxSearchBackendRequests` | 真实 backend 调用次数上限，`0` 不限制。达到后不再调度新的 backend 调用 |
 | `--max-source-reads` | `research.budget.maxSourceReads` | 专题/快速阅读次数上限（默认 16）。`--strategy exploratory` 时同时写入 `research.exploratory.maxSourceReads` |
 | `--exploratory-max-steps` | `research.exploratory.maxSteps` | 探索性步数上限，`0` 不限制（默认）。不是正常深度；仅在探索性与全局 token 硬上限都关闭时启用 64 步安全阀 |
 | `--exploratory-max-reads-per-step` | `research.exploratory.maxReadsPerStep` | 探索性调研每步阅读数 |
@@ -163,10 +167,17 @@ npm exec --package=. -- jdr research "Compare SearXNG and Brave Search APIs" \
 
 # 单次运行临时指定 JS Eyes skill（不写入 .env / SQLite）
 npm exec --package=. -- jdr research "openclaw" \
-  --search js-eyes \
-  --search-skills js-reddit-ops-skill \
-  --search-server-url ws://localhost:18080 \
-  --strategy quick --iterations 1
+ --search js-eyes \
+ --search-skills js-reddit-ops-skill \
+ --search-server-url ws://localhost:18080 \
+ --strategy quick --iterations 1
+
+# 同一 query 并行 fan-out 多个真实搜索引擎（策略层仍只调 search.search）
+npm exec --package=. -- jdr research "openclaw" \
+ --search-mode fanout \
+ --search-engines searxng,js-eyes \
+ --search-skills js-zhihu-ops-skill \
+ --strategy focused
 ```
 
 ### 输出行为
@@ -260,6 +271,8 @@ npm exec --package=. -- jdr config set research.iterations 3
 
 `config set` 会将字符串 `"true"` / `"false"` 转为布尔，`"123"` 转为数字。
 
+未配置 `search.mode` / `search.backends` 时继续走 `search.engine`。`mode: fanout` 时 search factory 对同一 query 并行调用启用的真实 backend，按 round-robin 合并、规范化 URL 去重，再应用顶层 `maxResults`。默认 `failurePolicy: partial`：部分失败返回其余结果；全部失败抛出含 backend id 的聚合错误。`AbortError` 不是 partial failure。`searchRequests` 仍是逻辑 query 次数；`searchBackendRequests` 才是真实 backend 调用次数。Web UI 可切换单源/多源并编辑各引擎配置后持久化启动调研。不要把 `composite` 注册成虚拟引擎 ID。
+
 ### 常用配置键
 
 ```json
@@ -274,6 +287,7 @@ npm exec --package=. -- jdr config set research.iterations 3
   },
   "search": {
     "engine": "searxng",
+    "mode": "single",
     "baseUrl": "http://127.0.0.1:8080",
     "maxResults": 8,
     "jsEyesCli": "js-eyes",
@@ -573,6 +587,8 @@ npm run benchmark:strategies -- \
 | `OPENAI_BASE_URL` | `llm.baseUrl` |
 | `OLLAMA_BASE_URL` | `llm.baseUrl`（provider 为 ollama 或未设 OpenAI URL 时） |
 | `SEARCH_ENGINE` | `search.engine` |
+| `SEARCH_MODE` | `search.mode`（`single` 或 `fanout`） |
+| `SEARCH_ENGINES` | `search.backends`（逗号分隔真实引擎 ID；未设 `SEARCH_MODE` 时隐含 `fanout`） |
 | `SEARCH_BASE_URL` / `SEARXNG_URL` | `search.baseUrl` |
 | `SEARCH_API_KEY` | `search.apiKey` |
 | `JS_EYES_CLI` | `search.jsEyesCli` |
@@ -609,7 +625,7 @@ Agent 选型建议：
 
 ### 研究控制与 Schema v3
 
-预算、查询记忆、来源聚类、passage/claim 证据链与自适应停轮**默认已开启**（质量优先预设）。快速摸底可用 `--focused-fetch-mode disabled`、`--focused-evidence-passages false` 等 flag 单次关闭。`preReportGate` 与 LLM 相关性过滤仍默认关闭。专题/快速的次数预算是 `research.budget.maxSearchRequests`（默认 18）和 `maxSourceReads`（默认 16），可用 `--max-search-requests` / `--max-source-reads` 覆盖。探索性调研以 `research.exploratory.minLlmTokens`（默认 20000）为探索下限、`research.exploratory.maxLlmTokens`（默认 80000）为上限；这两项只约束探索，不含最终报告。搜索/阅读次数和 `maxSteps` 默认 `0`（不限制）。显式设了探索性次数上限时，用尽后立刻写报告，不再空转决策。仅当探索性与全局 token 硬上限都关闭时，才用 64 步安全阀防止廉价死循环。报告默认不截断；`research.budget.reserveReportTokens` 不再预留探索额度。
+预算、查询记忆、来源聚类、passage/claim 证据链与自适应停轮**默认已开启**（质量优先预设）。快速摸底可用 `--focused-fetch-mode disabled`、`--focused-evidence-passages false` 等 flag 单次关闭。`preReportGate` 与 LLM 相关性过滤仍默认关闭。专题/快速的次数预算是 `research.budget.maxSearchRequests`（默认 18，逻辑 query 次数）和 `maxSourceReads`（默认 16），可用 `--max-search-requests` / `--max-source-reads` 覆盖。`searchRequests` 不因 fan-out 翻倍；真实 backend 调用另计 `searchBackendRequests`，可用 `--max-search-backend-requests` 限制。探索性调研以 `research.exploratory.minLlmTokens`（默认 20000）为探索下限、`research.exploratory.maxLlmTokens`（默认 80000）为上限；这两项只约束探索，不含最终报告。搜索/阅读次数和 `maxSteps` 默认 `0`（不限制）。显式设了探索性次数上限时，用尽后立刻写报告，不再空转决策。仅当探索性与全局 token 硬上限都关闭时，才用 64 步安全阀防止廉价死循环。报告默认不截断；`research.budget.reserveReportTokens` 不再预留探索额度。
 
 Schema v3 在旧四件套之外写入 `gaps.json`、`passages.json`、`claims.json`、`quality.json`、`trace.json`。Intel Store 继续读取 v2；`intel import --upgrade-existing` 可从有正文的旧产物派生 passage/claim，不能从 snippet 伪造正文证据。Wiki 会为 v3 生成 `Evidence/` 与 `Open Questions/` 页面。主支持率 `supportedRate` 只统计 Summary / Key Findings 的原子事实（完全 supported / 全部分母）；`supportedOrPartialRate` 把 partial 也算进分子。Evidence / Sources / Caveats 不进这个分母。对比旧 run 时看 `qualityMetricsVersion` 与 `claimExtractionVersion`，不要直接比口径变更前后的百分比。已引用且有正文、规则尚未明确 supported/unsupported 的 key claim，默认再走 `research.quality.entailment=rules_then_llm` 做蕴含判定；设为 `rules` 可关掉。snippet-only 与无引用不能靠 LLM 洗白。
 

@@ -14,6 +14,17 @@ describe('research control infrastructure', () => {
     assert.equal(events.filter((event) => event.stage === 'budget_exhausted' && event.kind === 'searchRequests').length, 1);
   });
 
+  it('tracks searchBackendRequests independently from logical searchRequests', () => {
+    const manager = new BudgetManager({ research: { budget: { maxSearchBackendRequests: 2 } } });
+    manager.claim('searchRequests');
+    manager.claim('searchBackendRequests');
+    manager.claim('searchBackendRequests');
+    assert.equal(manager.canClaim('searchRequests'), true);
+    assert.equal(manager.canClaim('searchBackendRequests'), false);
+    assert.equal(manager.snapshot().usage.searchRequests, 1);
+    assert.equal(manager.snapshot().usage.searchBackendRequests, 2);
+  });
+
   it('does not reserve report tokens against the exploration cap', () => {
     const manager = new BudgetManager({
       research: {

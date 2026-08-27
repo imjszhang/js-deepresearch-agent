@@ -4,6 +4,8 @@ import { applyExploratoryBudget, effectiveExploratoryMaxSteps, resolveExplorator
 import { decideAdaptiveAction, fallbackAdaptiveAction, evaluateAnswerReadiness, decomposeQuery, pickUnreadCandidates } from '../adaptive/agent-policy.mjs';
 import { ResearchState, hostnameOf } from '../adaptive/research-state.mjs';
 import { classifyResearchQuery } from '../adaptive/exploratory-sufficiency.mjs';
+import { resolveStrategyConcurrency } from '../strategy-utils.mjs';
+import { mapLimit } from '../search-executor.mjs';
 
 const STOP_REASONS = {
   evidenceSufficient: 'evidence_sufficient',
@@ -42,12 +44,15 @@ function countCapsExhausted(budget) {
   if (!budget) return false;
   const searchLimit = Number(budget.limits?.searchRequests) || 0;
   const readLimit = Number(budget.limits?.sourceReads) || 0;
+  const backendLimit = Number(budget.limits?.searchBackendRequests) || 0;
   if (searchLimit > 0 && !budget.canClaim('searchRequests')) return true;
+  if (backendLimit > 0 && !budget.canClaim('searchBackendRequests')) return true;
   if (readLimit > 0 && !budget.canClaim('sourceReads')) return true;
   return Boolean(
     budget.exhaustedKinds?.has?.('searchRequests')
     || budget.exhaustedKinds?.has?.('sourceReads')
     || budget.stopReason === 'searchRequests'
+    || budget.stopReason === 'searchBackendRequests'
     || budget.stopReason === 'sourceReads',
   );
 }
@@ -106,7 +111,7 @@ function normalizeSearchQueries(action, maxQueries) {
 }
 
 export async function runAdaptiveV2(context) {
-  const { query, llm, search, signal, emit, settings, budget, queryMemory, trace, researchProviders } = context;
+  const { query, llm, search, signal, emit, settings, budget, queryMemory, trace, researchProviders, concurrency } = context;
   const exploratory = resolveExploratorySettings(settings);
   const focused = resolveFocusedSettings(settings);
   const queryShape = classifyResearchQuery(query);
@@ -124,6 +129,7 @@ export async function runAdaptiveV2(context) {
   const maxRetries = Math.max(0, Number(exploratory.maxEvaluationRetries) || 0);
   const maxOpenGaps = Number(exploratory.maxOpenGaps) || 8;
   const maxQueriesPerStep = Math.max(1, Number(exploratory.maxQueriesPerStep) || 3);
+  const resolvedSearchConcurrency = resolveStrategyConcurrency(search, concurrency, 1);
   const autoReadTopK = Math.min(Math.max(0, Number(exploratory.autoReadTopK ?? 2)), maxReads);
   const answerGateEnabled = exploratory.answerGate !== false;
   const gateMode = exploratory.gateMode || 'rules-then-llm';
@@ -291,11 +297,11 @@ export async function runAdaptiveV2(context) {
           total: allowedQueries.length,
         });
         const candidatesBefore = state.candidates.size;
-        const searchResults = await Promise.all(allowedQueries.map(async (searchQuery) => {
+        const searchResults = await mapLimit(allowedQueries, resolvedSearchConcurrency, async (searchQuery) => {
           abort(signal);
           const results = await search.search(searchQuery, { signal });
           return { searchQuery, results };
-        }));
+        }, signal);
         let totalResults = 0;
         for (const { searchQuery, results } of searchResults) {
           totalResults += results.length;

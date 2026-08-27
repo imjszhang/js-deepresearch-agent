@@ -1,7 +1,9 @@
 import {
+  buildFanoutBackendsFromEngines,
   deprecatedStrategyError,
   isDeprecatedStrategyId,
   normalizeSearchConfig,
+  parseSearchEngineList,
 } from 'js-deepresearch-engine';
 import { parseProviderSkills } from './search-providers/js-eyes/provider-skills.mjs';
 import { normalizeJsEyesSearchConfig } from './search-providers/js-eyes/normalize-js-eyes-search-config.mjs';
@@ -117,6 +119,7 @@ export function applyResearchFlags(settings, flags) {
     'source-max-sources': 'research.focused.maxSourcesForReport',
     'max-llm-tokens': 'research.budget.maxLlmTokens',
     'max-search-requests': 'research.budget.maxSearchRequests',
+    'max-search-backend-requests': 'research.budget.maxSearchBackendRequests',
     'max-source-reads': 'research.budget.maxSourceReads',
     'max-rerank-requests': 'research.budget.maxRerankRequests',
     'max-rerank-tokens': 'research.budget.maxRerankTokens',
@@ -199,12 +202,41 @@ export function applyResearchFlags(settings, flags) {
   }
 
   applyProviderOverrides(settings, flags);
+  applySearchFanoutFlags(settings, flags);
 
   if (settings.search) {
     settings.search = normalizeJsEyesSearchConfig(normalizeSearchConfig(settings.search));
   }
 
   return settings;
+}
+
+function applySearchFanoutFlags(settings, flags) {
+  const hasFanoutFlags = flags['search-mode'] !== undefined || flags['search-engines'] !== undefined;
+
+  if (flags['search-mode'] !== undefined) {
+    setDeepValue(settings, 'search.mode', flags['search-mode']);
+  }
+
+  if (flags['search-engines'] !== undefined) {
+    const engines = parseSearchEngineList(flags['search-engines']);
+    if (engines.length === 0) {
+      throw new Error('Flag --search-engines requires at least one engine id.');
+    }
+    settings.search ||= {};
+    if (flags['search-mode'] === undefined) {
+      settings.search.mode = 'fanout';
+    }
+    settings.search.backends = buildFanoutBackendsFromEngines(engines, settings.search.backends);
+  }
+
+  if (flags.search !== undefined && !hasFanoutFlags) {
+    setDeepValue(settings, 'search.mode', 'single');
+  }
+
+  if (flags['search-max-parallel-backends'] !== undefined) {
+    setDeepValue(settings, 'search.fanout.maxParallelBackends', flags['search-max-parallel-backends']);
+  }
 }
 
 function coerceValue(value) {

@@ -1,4 +1,4 @@
-import { normalizeSearchConfig } from 'js-deepresearch-engine';
+import { buildFanoutBackendsFromEngines, normalizeSearchConfig, parseSearchEngineList } from 'js-deepresearch-engine';
 import { parseProviderSkills } from '../search-providers/js-eyes/provider-skills.mjs';
 import { normalizeJsEyesSearchConfig } from '../search-providers/js-eyes/normalize-js-eyes-search-config.mjs';
 
@@ -46,6 +46,20 @@ export function settingsFromEnv(env = process.env) {
   const searchEngine = readEnv('SEARCH_ENGINE');
   if (searchEngine) {
     search.engine = searchEngine;
+  }
+
+  const searchMode = readEnv('SEARCH_MODE');
+  if (searchMode) {
+    search.mode = searchMode;
+  }
+
+  const searchEngines = readEnv('SEARCH_ENGINES');
+  if (searchEngines) {
+    const engines = parseSearchEngineList(searchEngines);
+    search.backends = buildFanoutBackendsFromEngines(engines);
+    if (!search.mode) {
+      search.mode = 'fanout';
+    }
   }
 
   const searchBaseUrl = readEnv('SEARCH_BASE_URL') || readEnv('SEARXNG_URL');

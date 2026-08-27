@@ -40,6 +40,20 @@ EXISTING=from-file
     delete process.env.EXISTING;
   });
 
+  it('maps fan-out search env vars and reuses existing engine settings', () => {
+    const overrides = settingsFromEnv({
+      SEARCH_MODE: 'fanout',
+      SEARCH_ENGINES: 'searxng,js-eyes',
+      SEARCH_BASE_URL: 'http://192.168.31.82:8889',
+      JS_EYES_SKILL: 'js-zhihu-ops-skill',
+    });
+
+    assert.equal(overrides.search.mode, 'fanout');
+    assert.deepEqual(overrides.search.backends.map((item) => item.engine), ['searxng', 'js-eyes']);
+    assert.equal(overrides.search.baseUrl, 'http://192.168.31.82:8889');
+    assert.deepEqual(overrides.search.jsEyesSkills, ['js-zhihu-ops-skill']);
+  });
+
   it('maps search env vars to settings overrides', () => {
     const overrides = settingsFromEnv({
       SEARCH_ENGINE: 'searxng',

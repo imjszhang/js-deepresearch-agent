@@ -259,6 +259,29 @@ describe('CLI utilities', () => {
     assert.equal(settings.research.focused.fetchMode, 'extract');
   });
 
+  it('maps fan-out search flags without changing --search single-engine semantics', () => {
+    const fanout = applyResearchFlags({ search: { engine: 'searxng' } }, {
+      'search-mode': 'fanout',
+      'search-engines': 'searxng,js-eyes',
+      'search-max-parallel-backends': '2',
+      'max-search-backend-requests': '24',
+    });
+    assert.equal(fanout.search.mode, 'fanout');
+    assert.deepEqual(fanout.search.backends.map((item) => item.engine), ['searxng', 'js-eyes']);
+    assert.equal(fanout.search.fanout.maxParallelBackends, 2);
+    assert.equal(fanout.research.budget.maxSearchBackendRequests, 24);
+
+    const single = applyResearchFlags({
+      search: {
+        mode: 'fanout',
+        engine: 'searxng',
+        backends: [{ id: 'web', engine: 'searxng', enabled: true, settings: {} }],
+      },
+    }, { search: 'js-eyes' });
+    assert.equal(single.search.engine, 'js-eyes');
+    assert.equal(single.search.mode, 'single');
+  });
+
   it('maps http-proxy flag without persisting it', () => {
     const settings = applyResearchFlags({}, {
       'http-proxy': 'socks5://127.0.0.1:1080',

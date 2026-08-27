@@ -21,7 +21,10 @@ describe('settings defaults', () => {
     assert.equal(settings.research.questionsPerIteration, 2);
     assert.equal(settings.research.concurrency, 1);
     assert.equal(settings.research.budget.maxSearchRequests, 18);
+    assert.equal(settings.research.budget.maxSearchBackendRequests, 0);
     assert.equal(settings.research.budget.maxSourceReads, 16);
+    assert.equal(settings.search.mode, undefined);
+    assert.equal(settings.search.fanout.failurePolicy, 'partial');
     assert.equal(settings.research.focused.fetchMode, 'summary');
     assert.equal(settings.research.focused.evidencePassages.enabled, true);
     assert.equal(settings.research.focused.evidencePassages.claimAlignment, true);

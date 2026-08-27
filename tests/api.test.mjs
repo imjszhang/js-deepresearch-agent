@@ -26,6 +26,26 @@ describe('API', () => {
 
     assert.equal(updated.body.llm.provider, 'ollama');
     assert.equal(updated.body.llm.model, 'qwen');
+
+    const fanout = await request(app)
+      .put('/api/settings')
+      .send({
+        search: {
+          mode: 'fanout',
+          engine: 'searxng',
+          maxResults: 12,
+          backends: [
+            { id: 'web', engine: 'searxng', enabled: true, settings: { baseUrl: 'http://searx.local', maxResults: 6 } },
+            { id: 'community', engine: 'js-eyes', enabled: true, settings: { maxResults: 5 } },
+          ],
+          fanout: { failurePolicy: 'partial', merge: 'round-robin', maxParallelBackends: 2 },
+        },
+      })
+      .expect(200);
+
+    assert.equal(fanout.body.search.mode, 'fanout');
+    assert.equal(fanout.body.search.backends.length, 2);
+    assert.equal(fanout.body.search.fanout.maxParallelBackends, 2);
   });
 
   it('validates research submission', async () => {

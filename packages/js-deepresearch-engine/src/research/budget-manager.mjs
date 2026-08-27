@@ -25,6 +25,7 @@ export class BudgetManager {
       llmTokens: limit(budget.maxLlmTokens),
       totalLlmTokens: limit(budget.maxTotalLlmTokens),
       searchRequests: limit(budget.maxSearchRequests),
+      searchBackendRequests: limit(budget.maxSearchBackendRequests),
       sourceReads: limit(budget.maxSourceReads),
       rerankRequests: limit(budget.maxRerankRequests),
       rerankTokens: limit(budget.maxRerankTokens),
@@ -47,6 +48,7 @@ export class BudgetManager {
       reportTokens: 0,
       evaluationTokens: 0,
       searchRequests: 0,
+      searchBackendRequests: 0,
       sourceReads: 0,
       rerankRequests: 0,
       rerankTokens: 0,
@@ -189,7 +191,63 @@ export class BudgetManager {
   }
 }
 
-export function wrapProvidersWithBudget({ llm, search, budget, onLlmEvent = () => {} }) {
+function wrapSearchWithBudget(search, budget, onSearchEvent = () => {}) {
+  if (!search) return search;
+  if (search.kind === 'composite' && typeof search.bindBudget === 'function') {
+    search.bindBudget({ budget, onEvent: onSearchEvent });
+  }
+  return {
+    kind: search.kind || 'single',
+    id: search.id,
+    backends: search.backends,
+    capabilities: search.capabilities,
+    async search(query, options) {
+      budget.claim('searchRequests');
+      if (search.kind === 'composite') {
+        return search.search(query, options);
+      }
+      return runSingleBackendSearch(search, query, options, budget, onSearchEvent);
+    },
+  };
+}
+
+async function runSingleBackendSearch(search, query, options, budget, onSearchEvent) {
+  const startedAt = Date.now();
+  const backendId = search.id || 'search';
+  try {
+    budget.claim('searchBackendRequests');
+    const sources = await search.search(query, options);
+    const list = Array.isArray(sources) ? sources : [];
+    onSearchEvent({
+      type: 'backend',
+      query,
+      backendId,
+      engine: backendId,
+      status: 'ok',
+      resultCount: list.length,
+      durationMs: Date.now() - startedAt,
+      errorName: null,
+      errorMessage: null,
+    });
+    return list;
+  } catch (error) {
+    const cancelled = error?.name === 'AbortError' || error?.code === 'ABORT_ERR';
+    onSearchEvent({
+      type: 'backend',
+      query,
+      backendId,
+      engine: backendId,
+      status: cancelled ? 'cancelled' : 'failed',
+      resultCount: 0,
+      durationMs: Date.now() - startedAt,
+      errorName: cancelled ? 'AbortError' : (error?.name || 'Error'),
+      errorMessage: String(error?.message || 'unknown error').slice(0, 300),
+    });
+    throw error;
+  }
+}
+
+export function wrapProvidersWithBudget({ llm, search, budget, onLlmEvent = () => {}, onSearchEvent = () => {} }) {
   let llmCallSequence = 0;
   let lastLlmCall = null;
   return {
@@ -248,13 +306,6 @@ export function wrapProvidersWithBudget({ llm, search, budget, onLlmEvent = () =
         }
       },
     },
-    search: {
-      ...search,
-      capabilities: search.capabilities,
-      async search(query, options) {
-        budget.claim('searchRequests');
-        return search.search(query, options);
-      },
-    },
+    search: wrapSearchWithBudget(search, budget, onSearchEvent),
   };
 }

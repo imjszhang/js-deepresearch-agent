@@ -1,4 +1,6 @@
 import { SearxngSearchEngine } from './engines/searxng.mjs';
+import { createFanoutSearchEngine } from './fanout-engine.mjs';
+import { resolveSearchMode } from './fanout-config.mjs';
 import { normalizeSearchConfig } from './normalize-search-config.mjs';
 
 const searchEngines = new Map();
@@ -71,12 +73,33 @@ export function resetSearchEngines() {
 }
 
 export function createSearchEngine(settings) {
-  const engineId = settings.search.engine;
+  const search = normalizeSearchConfig(settings?.search || {});
+  const mode = resolveSearchMode(search);
+  if (mode === 'fanout') {
+    return createFanoutSearchEngine(search, instantiateRegisteredEngine);
+  }
+
+  const engineId = search.engine;
   const entry = searchEngines.get(engineId);
   if (!entry?.create) {
     throw new Error(`Unsupported search engine for MVP: ${engineId}`);
   }
-  return entry.create(normalizeSearchConfig(settings.search));
+  return assignEngineId(entry.create(normalizeSearchConfig(search)), engineId);
+}
+
+function instantiateRegisteredEngine(engineId, config, backendId) {
+  const entry = searchEngines.get(engineId);
+  if (!entry?.create) {
+    throw new Error(`Unknown search backend engine "${engineId}" for backend "${backendId}".`);
+  }
+  return assignEngineId(entry.create(normalizeSearchConfig(config)), engineId);
+}
+
+function assignEngineId(instance, engineId) {
+  if (instance && typeof instance === 'object' && instance.id == null) {
+    instance.id = engineId;
+  }
+  return instance;
 }
 
 registerBuiltins();
