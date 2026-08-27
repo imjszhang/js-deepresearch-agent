@@ -53,7 +53,7 @@ function resolveEmbedding(config, { fetch } = {}) {
 
 function wrapEmbedding(embedding, { onEvent } = {}) {
   if (!embedding) return null;
-  return {
+  const wrapped = {
     ...embedding,
     provider: embedding.provider,
     model: embedding.model,
@@ -98,6 +98,13 @@ function wrapEmbedding(embedding, { onEvent } = {}) {
       }
     },
   };
+  if (typeof embedding.embed === 'function') {
+    wrapped.embed = (text, options) => embedding.embed(text, options);
+  }
+  if (typeof embedding.similarity === 'function') {
+    wrapped.similarity = (left, right, options) => embedding.similarity(left, right, options);
+  }
+  return wrapped;
 }
 
 function wrapRerank(primary, fallback, { budget, onEvent } = {}) {

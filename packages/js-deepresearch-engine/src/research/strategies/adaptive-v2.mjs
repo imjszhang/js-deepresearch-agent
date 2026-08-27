@@ -652,7 +652,6 @@ export async function runAdaptiveV2(context) {
     }
   } catch (error) {
     if (error?.name === 'AbortError') {
-      stopReason = STOP_REASONS.userCancelled;
       addTrace(trace, state, 'stop', { reasonCode: STOP_REASONS.userCancelled }, budget, 'cancelled');
       throw error;
     }

@@ -85,15 +85,11 @@ export function annotateBodyQuality(source = {}) {
     return { ...source, bodyQuality: source.fetchStatus };
   }
   if (!text || text.length < MIN_SUCCESSFUL_BODY_CHARS) {
-    if (source.fetchStatus === 'ok' || text) {
-      return {
-        ...source,
-        fetchStatus: source.fetchStatus === 'ok' ? 'failed' : (source.fetchStatus || 'failed'),
-        fetchError: source.fetchError || 'Empty or too-short body',
-        bodyQuality: 'too_short',
-      };
-    }
-    return { ...source, bodyQuality: 'missing' };
+    return {
+      ...source,
+      fetchError: source.fetchError || 'Empty or too-short body',
+      bodyQuality: text ? 'too_short' : 'missing',
+    };
   }
   return { ...source, fetchStatus: source.fetchStatus || 'ok', bodyQuality: 'ok' };
 }

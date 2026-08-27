@@ -11,8 +11,6 @@ export const GAP_STATUSES = Object.freeze([
   'missing',
 ]);
 
-const CLOSED_STATUSES = new Set(['verified']);
-const UNRESOLVED_STATUSES = new Set(['open', 'searched', 'body_read', 'missing']);
 const REQUIRED_UNMET = new Set(['open', 'searched', 'body_read', 'missing', 'blocked']);
 
 function successfulSources(findings = [], gapId = null) {
