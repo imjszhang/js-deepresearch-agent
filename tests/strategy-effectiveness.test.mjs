@@ -1,188 +1,464 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { matchQueryBattery } from '../scripts/benchmark/query-battery.mjs';
 import {
-  evaluateStrategyContract,
-  scoreCoverage,
-  scoreEvidenceMix,
-  scoreNarrativeQuality,
-  scoreStrategyEffectiveness,
-  scoreSubjectEvidence,
+  extractClaimNumbers,
+  sha256Hex,
+} from '../scripts/benchmark/claim-audit.mjs';
+import {
+  hitsPatterns,
+  matchQueryBattery,
+  sourceMatchesPolicy,
+  registrableDomain,
+} from '../scripts/benchmark/query-battery.mjs';
+import { isWafOrErrorBody } from '../scripts/benchmark/source-policy.mjs';
+import {
+  auditClaim,
+  auditStrategyRun,
+  completeSlots,
 } from '../scripts/benchmark/strategy-effectiveness.mjs';
 
 const QUERY = '截至2026年8月，llama.cpp、MLX 与 Ollama 在 Apple Silicon 上做本地 LLM 推理的官方定位、性能取舍与推荐用法是什么？';
+const ZHIPU_QUERY = '全面研究智谱这家公司，决定上亿资金是否投资智谱';
 
 const REPORT = `# Report
 
 ## Summary
 llama.cpp 定位为跨平台底层引擎 [1.1]。
-MLX 是 Apple 原生框架 [1.2]。
-Ollama 推荐给初学者，并切换到 MLX 后端 [1.3]。
+MLX 定位为 Apple 原生框架 [1.2]。
+Ollama 定位为易用封装，并推荐给初学者 [1.3]。
 
 ## Key Findings
-
-### 官方定位
 - llama.cpp 是一等公民并提供 Metal 后端 [1.1]。
 - MLX 是 Apple 原生框架 [1.2]。
 - Ollama 是易用封装 [1.3]。
-
-### 性能取舍
+- llama.cpp 吞吐约为 40 tok/s [1.1]。
 - MLX 吞吐比 llama.cpp 快 30% [1.2]。
-- Ollama 切换后端后快 2 倍 [1.3]。
-
-### 推荐用法
+- Ollama 切换后端后快 20% [1.3]。
 - 追求易用选 Ollama，追求性能用 mlx-lm，跨平台选 llama.cpp [1.3]。
 `;
 
+const OFFICIAL_BODIES = [
+  {
+    id: 's1',
+    title: 'llama.cpp',
+    url: 'https://github.com/ggml-org/llama.cpp',
+    content: 'llama.cpp is a first-class Metal backend. Throughput is about 40 tok/s on Apple Silicon.',
+    fetchStatus: 'ok',
+    contentOrigin: 'fetched',
+  },
+  {
+    id: 's2',
+    title: 'MLX',
+    url: 'https://github.com/ml-explore/mlx',
+    content: 'MLX is Apple native. Throughput is 30% faster than llama.cpp on unified memory.',
+    fetchStatus: 'ok',
+    contentOrigin: 'fetched',
+  },
+  {
+    id: 's3',
+    title: 'Ollama',
+    url: 'https://ollama.com',
+    content: 'Ollama is a beginner-friendly wrapper. Switching backends is 20% faster with mlx-lm.',
+    fetchStatus: 'ok',
+    contentOrigin: 'fetched',
+  },
+];
+
+function findingsFrom(sources, query = QUERY) {
+  return [{ question: query, sources }];
+}
+
+function appleInput(overrides = {}) {
+  return {
+    query: QUERY,
+    strategy: 'focused',
+    report: REPORT,
+    findings: findingsFrom(OFFICIAL_BODIES),
+    sources: OFFICIAL_BODIES,
+    claims: [],
+    passages: [],
+    quality: { budget: { usage: { llmTokens: 40000, sourceReads: 6 } } },
+    trace: [],
+    meta: { createdAt: '2026-08-01T00:00:00.000Z', query: QUERY },
+    usage: { llmTokens: 40000, sourceReads: 6 },
+    ...overrides,
+  };
+}
+
 describe('query battery', () => {
-  it('matches the Apple Silicon comparison query', () => {
+  it('matches the Apple Silicon comparison query as slots, not cells', () => {
     const battery = matchQueryBattery(QUERY);
     assert.equal(battery.id, 'apple-silicon-local-llm');
-    assert.equal(battery.subjects.length, 3);
+    assert.equal(battery.slots.length, 7);
+    assert.equal(battery.subjects, undefined);
+    assert.ok(battery.slots.every((slot) => slot.id && slot.patterns.length));
   });
 
-  it('matches a Zhipu equity-investment query', () => {
-    const battery = matchQueryBattery('全面研究智谱这家公司，决定上亿资金是否投资智谱');
+  it('matches a Zhipu equity-investment query as slots, not a 3x3 matrix', () => {
+    const battery = matchQueryBattery(ZHIPU_QUERY);
     assert.equal(battery.id, 'zhipu-equity-investment');
-    assert.equal(battery.subjects.length, 3);
-    assert.equal(battery.aspects.length, 3);
+    assert.ok(battery.slots.length >= 10);
+    assert.equal(battery.subjects, undefined);
+    assert.equal(battery.aspects, undefined);
+    assert.ok(battery.slots.some((slot) => slot.id === 'financials.revenue'));
+    assert.ok(battery.slots.some((slot) => slot.id === 'disclosure.gaps'));
+    assert.deepEqual(battery.sourcePolicies.regulatory.map((entry) => entry.host).sort(), [
+      'hkexnews.hk',
+      'www.hkexnews.hk',
+      'www1.hkexnews.hk',
+    ].sort());
   });
 });
 
-describe('strategy effectiveness', () => {
-  it('scores subject and aspect coverage from the narrative', () => {
-    const coverage = scoreCoverage(REPORT, matchQueryBattery(QUERY));
-    assert.equal(coverage.subjectRate, 1);
-    assert.equal(coverage.aspectRate, 1);
-    assert.equal(coverage.cellRate, 1);
+describe('host policy', () => {
+  const llamaOfficial = [{ host: 'github.com', pathPrefix: '/ggml-org/' }];
+
+  it('accepts an official path prefix', () => {
+    assert.equal(sourceMatchesPolicy('https://github.com/ggml-org/llama.cpp', llamaOfficial), true);
+    assert.equal(sourceMatchesPolicy('https://github.com/ggml-org/', llamaOfficial), true);
   });
 
-  it('does not treat name-dropping as a full comparison', () => {
-    const coverage = scoreCoverage(`# Report
+  it('rejects lookalike hosts and unrelated paths', () => {
+    assert.equal(sourceMatchesPolicy('https://github.com.evil.example/ggml-org/llama.cpp', llamaOfficial), false);
+    assert.equal(sourceMatchesPolicy('https://evil-github.com/ggml-org/llama.cpp', llamaOfficial), false);
+    assert.equal(sourceMatchesPolicy('https://github.com/other/llama.cpp', llamaOfficial), false);
+  });
+
+  it('normalizes a single leading www without treating extra subdomains as equal', () => {
+    assert.equal(sourceMatchesPolicy('https://www.hkexnews.hk/listedco/listconews', [{ host: 'hkexnews.hk' }]), true);
+    assert.equal(sourceMatchesPolicy('https://hkexnews.hk/listedco/listconews', [{ host: 'www.hkexnews.hk' }]), true);
+    assert.equal(sourceMatchesPolicy('https://news.hkexnews.hk/listedco/listconews', [{ host: 'hkexnews.hk' }]), false);
+    assert.equal(sourceMatchesPolicy('https://www1.hkexnews.hk/app', [{ host: 'www1.hkexnews.hk' }]), true);
+  });
+
+  it('collapses registrable domains and counts independent hosts', () => {
+    assert.equal(registrableDomain('news.example.com'), 'example.com');
+    assert.equal(registrableDomain('www.example.com'), 'example.com');
+    assert.equal(registrableDomain('a.example.com.cn'), 'example.com.cn');
+    const domains = new Set(['a.example.com', 'b.other.com'].map((host) => registrableDomain(host)));
+    assert.equal(domains.size, 2);
+  });
+});
+
+describe('strategy audit', () => {
+  it('does not complete a slot from name-dropping when numbers or official hosts are required', () => {
+    const report = `# Report
 
 ## Summary
-llama.cpp、MLX 与 Ollama 都出现在本地推理讨论里。
+llama.cpp、MLX 与 Ollama 都出现在本地推理讨论里，本文比较它们的官方定位与性能。
 
 ## Key Findings
+- llama.cpp MLX Ollama 都支持 Apple Silicon 本地推理。
 - llama.cpp 定位为跨平台底层引擎。
-`, matchQueryBattery(QUERY));
-    assert.equal(coverage.subjectRate, 1);
-    assert.ok(coverage.cellRate < 1);
-  });
-
-  it('requires a body or summary that mentions each subject', () => {
-    const scored = scoreSubjectEvidence([
-      { url: 'https://github.com/ggml-org/llama.cpp', content: 'llama.cpp Metal', fetchStatus: 'ok', contentOrigin: 'fetched' },
-      { url: 'https://example.com/mlx', snippet: 'MLX only' },
-    ], matchQueryBattery(QUERY));
-    assert.equal(scored.subjectBodyRate, Number((1 / 3).toFixed(4)));
-    assert.equal(scored.officialSubjectRate, Number((1 / 3).toFixed(4)));
-  });
-
-  it('treats snippets as the quick-mode evidence mix', () => {
-    const mix = scoreEvidenceMix([], [
-      { url: 'https://example.com/a', snippet: 'hello' },
-      { url: 'https://github.com/ggml-org/llama.cpp', snippet: 'official' },
-    ]);
-    assert.equal(mix.bodySources, 0);
-    assert.equal(mix.snippetSources, 2);
-    assert.equal(mix.officialSources, 1);
-  });
-
-  it('counts only Summary and Key Findings as narrative claims', () => {
-    const scored = scoreNarrativeQuality(`${REPORT}\n\n## Evidence\n- dump [1.1]\n`, QUERY, []);
-    assert.ok(scored.metrics.keyClaimCount >= 3);
-    assert.equal(scored.metrics.evidenceEntryCount, 0);
-    assert.equal(scored.origin, 'extracted');
-  });
-
-  it('prefers stored key-claim verdicts over a fresh extract', () => {
-    const scored = scoreNarrativeQuality(REPORT, QUERY, [{
-      kind: 'key_claim',
-      text: 'llama.cpp 定位为跨平台底层引擎',
-      evaluation: { verdict: 'supported' },
-    }]);
-    assert.equal(scored.origin, 'stored_key_claims');
-    assert.equal(scored.metrics.keyClaimCount, 1);
-    assert.equal(scored.metrics.rates.supportedRate, 1);
-  });
-
-  it('passes exploratory when subjects, aspects, bodies, and claims are present', () => {
-    const effect = scoreStrategyEffectiveness({
-      query: QUERY,
-      strategy: 'exploratory',
-      report: REPORT,
-      sources: [
-        {
-          url: 'https://github.com/ggml-org/llama.cpp',
-          content: 'llama.cpp is a first-class Metal backend.',
-          fetchStatus: 'ok',
-          contentOrigin: 'fetched',
-        },
-        {
-          url: 'https://github.com/ml-explore/mlx',
-          content: 'MLX uses unified memory on Apple Silicon.',
-          fetchStatus: 'ok',
-          contentOrigin: 'fetched',
-        },
-        {
-          url: 'https://ollama.com',
-          content: 'Ollama is the beginner-friendly local runner.',
-          fetchStatus: 'ok',
-          contentOrigin: 'fetched',
-        },
-      ],
-      usage: { llmTokens: 60000, sourceReads: 8 },
+`;
+    const audit = auditStrategyRun({
+      ...appleInput({
+        report,
+        findings: findingsFrom([{ url: 'https://news.example.com/local-llm', snippet: 'llama.cpp MLX Ollama' }]),
+        sources: [{ url: 'https://news.example.com/local-llm', snippet: 'llama.cpp MLX Ollama' }],
+        usage: { llmTokens: 8000, sourceReads: 1 },
+      }),
     });
-    assert.equal(effect.contract.pass, true);
-    assert.equal(effect.coverage.subjectRate, 1);
-    assert.equal(effect.coverage.cellRate, 1);
-    assert.equal(effect.evidence.subjectBodyRate, 1);
+    const byId = Object.fromEntries(audit.requiredSlotCompletion.slots.map((slot) => [slot.id, slot]));
+    assert.equal(byId['llamacpp.positioning'].status !== 'completed', true);
+    assert.equal(byId['mlx.performance'].status !== 'completed', true);
+    assert.equal(audit.requiredSlotCompletion.pass, false);
   });
 
-  it('fails exploratory when the comparison matrix is mostly empty', () => {
-    const effect = scoreStrategyEffectiveness({
-      query: QUERY,
+  it('passes the quick process contract on snippet-only sources and zero reads', () => {
+    const snippets = OFFICIAL_BODIES.map((source) => ({
+      ...source,
+      content: undefined,
+      fetchStatus: undefined,
+      contentOrigin: undefined,
+      snippet: 'llama.cpp MLX Ollama official positioning',
+    }));
+    const audit = auditStrategyRun({
+      ...appleInput({
+        strategy: 'quick',
+        findings: findingsFrom(snippets),
+        sources: snippets,
+        usage: { llmTokens: 5000, sourceReads: 0 },
+        quality: { budget: { usage: { llmTokens: 5000, sourceReads: 0 } } },
+      }),
+    });
+    assert.equal(audit.processContract.pass, true);
+    assert.equal(audit.evidenceProvenance.counts.realBodies, 0);
+    assert.equal(audit.status, 'not_ready');
+  });
+
+  it('fails the quick process contract when it counted bodies', () => {
+    const audit = auditStrategyRun({
+      ...appleInput({
+        strategy: 'quick',
+        usage: { llmTokens: 5000, sourceReads: 0 },
+        quality: { budget: { usage: { llmTokens: 5000, sourceReads: 0 } } },
+      }),
+    });
+    assert.equal(audit.processContract.pass, false);
+    assert.ok(audit.processContract.checks.some((item) => item.id === 'no_body_class_evidence' && item.pass === false));
+    assert.ok(audit.evidenceProvenance.counts.realBodies > 0);
+  });
+
+  it('fails focused with zero real bodies', () => {
+    const snippets = OFFICIAL_BODIES.map((source) => ({
+      url: source.url,
+      title: source.title,
+      snippet: source.content,
+    }));
+    const audit = auditStrategyRun({
+      ...appleInput({
+        findings: findingsFrom(snippets),
+        sources: snippets,
+        usage: { llmTokens: 12000, sourceReads: 0 },
+      }),
+    });
+    assert.equal(audit.processContract.pass, false);
+    assert.ok(audit.processContract.checks.some((item) => item.id === 'real_body_or_summary' && item.pass === false));
+    assert.equal(audit.status, 'not_ready');
+  });
+
+  it('fails focused on empty bullets', () => {
+    const audit = auditStrategyRun(appleInput({
+      report: `${REPORT}\n\n## Extra\n-\n`,
+    }));
+    assert.equal(audit.reportIntegrity.pass, false);
+    assert.ok(audit.reportIntegrity.checks.some((item) => item.id === 'no_empty_bullets' && item.pass === false));
+    assert.equal(audit.status, 'not_ready');
+  });
+
+  it('fails focused when a required official slot cites only a random media host', () => {
+    const media = [{
+      id: 'media',
+      title: 'Blog',
+      url: 'https://news.example.com/llama-cpp',
+      content: 'llama.cpp is a first-class Metal backend. Throughput is about 40 tok/s on Apple Silicon.',
+      fetchStatus: 'ok',
+      contentOrigin: 'fetched',
+    }, OFFICIAL_BODIES[1], OFFICIAL_BODIES[2]];
+    const report = REPORT.replaceAll('[1.1]', '[1.1]');
+    const audit = auditStrategyRun(appleInput({
+      report,
+      findings: findingsFrom(media),
+      sources: media,
+    }));
+    const positioning = audit.requiredSlotCompletion.slots.find((slot) => slot.id === 'llamacpp.positioning');
+    assert.equal(positioning.status, 'blocked');
+    assert.ok(positioning.checks.some((item) => item.id === 'source_policy' && item.pass === false));
+    assert.equal(audit.requiredSlotCompletion.pass, false);
+    assert.equal(audit.status, 'not_ready');
+  });
+
+  it('fails exploratory when a critical slot is missing even if the report is long and sources exist', () => {
+    const report = `# Report
+
+## Summary
+${'llama.cpp 定位为跨平台底层引擎 [1.1]。这篇长报告重复说明本地推理背景。 '.repeat(8)}
+
+## Key Findings
+- llama.cpp 是一等公民并提供 Metal 后端 [1.1]。
+- llama.cpp 吞吐约为 40 tok/s [1.1]。
+`;
+    const audit = auditStrategyRun(appleInput({
       strategy: 'exploratory',
+      report,
+      findings: findingsFrom([OFFICIAL_BODIES[0]]),
+      sources: [OFFICIAL_BODIES[0]],
+      usage: { llmTokens: 80000, sourceReads: 8 },
+      quality: { budget: { usage: { llmTokens: 80000, sourceReads: 8 } } },
+    }));
+    assert.ok(report.length > 200);
+    assert.ok(audit.requiredSlotCompletion.slots.some((slot) => slot.critical && slot.status === 'missing'));
+    assert.ok(audit.processContract.checks.some((item) => item.id === 'critical_slots_not_missing' && item.pass === false));
+    assert.equal(audit.status, 'not_ready');
+  });
+
+  it('ignores a stored supported verdict when mechanical checks fail', () => {
+    const claims = [{
+      id: 'c-wrong',
+      kind: 'key_claim',
+      text: 'MLX 吞吐比 llama.cpp 快 99% [1.2]',
+      citationKeys: ['1.2'],
+      evaluation: { verdict: 'supported', method: 'llm' },
+    }];
+    const audit = auditStrategyRun(appleInput({ claims }));
+    const claim = audit.claimChecks.find((item) => item.text.includes('99%'));
+    assert.equal(claim.numbers_match, false);
+    assert.equal(audit.status, 'not_ready');
+    assert.equal(audit.requiredSlotCompletion.slots.find((slot) => slot.id === 'mlx.performance').status !== 'completed', true);
+  });
+
+  it('marks ready when focused satisfies the published Apple contract', () => {
+    const audit = auditStrategyRun(appleInput());
+    assert.equal(audit.batteryId, 'apple-silicon-local-llm');
+    assert.equal(audit.reportIntegrity.pass, true);
+    assert.equal(audit.citationIntegrity.pass, true);
+    assert.equal(audit.requiredSlotCompletion.pass, true);
+    assert.equal(audit.processContract.pass, true);
+    assert.equal(audit.status, 'ready');
+  });
+});
+
+describe('mutation fixtures', () => {
+  it('fails citation_resolved after a citation is deleted', () => {
+    const audit = auditStrategyRun(appleInput({
+      findings: findingsFrom([OFFICIAL_BODIES[1], OFFICIAL_BODIES[2]]),
+      sources: [OFFICIAL_BODIES[1], OFFICIAL_BODIES[2]],
+    }));
+    assert.equal(audit.citationIntegrity.pass, false);
+    assert.ok(audit.claimChecks.some((claim) => claim.citation_resolved === false || audit.citationIntegrity.counts.unresolved > 0));
+    assert.equal(audit.status, 'invalid');
+  });
+
+  it('fails numbers_match when the claim number is changed but the body is not', () => {
+    const claim = {
+      id: 'c1',
+      kind: 'key_claim',
+      text: 'MLX 吞吐比 llama.cpp 快 77% [1.2]',
+      citationKeys: ['1.2'],
+    };
+    const audited = auditClaim(claim, {
+      citationMap: new Map([['1.2', { source: OFFICIAL_BODIES[1], sourceId: 's2' }]]),
+      sources: OFFICIAL_BODIES,
+      passages: [],
+    });
+    assert.equal(extractClaimNumbers(claim.text).some((item) => item.digits === '77'), true);
+    assert.equal(audited.numbers_match, false);
+  });
+
+  it('is invalid when body text no longer matches a stored contentHash', () => {
+    const original = OFFICIAL_BODIES[0].content;
+    const audit = auditStrategyRun(appleInput({
+      passages: [{
+        id: 'p1',
+        sourceId: 's1',
+        text: 'tampered body text that is long enough',
+        contentHash: sha256Hex(original),
+        startChar: 0,
+        endChar: original.length,
+      }],
+    }));
+    assert.equal(audit.status, 'invalid');
+  });
+
+  it('does not count a Cloudflare WAF page as a real body', () => {
+    const waf = [{
+      id: 'waf',
+      url: 'https://github.com/ggml-org/llama.cpp',
+      content: 'Just a moment... Attention Required! Cloudflare enable JavaScript to continue.',
+      fetchStatus: 'ok',
+      contentOrigin: 'fetched',
+    }];
+    const audit = auditStrategyRun(appleInput({
+      findings: findingsFrom(waf),
+      sources: waf,
+    }));
+    assert.equal(audit.evidenceProvenance.counts.realBodies, 0);
+    assert.ok(audit.evidenceProvenance.counts.wafRejected >= 1);
+    assert.equal(audit.evidenceProvenance.pass, false);
+    assert.equal(isWafOrErrorBody(waf[0].content, { fetchClaimedOk: true }), true);
+  });
+
+  it('fails freshness when a dated source is older than maxAgeDays', () => {
+    const battery = matchQueryBattery(ZHIPU_QUERY);
+    const slot = battery.slots.find((item) => item.id === 'market.price');
+    const completed = completeSlots({
+      battery: { ...battery, slots: [slot] },
+      report: '# Report\n\n## Summary\n截至 2024-01-01 智谱股价 12.5 港元，市值 100 亿 [1.1]。\n',
+      narrative: '截至 2024-01-01 智谱股价 12.5 港元，市值 100 亿 [1.1]。',
+      claims: [{
+        kind: 'key_claim',
+        text: '截至 2024-01-01 智谱股价 12.5 港元，市值 100 亿 [1.1]',
+        citationKeys: ['1.1'],
+      }],
+      sources: [{
+        id: 'px',
+        url: 'https://www.hkexnews.hk/price',
+        content: 'Price 12.5 HKD. Market cap 100 亿 as of 2024-01-01.',
+        publishedAt: '2024-01-01T00:00:00.000Z',
+        fetchStatus: 'ok',
+        contentOrigin: 'fetched',
+      }],
+      meta: { createdAt: '2026-08-01T00:00:00.000Z' },
+      citationMap: new Map([['1.1', {
+        source: { url: 'https://www.hkexnews.hk/price' },
+        sourceId: 'px',
+      }]]),
+    });
+    assert.equal(completed.slots[0].status, 'blocked');
+    assert.ok(completed.slots[0].checks.some((item) => item.id === 'freshness' && item.pass === false));
+  });
+
+  it('does not treat two URLs on the same registrable domain as two independent domains', () => {
+    const battery = {
+      id: 'custom',
+      sourcePolicies: {},
+      slots: [{
+        id: 'cash',
+        required: true,
+        critical: true,
+        minSources: 2,
+        minIndependentDomains: 2,
+        patternMode: 'any',
+        patterns: [/cash|现金/i],
+        requiresNumbers: false,
+        sourcePolicy: null,
+        maxAgeDays: null,
+      }],
+    };
+    const sources = [
+      { id: 'a', url: 'https://news.example.com/a', content: 'cash 10', fetchStatus: 'ok', contentOrigin: 'fetched' },
+      { id: 'b', url: 'https://www.example.com/b', content: 'cash 10', fetchStatus: 'ok', contentOrigin: 'fetched' },
+    ];
+    const completed = completeSlots({
+      battery,
+      report: '## Summary\n现金 cash runway remains 10 months [1.1] [1.2].\n',
+      claims: [{ kind: 'key_claim', text: '现金 cash runway remains 10 months [1.1] [1.2]', citationKeys: ['1.1', '1.2'] }],
+      sources,
+      citationMap: new Map([
+        ['1.1', { source: sources[0], sourceId: 'a' }],
+        ['1.2', { source: sources[1], sourceId: 'b' }],
+      ]),
+    });
+    assert.equal(completed.slots[0].checks.find((item) => item.id === 'independent_domains').pass, false);
+    assert.equal(completed.slots[0].status !== 'completed', true);
+  });
+
+  it('rejects a fake official subdomain', () => {
+    assert.equal(
+      sourceMatchesPolicy('https://github.com.evil.example/ggml-org/llama.cpp', [
+        { host: 'github.com', pathPrefix: '/ggml-org/' },
+      ]),
+      false,
+    );
+  });
+
+  it('fails reportIntegrity on an empty bullet', () => {
+    const audit = auditStrategyRun(appleInput({
       report: `# Report
 
 ## Summary
-llama.cpp、MLX 与 Ollama 都出现在本地推理讨论里。
+llama.cpp 定位为跨平台底层引擎 [1.1]。这篇补充文字用于超过最短叙事长度要求，避免和空列表项混淆。
 
 ## Key Findings
-- llama.cpp 定位为跨平台底层引擎。
+-
+- MLX 定位为 Apple 原生框架 [1.2]。
 `,
-      sources: [
-        { url: 'https://github.com/ggml-org/llama.cpp', content: 'llama.cpp', fetchStatus: 'ok', contentOrigin: 'fetched' },
-        { url: 'https://github.com/ml-explore/mlx', content: 'MLX', fetchStatus: 'ok', contentOrigin: 'fetched' },
-        { url: 'https://ollama.com', content: 'Ollama', fetchStatus: 'ok', contentOrigin: 'fetched' },
-      ],
-      usage: { llmTokens: 60000, sourceReads: 8 },
-    });
-    assert.equal(effect.contract.pass, false);
-    assert.ok(effect.contract.checks.some((check) => check.id === 'covers_subject_aspects' && check.pass === false));
+    }));
+    assert.equal(audit.reportIntegrity.pass, false);
+    assert.equal(audit.status, 'not_ready');
+  });
+});
+
+describe('determinism', () => {
+  it('returns byte-identical audit JSON for the same input', () => {
+    const input = appleInput();
+    const first = auditStrategyRun(input);
+    const second = auditStrategyRun(input);
+    assert.equal(JSON.stringify(first), JSON.stringify(second));
   });
 
-  it('fails focused when it never reads a body or summary', () => {
-    const contract = evaluateStrategyContract('focused', {
-      mix: { bodySources: 0, summarySources: 0 },
-      coverage: { subjectRate: 1, aspectRate: 1 },
-      narrative: { metrics: { keyClaimCount: 4 } },
-      usage: { sourceReads: 0 },
-    });
-    assert.equal(contract.pass, false);
-    assert.ok(contract.checks.some((check) => check.id === 'reads_bodies' && check.pass === false));
-  });
-
-  it('passes quick when it stays snippet-first and names every subject', () => {
-    const effect = scoreStrategyEffectiveness({
-      query: QUERY,
-      strategy: 'quick',
-      report: REPORT,
-      sources: [{ url: 'https://example.com', snippet: 'llama.cpp MLX Ollama' }],
-      usage: { llmTokens: 5000, sourceReads: 0 },
-    });
-    assert.equal(effect.contract.pass, true);
-    assert.equal(effect.evidence.bodySources, 0);
+  it('keeps hitsPatterns available for battery helpers', () => {
+    assert.equal(hitsPatterns('llama.cpp official', [/llama\.cpp/i]), true);
   });
 });

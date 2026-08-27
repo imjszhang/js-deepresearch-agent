@@ -275,66 +275,68 @@ describe('compare strategy sessions', () => {
     assert.equal(comparison.runs[0].strategyLabel, 'focused');
     assert.equal(comparison.runs[1].strategyLabel, 'exploratory');
     assert.equal(comparison.deltas[0].llmTokens, 20000);
-    assert.ok(comparison.runs[0].effectiveness);
-    assert.ok(comparison.runs[1].effectiveness);
-    assert.match(formatStrategyCompareMarkdown(comparison), /Strategy Benchmark Comparison/);
-    assert.match(formatStrategyCompareMarkdown(comparison), /Strategy Effectiveness/);
+    assert.ok(comparison.runs[0].audit);
+    assert.ok(comparison.runs[1].audit);
+    assert.equal(comparison.runs[0].effectiveness, comparison.runs[0].audit);
+    const markdown = formatStrategyCompareMarkdown(comparison);
+    assert.match(markdown, /Strategy Benchmark Comparison/);
+    assert.match(markdown, /Strategy Audit/);
+    assert.match(markdown, /ready|not_ready|invalid/);
+    assert.doesNotMatch(markdown, /Narrative supported|Tokens \/ supported|Contract \|/);
     assert.match(formatStrategyCompareJson(comparison), /"strategyLabel": "exploratory"/);
   });
 
-  it('scores promise-aware contracts for the three live strategies', async () => {
+  it('audits promise-aware contracts for the three live strategies', async () => {
     const query = '截至2026年8月，llama.cpp、MLX 与 Ollama 在 Apple Silicon 上做本地 LLM 推理的官方定位、性能取舍与推荐用法是什么？';
     const report = `# Report
 
 ## Summary
-llama.cpp 定位为跨平台底层引擎 [1.1]。MLX 针对统一内存做了优化 [1.2]。Ollama 推荐给初学者 [1.3]。
+llama.cpp 定位为跨平台底层引擎 [1.1]。MLX 定位为 Apple 原生框架 [1.2]。Ollama 定位为易用封装并推荐给初学者 [1.3]。
 
 ## Key Findings
-
-### 官方定位
 - llama.cpp 是一等公民并提供 Metal 后端 [1.1]。
-
-### 性能取舍
+- MLX 是 Apple 原生框架 [1.2]。
+- Ollama 是易用封装 [1.3]。
+- llama.cpp 吞吐约为 40 tok/s [1.1]。
 - MLX 吞吐比 llama.cpp 快 30% [1.2]。
-
-### 推荐用法
-- 追求易用选 Ollama，追求性能用 mlx-lm [1.3]。
+- Ollama 切换后端后快 20% [1.3]。
+- 追求易用选 Ollama，追求性能用 mlx-lm，跨平台选 llama.cpp [1.3]。
 `;
     const officialBodies = [
       {
         title: 'llama.cpp',
         url: 'https://github.com/ggml-org/llama.cpp',
-        content: 'llama.cpp is a first-class Metal backend.',
+        content: 'llama.cpp is a first-class Metal backend. Throughput is about 40 tok/s on Apple Silicon.',
         fetchStatus: 'ok',
         contentOrigin: 'fetched',
       },
       {
         title: 'MLX',
         url: 'https://github.com/ml-explore/mlx',
-        content: 'MLX uses unified memory on Apple Silicon.',
+        content: 'MLX is Apple native. Throughput is 30% faster than llama.cpp on unified memory.',
         fetchStatus: 'ok',
         contentOrigin: 'fetched',
       },
       {
         title: 'Ollama',
         url: 'https://ollama.com',
-        content: 'Ollama is the beginner-friendly local runner.',
+        content: 'Ollama is a beginner-friendly wrapper. Switching backends is 20% faster with mlx-lm.',
         fetchStatus: 'ok',
         contentOrigin: 'fetched',
       },
     ];
-    const snippet = {
-      title: 'llama.cpp',
-      url: 'https://github.com/ggml-org/llama.cpp',
+    const snippets = officialBodies.map((source) => ({
+      title: source.title,
+      url: source.url,
       snippet: 'llama.cpp MLX Ollama official positioning',
-    };
+    }));
 
     const quick = createFixture({
       strategy: 'quick',
       query,
       report,
-      sources: [snippet],
-      findings: [{ question: query, sources: [snippet] }],
+      sources: snippets,
+      findings: [{ question: query, sources: snippets }],
       quality: {
         schemaVersion: 3,
         gate: 'pass_with_warnings',
@@ -375,14 +377,21 @@ llama.cpp 定位为跨平台底层引擎 [1.1]。MLX 针对统一内存做了优
     });
 
     assert.equal(comparison.runs.map((run) => run.strategyLabel).join(','), 'quick,focused,exploratory');
-    assert.equal(comparison.runs[0].effectiveness.batteryId, 'apple-silicon-local-llm');
-    assert.equal(comparison.runs[0].effectiveness.contract.pass, true);
-    assert.equal(comparison.runs[1].effectiveness.contract.pass, true);
-    assert.equal(comparison.runs[2].effectiveness.contract.pass, true);
-    assert.equal(comparison.runs[0].effectiveness.evidence.bodySources, 0);
-    assert.ok(comparison.runs[1].effectiveness.evidence.bodySources > 0);
-    assert.equal(comparison.runs[2].effectiveness.coverage.subjectRate, 1);
-    assert.ok(comparison.runs[2].effectiveness.coverage.cellRate >= 0.67);
-    assert.match(formatStrategyCompareMarkdown(comparison), /Contract \|/);
+    assert.equal(comparison.runs[0].audit.batteryId, 'apple-silicon-local-llm');
+    assert.equal(comparison.runs[0].audit.processContract.pass, true);
+    assert.equal(comparison.runs[0].audit.status, 'not_ready');
+    assert.equal(comparison.runs[0].audit.evidenceProvenance.counts.realBodies, 0);
+    assert.equal(comparison.runs[1].audit.status, 'ready');
+    assert.equal(comparison.runs[1].audit.processContract.pass, true);
+    assert.ok(comparison.runs[1].audit.evidenceProvenance.counts.realBodies > 0);
+    assert.equal(comparison.runs[2].audit.status, 'ready');
+    assert.ok(comparison.runs[2].audit.requiredSlotCompletion.slots.some((slot) => slot.id === 'llamacpp.positioning'));
+    const markdown = formatStrategyCompareMarkdown(comparison);
+    assert.match(markdown, /ready/);
+    assert.match(markdown, /not_ready/);
+    assert.match(markdown, /llamacpp\.positioning/);
+    assert.match(markdown, /Optional semantic analysis \(non-official\)/);
+    assert.doesNotMatch(markdown, /Narrative supported|Tokens \/ supported|official supported rate/);
+    assert.doesNotMatch(markdown, /Subject × aspect|cellRate/);
   });
 });
