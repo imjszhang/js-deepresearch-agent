@@ -5,7 +5,18 @@ import { normalizeSourceUrl } from '../source-candidates.mjs';
 export const URL_STATUSES = Object.freeze(['unread', 'read', 'failed', 'waf', 'duplicate']);
 
 function candidateKey(source) {
-  return normalizeSourceUrl(source?.url || source?.id || '') || String(source?.id || '').trim();
+  return String(source?.id || source?.url || '').trim();
+}
+
+function findExisting(candidates, id, normalized) {
+  if (candidates.has(id)) return candidates.get(id);
+  if (!normalized) return null;
+  for (const candidate of candidates.values()) {
+    if (candidate.normalizedUrl === normalized || candidate.id === normalized || candidate.url === normalized) {
+      return candidate;
+    }
+  }
+  return null;
 }
 
 export function upsertUrlPool(candidates, sources = [], {
@@ -18,7 +29,8 @@ export function upsertUrlPool(candidates, sources = [], {
   for (const source of sources || []) {
     const id = candidateKey(source);
     if (!id) continue;
-    const existing = candidates.get(id);
+    const normalized = normalizeSourceUrl(source.url || id) || id;
+    const existing = findExisting(candidates, id, normalized);
     if (existing) {
       duplicates += 1;
       existing.freq = (existing.freq || 0) + 1;
@@ -34,6 +46,7 @@ export function upsertUrlPool(candidates, sources = [], {
       ...source,
       id,
       url: source.url || id,
+      normalizedUrl: normalized,
       gapId,
       gapIds: [gapId],
       query,
@@ -44,7 +57,7 @@ export function upsertUrlPool(candidates, sources = [], {
       skipReason: null,
       selectReason: null,
     }, gap);
-    decorated.normalizedUrl = id;
+    decorated.normalizedUrl = normalized;
     decorated.hostname = decorated.hostname || hostnameOf(decorated.url);
     decorated.registrableDomain = decorated.registrableDomain || registrableDomain(decorated.hostname);
     candidates.set(id, decorated);
@@ -91,10 +104,10 @@ export function clusterCandidatesByOverlap(candidates, { threshold = 0.72 } = {}
       if (!left.size || !rightTokens.length) continue;
       const overlap = rightTokens.filter((token) => left.has(token)).length;
       const union = new Set([...left, ...rightTokens]).size;
-      if (union && overlap / union >= threshold) {
+      // Similar titles from different publishers are a cluster for diversity,
+      // not a reprint. Only same-domain copies may leave the unread pool.
+      if (union && overlap / union >= threshold && Math.min(left.size, rightTokens.length) >= 4) {
         items[j].clusterId = clusterId;
-        items[j].status = items[j].status === 'unread' ? 'duplicate' : items[j].status;
-        items[j].skipReason = items[j].skipReason || 'reprint_overlap';
       }
     }
   }

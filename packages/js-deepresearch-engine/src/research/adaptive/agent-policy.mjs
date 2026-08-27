@@ -96,6 +96,7 @@ export function pickUnreadCandidates(state, count = 2, gap = null) {
     gap: focus,
     readSourceIds: state.readSourceIds,
     failedIds: state.failedSourceIds || new Set(),
+    skipHostnames: readHostnames(state),
     count,
     maxPerHostname: 2,
   });
@@ -158,6 +159,15 @@ export function fallbackAdaptiveAction(state, options = {}) {
         action: 'search',
         query: hostQueries[0] || uncovered.question,
         gapId: uncovered.id,
+        reasonCode: 'fallback_explore_below_min',
+      };
+    }
+    const nextQuery = `${state.query} official documentation`.trim();
+    if (!state.searchedQueries().some((previous) => previous === nextQuery)) {
+      return {
+        action: 'search',
+        query: nextQuery,
+        gapId: focus?.id || 'gap-1',
         reasonCode: 'fallback_explore_below_min',
       };
     }

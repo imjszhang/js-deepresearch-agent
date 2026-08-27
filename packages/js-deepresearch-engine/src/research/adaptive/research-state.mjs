@@ -263,13 +263,8 @@ export class ResearchState {
   }
 
   focusGap() {
-    const requiredOpen = this.gaps.filter((gap) => (
-      (gap.priority === 'critical' || gap.requiredHosts?.length || (gap.requiredSourceTypes || []).includes('primary'))
-      && !this.gapCovered(gap.id)
-      && gap.status !== 'blocked'
-    ));
-    const open = this.gaps.filter((gap) => !this.gapCovered(gap.id) && gap.status !== 'blocked' && gap.status !== 'verified');
-    const pool = requiredOpen.length ? requiredOpen : (open.length ? open : this.gaps.filter((gap) => gap.status === 'open'));
+    const open = this.gaps.filter((gap) => gap.status === 'open' && !this.gapCovered(gap.id));
+    const pool = open.length ? open : this.gaps.filter((gap) => gap.status === 'open' || !this.gapCovered(gap.id));
     if (!pool.length) return this.gaps[0];
     return pool[this.step % pool.length];
   }
@@ -361,8 +356,9 @@ export class ResearchState {
 
   addCandidates(sources, gapId, query = '') {
     const gap = this.gapById(gapId);
+    const resolvedGapId = gap?.id || gapId || 'gap-1';
     const before = this.candidates.size;
-    const result = upsertUrlPool(this.candidates, sources, { gapId: gapId || 'gap-1', query, gap });
+    const result = upsertUrlPool(this.candidates, sources, { gapId: resolvedGapId, query, gap });
     for (const source of sources || []) {
       const id = source.id || source.url;
       if (id && gap && !gap.candidateUrls.includes(id)) gap.candidateUrls.push(id);

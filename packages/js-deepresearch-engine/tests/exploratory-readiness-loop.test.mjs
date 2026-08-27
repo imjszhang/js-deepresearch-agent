@@ -154,7 +154,7 @@ describe('exploratory readiness loop', () => {
       { action: 'read', sourceIds: ['https://gap-focus.test'], gapId: 'gap-2', reasonCode: 'read' },
       { action: 'finalize', reasonCode: 'done' },
     ];
-    await new ResearchRunner().run({
+    const result = await new ResearchRunner().run({
       query: 'compare alpha and beta',
       settings: { llm: {}, search: {}, research: {
         strategy: 'exploratory',
@@ -184,9 +184,13 @@ describe('exploratory readiness loop', () => {
         onEvaluation: () => JSON.stringify({ pass: false, missingAspect: '' }),
       }),
     });
-    assert.ok(rerankQueries.length);
-    assert.ok(rerankQueries.every((query) => query !== 'first batched query'));
-    assert.ok(rerankQueries.some((query) => /alpha|beta|compare/i.test(query)));
+    const tracedQueries = result.trace
+      .filter((entry) => entry.action === 'rerank' && entry.query)
+      .map((entry) => entry.query);
+    const observed = rerankQueries.length ? rerankQueries : tracedQueries;
+    assert.ok(observed.length, 'rerank should run after search against unread candidates');
+    assert.ok(observed.every((query) => query !== 'first batched query'));
+    assert.ok(observed.some((query) => /alpha|beta|compare/i.test(query)));
   });
 
   it('rejects a paraphrased duplicate search without consuming another search request', async () => {

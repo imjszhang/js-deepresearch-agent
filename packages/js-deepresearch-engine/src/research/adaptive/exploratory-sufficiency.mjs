@@ -31,21 +31,29 @@ export function similarQuestions(left, right, threshold = 0.7) {
   return union > 0 && intersection / union >= threshold;
 }
 
-export function extractComparisonSubjects(query) {
-  const text = String(query || '').trim();
-  const compareAnd = text.match(/(?:compare|对比|比较)\s+(.+?)\s+(?:and|与|和|以及)\s+(.+?)(?:\s+(?:for|in|on|regarding|的)\b|[?!]|$)/i);
-  if (compareAnd) return [compareAnd[1], compareAnd[2]].map(cleanSubject).filter(Boolean);
-  const versus = text.match(/(.+?)\s+(?:vs\.?|versus|compared to|compared with)\s+(.+?)(?:\s+(?:for|in|on|regarding)\b|[?!]|$)/i);
-  if (versus) return [versus[1], versus[2]].map(cleanSubject).filter(Boolean);
-  return [];
-}
-
 function cleanSubject(value) {
   return String(value || '')
     .replace(/^(?:compare|对比|比较)\s+/i, '')
     .replace(/[?!]+$/g, '')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function splitSubjectList(value) {
+  return String(value || '')
+    .split(/\s*(?:,|、|\/)\s*/)
+    .flatMap((part) => String(part || '').split(/\s+(?:and|与|和|以及)\s+/i))
+    .map(cleanSubject)
+    .filter((item) => item && !/^(?:and|or|the|与|和)$/i.test(item));
+}
+
+export function extractComparisonSubjects(query) {
+  const text = String(query || '').trim();
+  const compareAnd = text.match(/(?:compare|对比|比较)\s+(.+?)\s+(?:and|与|和|以及)\s+(.+?)(?:\s+(?:for|in|on|regarding|的)\b|[?!]|$)/i);
+  if (compareAnd) return [...splitSubjectList(compareAnd[1]), ...splitSubjectList(compareAnd[2])];
+  const versus = text.match(/(.+?)\s+(?:vs\.?|versus|compared to|compared with)\s+(.+?)(?:\s+(?:for|in|on|regarding)\b|[?!]|$)/i);
+  if (versus) return [...splitSubjectList(versus[1]), ...splitSubjectList(versus[2])];
+  return [];
 }
 
 export function classifyResearchQuery(query) {

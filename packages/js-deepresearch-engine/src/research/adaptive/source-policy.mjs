@@ -147,6 +147,7 @@ export function selectReads({
   gap = {},
   readSourceIds = new Set(),
   failedIds = new Set(),
+  skipHostnames = new Set(),
   count = 3,
   maxPerHostname = 2,
 } = {}) {
@@ -161,6 +162,9 @@ export function selectReads({
     }
     const decorated = decorateCandidate(raw, gap);
     if (hostMatchesAny(decorated.hostname, gap.blockedHosts || [])) {
+      continue;
+    }
+    if (decorated.hostname && skipHostnames.has(decorated.hostname) && decorated.tier !== 'required_primary') {
       continue;
     }
     const hostCount = hostnameCounts.get(decorated.hostname) || 0;

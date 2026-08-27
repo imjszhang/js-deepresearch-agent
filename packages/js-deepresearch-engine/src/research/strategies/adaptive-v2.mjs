@@ -84,9 +84,15 @@ function gatePasses(state) {
   return Boolean(state.readiness?.pass || state.sufficiency?.sufficient);
 }
 
+function unreadForRerank(candidates, gap) {
+  const scoped = unreadForGap(candidates, gap?.id).filter((candidate) => !candidate.status || candidate.status === 'unread');
+  if (scoped.length) return scoped;
+  return [...candidates.values()].filter((candidate) => !candidate.status || candidate.status === 'unread');
+}
+
 async function observeRerank({ state, gap, providers, signal, trace, budget }) {
-  const unread = unreadForGap(state.candidates, gap?.id).filter((candidate) => candidate.status === 'unread');
-  if (!providers?.rerank || !unread.length) return null;
+  const unread = unreadForRerank(state.candidates, gap);
+  if (!providers?.rerank?.rerank || !unread.length) return null;
   const query = gap?.question || state.query;
   const documents = unread.map((source) => ({
     id: source.id,
@@ -140,7 +146,6 @@ export async function runAdaptiveV2(context) {
   const maxOpenGaps = Number(exploratory.maxOpenGaps) || 8;
   const maxQueriesPerStep = Math.max(1, Number(exploratory.maxQueriesPerStep) || 3);
   const autoReadTopK = Math.min(Math.max(0, Number(exploratory.autoReadTopK ?? 2)), maxReads);
-  const minPolicyReads = Math.min(maxReads, Math.max(2, autoReadTopK || 0));
   const answerGateEnabled = exploratory.answerGate !== false;
   const gateMode = exploratory.gateMode || 'rules-then-llm';
   let degraded = false;
@@ -390,8 +395,9 @@ export async function runAdaptiveV2(context) {
       abort(signal);
 
       if (action.action === 'search') {
-        const gapId = action.gapId || state.focusGap()?.id || 'gap-1';
-        const gap = state.gapById(gapId);
+        const requestedGapId = action.gapId || state.focusGap()?.id || 'gap-1';
+        const gap = state.gapById(requestedGapId);
+        const gapId = gap.id;
         const seeded = [...searchQueries];
         if ((gap.requiredHosts || []).length) {
           for (const hostQuery of requiredHostQueries(gap, { alreadySearched: [...state.searchedQueries(), ...seeded] })) {
@@ -462,8 +468,7 @@ export async function runAdaptiveV2(context) {
         }
 
         if (autoReadTopK > 0) {
-          let autoReadCount = Math.max(autoReadTopK, minPolicyReads);
-          autoReadCount = Math.min(autoReadCount, maxReads);
+          let autoReadCount = Math.min(autoReadTopK, maxReads);
           while (budget && autoReadCount > 0 && !budget.canClaim('sourceReads', autoReadCount)) autoReadCount -= 1;
           const picks = autoReadCount > 0 ? pickUnreadCandidates(state, autoReadCount, gap) : [];
           if (picks.length) {
@@ -516,6 +521,24 @@ export async function runAdaptiveV2(context) {
           && pendingStopReason !== STOP_REASONS.budgetExhausted
           && pendingStopReason !== STOP_REASONS.safetyCap;
         const hasDirectEvidence = state.hasBodyEvidence() && (state.cycleHadSuccessfulBody() || state.lastAction !== 'search');
+        if (belowMin && canContinue && !pendingStopReason) {
+          state.addDiary('finalize deferred: still below the token floor');
+          addTrace(trace, state, 'evaluate_report', { reasonCode: 'below_min_keep_exploring' }, budget, 'retry');
+          action = normalizeAgentAction(fallbackAdaptiveAction(state, {
+            sufficiency: state.sufficiency,
+            readiness: state.readiness,
+            belowMin: true,
+          }));
+          if (action.action === 'search' || action.action === 'read') {
+            state.lastAction = action.action;
+            if (action.action === 'search') {
+              searchQueries = normalizeSearchQueries(action, maxQueriesPerStep);
+            }
+            // Fall through by restarting the loop with the fallback action.
+            state.step -= 1;
+            continue;
+          }
+        }
         if (!hasDirectEvidence && canContinue && state.evaluationRetries < maxRetries && budget?.canClaim('searchRequests')) {
           state.evaluationRetries += 1;
           state.observations.push({ type: 'evaluation', verdict: 'needs_more_evidence' });

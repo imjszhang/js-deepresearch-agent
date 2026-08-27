@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 import { BudgetManager } from '../src/research/budget-manager.mjs';
 import { ResearchState } from '../src/research/adaptive/research-state.mjs';
 import { fallbackAdaptiveAction } from '../src/research/adaptive/agent-policy.mjs';
-import { evaluateExploratorySufficiency, classifyResearchQuery, similarQuestions } from '../src/research/adaptive/exploratory-sufficiency.mjs';
+import { evaluateExploratorySufficiency, classifyResearchQuery, extractComparisonSubjects, similarQuestions } from '../src/research/adaptive/exploratory-sufficiency.mjs';
 import { buildBudgetView, estimateReportPromptTokens } from '../src/research/adaptive/budget-view.mjs';
 import { applyExploratoryBudget, effectiveExploratoryMaxSteps, EXPLORATORY_SAFETY_MAX_STEPS, resolveExploratorySettings } from '../src/research/exploratory-settings.mjs';
 import { mapStructuredProgressEvent } from '../src/research/progress-events.mjs';
@@ -45,6 +45,7 @@ describe('exploratory budget snapshot and sufficiency', () => {
 
   it('marks comparison queries insufficient until each subject has body evidence', () => {
     const query = 'Compare Ollama and llama.cpp';
+    assert.deepEqual(extractComparisonSubjects('Compare alpha, beta, gamma, and delta'), ['alpha', 'beta', 'gamma', 'delta']);
     assert.equal(classifyResearchQuery(query).kind, 'comparison');
     const oneSubject = evaluateExploratorySufficiency({
       query,

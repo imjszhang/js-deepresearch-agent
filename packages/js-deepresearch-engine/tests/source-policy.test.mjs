@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { classifySourceTier, independentBodyDomains, requiredHostQueries, selectReads } from '../src/research/adaptive/source-policy.mjs';
+import { clusterCandidatesByOverlap } from '../src/research/adaptive/url-pool.mjs';
 
 describe('source policy', () => {
   it('ranks required hosts and primary tiers before mainstream reprints', () => {
@@ -37,5 +38,18 @@ describe('source policy', () => {
     assert.equal(domains.size, 2);
     assert.ok(domains.has('example.com'));
     assert.ok(domains.has('other.test'));
+  });
+
+  it('does not drop different-host SERP hits as duplicates just because titles overlap', () => {
+    const candidates = new Map([
+      ['https://alpha-1.example/page', { id: 'https://alpha-1.example/page', url: 'https://alpha-1.example/page', title: 'alpha 1', status: 'unread', registrableDomain: 'alpha-1.example' }],
+      ['https://alpha-2.example/page', { id: 'https://alpha-2.example/page', url: 'https://alpha-2.example/page', title: 'alpha 2', status: 'unread', registrableDomain: 'alpha-2.example' }],
+      ['https://news.example.com/a', { id: 'https://news.example.com/a', url: 'https://news.example.com/a', title: 'Reprint', status: 'unread', registrableDomain: 'example.com' }],
+      ['https://blog.example.com/b', { id: 'https://blog.example.com/b', url: 'https://blog.example.com/b', title: 'Reprint copy', status: 'unread', registrableDomain: 'example.com' }],
+    ]);
+    clusterCandidatesByOverlap(candidates);
+    assert.equal(candidates.get('https://alpha-1.example/page').status, 'unread');
+    assert.equal(candidates.get('https://alpha-2.example/page').status, 'unread');
+    assert.equal(candidates.get('https://blog.example.com/b').status, 'duplicate');
   });
 });
