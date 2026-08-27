@@ -64,7 +64,7 @@ export class BudgetManager {
     this.controllerStopReason = reason || null;
   }
 
-  updateReportReserve(_promptTokens) {
+  updateReportReserve() {
     this.reserveReportTokens = 0;
     this.reservedReportTotalTokens = 0;
     return 0;

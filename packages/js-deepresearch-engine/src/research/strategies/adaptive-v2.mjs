@@ -111,7 +111,7 @@ function normalizeSearchQueries(action, maxQueries) {
 }
 
 export async function runAdaptiveV2(context) {
-  const { query, llm, search, signal, emit, settings, budget, queryMemory, trace, researchProviders, concurrency } = context;
+  const { query, llm, search, signal, emit, settings, budget, queryMemory, trace, researchProviders } = context;
   const exploratory = resolveExploratorySettings(settings);
   const focused = resolveFocusedSettings(settings);
   const queryShape = classifyResearchQuery(query);
@@ -129,7 +129,6 @@ export async function runAdaptiveV2(context) {
   const maxRetries = Math.max(0, Number(exploratory.maxEvaluationRetries) || 0);
   const maxOpenGaps = Number(exploratory.maxOpenGaps) || 8;
   const maxQueriesPerStep = Math.max(1, Number(exploratory.maxQueriesPerStep) || 3);
-  const resolvedSearchConcurrency = resolveStrategyConcurrency(search, concurrency, 1);
   const autoReadTopK = Math.min(Math.max(0, Number(exploratory.autoReadTopK ?? 2)), maxReads);
   const answerGateEnabled = exploratory.answerGate !== false;
   const gateMode = exploratory.gateMode || 'rules-then-llm';
@@ -297,11 +296,16 @@ export async function runAdaptiveV2(context) {
           total: allowedQueries.length,
         });
         const candidatesBefore = state.candidates.size;
-        const searchResults = await mapLimit(allowedQueries, resolvedSearchConcurrency, async (searchQuery) => {
-          abort(signal);
-          const results = await search.search(searchQuery, { signal });
-          return { searchQuery, results };
-        }, signal);
+        const searchResults = await mapLimit(
+          allowedQueries,
+          resolveStrategyConcurrency(search, allowedQueries.length, allowedQueries.length),
+          async (searchQuery) => {
+            abort(signal);
+            const results = await search.search(searchQuery, { signal });
+            return { searchQuery, results };
+          },
+          signal,
+        );
         let totalResults = 0;
         for (const { searchQuery, results } of searchResults) {
           totalResults += results.length;
