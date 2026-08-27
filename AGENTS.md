@@ -547,7 +547,7 @@ npm run benchmark:strategies -- \
 | `--output <file>` | 写入 Markdown/JSON 报告 |
 | `--no-llm` | 官方对比路径：只跑确定性审计。归档 verdict / `--llm` 仅进入文末 **optional / non-official** 语义层，不写入 `status` |
 
-对比报告的官方结果是 **Strategy Audit**，只回答「这次 run 是否满足已发布的确定性证据合同」，不回答「报告好不好 / 真不真」。`--no-llm` 是官方 compare 路径。
+对比报告的官方结果是 **Strategy Audit**，只回答「这次 run 是否满足已发布的确定性证据合同」，不回答「报告好不好 / 真不真」。`--no-llm` 是官方 compare 路径。`status` 是硬门槛，三轮都可以同为 `not_ready`；要比模式差别看 **Observable counts**、**Slot matrix** 和 **Where strategies differ**，不要只看第一列状态。
 
 审计输出 `status`：`ready` / `not_ready` / `invalid`。没有加权总分、没有 A/B/good 评级。五组硬检查：
 

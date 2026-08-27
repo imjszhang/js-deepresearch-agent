@@ -16,9 +16,46 @@ function formatPass(value) {
 }
 
 function slotSummary(audit) {
+  const counts = slotStatusCounts(audit);
+  return counts.total ? `${counts.completed}/${counts.total}` : 'n/a';
+}
+
+function slotStatusCounts(audit) {
   const slots = audit?.requiredSlotCompletion?.slots || [];
-  const completed = slots.filter((slot) => slot.status === 'completed').length;
-  return slots.length ? `${completed}/${slots.length}` : 'n/a';
+  return {
+    total: slots.length,
+    completed: slots.filter((slot) => slot.status === 'completed').length,
+    blocked: slots.filter((slot) => slot.status === 'blocked').length,
+    missing: slots.filter((slot) => slot.status === 'missing').length,
+  };
+}
+
+function collectSlotIds(runs = []) {
+  const ids = [];
+  for (const run of runs) {
+    for (const slot of run.audit?.requiredSlotCompletion?.slots || []) {
+      if (!ids.includes(slot.id)) ids.push(slot.id);
+    }
+  }
+  return ids;
+}
+
+function slotById(audit, slotId) {
+  return (audit?.requiredSlotCompletion?.slots || []).find((slot) => slot.id === slotId) || null;
+}
+
+function formatSlotStatus(slot) {
+  if (!slot) return 'n/a';
+  if (slot.status === 'completed') return 'completed';
+  const failed = (slot.checks || []).filter((item) => !item.pass).map((item) => item.id);
+  return failed.length ? `${slot.status} (${failed.join(', ')})` : slot.status;
+}
+
+function slotStatusesDiffer(runs, slotId) {
+  const statuses = runs
+    .map((run) => slotById(run.audit, slotId)?.status || 'n/a')
+    .join('\0');
+  return new Set(statuses.split('\0')).size > 1;
 }
 
 export function formatStrategyCompareMarkdown(comparison) {
@@ -69,13 +106,49 @@ export function formatStrategyCompareMarkdown(comparison) {
       );
     }
 
+    lines.push(
+      '',
+      '### Observable counts',
+      '',
+      'These are the comparable numbers. `status` stays `not_ready` until every hard gate passes; it is not the ranking.',
+      '',
+      '| Strategy | Completed | Blocked | Missing | Empty bullets | Real bodies | WAF rejected | Resolved citations |',
+      '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |',
+    );
     for (const run of comparison.runs) {
-      const slots = run.audit?.requiredSlotCompletion?.slots || [];
-      if (!slots.length) continue;
-      lines.push('', `### ${run.strategyLabel} slots`);
-      for (const slot of slots) {
-        const failed = slot.checks.filter((item) => !item.pass).map((item) => item.id);
-        lines.push(`- \`${slot.id}\`: ${slot.status}${failed.length ? ` (${failed.join(', ')})` : ''}`);
+      const audit = run.audit;
+      if (!audit) continue;
+      const slots = slotStatusCounts(audit);
+      lines.push(
+        `| ${run.strategyLabel} | ${slots.completed} | ${slots.blocked} | ${slots.missing} | ${audit.reportIntegrity?.counts?.emptyBulletCount ?? 0} | ${audit.evidenceProvenance?.counts?.realBodies ?? 0} | ${audit.evidenceProvenance?.counts?.wafRejected ?? 0} | ${audit.citationIntegrity?.counts?.resolved ?? 0} |`,
+      );
+    }
+
+    const slotIds = collectSlotIds(comparison.runs);
+    if (slotIds.length && comparison.runs.length > 1) {
+      const labels = comparison.runs.map((run) => run.strategyLabel);
+      lines.push(
+        '',
+        '### Slot matrix',
+        '',
+        `| Slot | ${labels.join(' | ')} |`,
+        `| --- | ${labels.map(() => '---').join(' | ')} |`,
+      );
+      for (const slotId of slotIds) {
+        const cells = comparison.runs.map((run) => formatSlotStatus(slotById(run.audit, slotId)));
+        lines.push(`| \`${slotId}\` | ${cells.join(' | ')} |`);
+      }
+
+      const diverged = slotIds.filter((slotId) => slotStatusesDiffer(comparison.runs, slotId));
+      lines.push('', '### Where strategies differ');
+      if (diverged.length === 0) {
+        lines.push('', 'No slot status differs across the compared runs.');
+      } else {
+        lines.push('');
+        for (const slotId of diverged) {
+          const parts = comparison.runs.map((run) => `${run.strategyLabel}=${formatSlotStatus(slotById(run.audit, slotId))}`);
+          lines.push(`- \`${slotId}\`: ${parts.join('; ')}`);
+        }
       }
     }
 

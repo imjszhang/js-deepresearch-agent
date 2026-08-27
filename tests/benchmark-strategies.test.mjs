@@ -389,6 +389,9 @@ llama.cpp 定位为跨平台底层引擎 [1.1]。MLX 定位为 Apple 原生框�
     const markdown = formatStrategyCompareMarkdown(comparison);
     assert.match(markdown, /ready/);
     assert.match(markdown, /not_ready/);
+    assert.match(markdown, /Observable counts/);
+    assert.match(markdown, /Slot matrix/);
+    assert.match(markdown, /Where strategies differ/);
     assert.match(markdown, /llamacpp\.positioning/);
     assert.match(markdown, /Optional semantic analysis \(non-official\)/);
     assert.doesNotMatch(markdown, /Narrative supported|Tokens \/ supported|official supported rate/);
