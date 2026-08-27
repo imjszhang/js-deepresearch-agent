@@ -67,6 +67,11 @@ export function formatStrategyCompareMarkdown(comparison) {
       lines.push(`- Source reads: ${formatDelta(delta.sourceReads)}`);
       lines.push(`- Rerank requests: ${formatDelta(delta.rerankRequests)}`);
       lines.push(`- Supported rate: ${formatDelta(delta.supportedRate, { percent: true })}`);
+      lines.push(`- Narrative at least partial: ${formatDelta(delta.supportedOrPartialRate, { percent: true })}`);
+      lines.push(`- Subject coverage: ${formatDelta(delta.subjectRate, { percent: true })}`);
+      lines.push(`- Aspect coverage: ${formatDelta(delta.aspectRate, { percent: true })}`);
+      lines.push(`- Subject × aspect cells: ${formatDelta(delta.cellRate, { percent: true })}`);
+      lines.push(`- Bodies per subject: ${formatDelta(delta.subjectBodyRate, { percent: true })}`);
       lines.push(`- Evidence coverage: ${formatDelta(delta.evidenceCoverageRate, { percent: true })}`);
       lines.push(`- Sources: ${formatDelta(delta.sourceCount)}`);
       lines.push('');
@@ -90,6 +95,34 @@ export function formatStrategyCompareMarkdown(comparison) {
     }
     if (run.unusedBudgetTokens != null) {
       lines.push(`  - unused budget: ${run.unusedBudgetTokens}`);
+    }
+  }
+
+  if (comparison.runs.some((run) => run.effectiveness)) {
+    lines.push(
+      '',
+      '## Strategy Effectiveness',
+      '',
+      'Coverage and contract scores are promise-aware: quick is a snippet scan, focused should read bodies, exploratory should cover every named subject and aspect.',
+      '',
+      '| Strategy | Subjects | Cells | Body/subject | Official | Key claims | Narrative supported | At least partial | Tokens / supported | Contract |',
+      '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |',
+    );
+    for (const run of comparison.runs) {
+      const effect = run.effectiveness;
+      if (!effect) continue;
+      lines.push(
+        `| ${run.strategyLabel} | ${formatPercent(effect.coverage.subjectRate)} | ${formatPercent(effect.coverage.cellRate)} | ${formatPercent(effect.evidence.subjectBodyRate)} | ${formatPercent(effect.evidence.officialSubjectRate ?? effect.evidence.officialRate)} | ${effect.narrative.keyClaimCount} | ${formatPercent(effect.narrative.supportedRate)} | ${formatPercent(effect.narrative.supportedOrPartialRate)} | ${effect.efficiency.tokensPerSupportedClaim ?? 'n/a'} | ${effect.contract.pass ? 'pass' : 'fail'} |`,
+      );
+    }
+
+    for (const run of comparison.runs) {
+      const failed = (run.effectiveness?.contract.checks || []).filter((check) => !check.pass);
+      if (!failed.length) continue;
+      lines.push('', `### ${run.strategyLabel} contract gaps`);
+      for (const check of failed) {
+        lines.push(`- ${check.id}: ${check.detail}`);
+      }
     }
   }
 

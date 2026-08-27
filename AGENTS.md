@@ -547,6 +547,14 @@ npm run benchmark:strategies -- \
 | `--output <file>` | 写入 Markdown/JSON 报告 |
 | `--no-llm` | 质量评估复用 schema v3 归档 verdict |
 
+对比报告除花费与支持率外，还有 **Strategy Effectiveness**：按策略承诺看主体覆盖、主体×方面格子、每个主体是否读到正文、官方来源、叙事支持率和合同检查。`quick` 不要求正文；`focused` 要求每个主体都有正文/摘要；`exploratory` 还要求比较题的主体×方面格子基本填满。同一道题的离线对比：
+
+```bash
+npm run benchmark:strategies -- \
+  --sessions quick=work_dir/quick/<timestamp>,focused=work_dir/focused/<timestamp>,exploratory=work_dir/exploratory/<timestamp> \
+  --no-llm --output tmp/strategy-effectiveness.md
+```
+
 耗时取自 `--run` 墙钟时间，或从 `trace.json` 时间戳/`durationMs` 推算；成本取自 `quality.json` 的 `budget.usage`。
 
 ---

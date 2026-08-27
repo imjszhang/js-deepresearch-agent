@@ -171,7 +171,7 @@ function outputComparison(comparison, flags) {
 
 function printHelp() {
   console.log(`
-Strategy benchmark comparison (quality, time, cost)
+Strategy benchmark comparison (quality, time, cost, strategy contract)
 
 Usage:
   node scripts/benchmark-strategies.mjs --sessions <dir1,dir2,...> [options]

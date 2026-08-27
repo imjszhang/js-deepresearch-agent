@@ -1,6 +1,7 @@
 import { loadArtifacts, loadArtifactsByResearchId } from './load-artifacts.mjs';
 import { runBenchmark } from './run-benchmark.mjs';
 import { extractRunStats } from './extract-run-stats.mjs';
+import { scoreStrategyEffectiveness } from './strategy-effectiveness.mjs';
 
 function collectWarnings(runs) {
   const warnings = [];
@@ -33,8 +34,14 @@ function buildDeltas(runs) {
     sourceReads: run.cost.sourceReads - baseline.cost.sourceReads,
     rerankRequests: run.cost.rerankRequests - baseline.cost.rerankRequests,
     supportedRate: run.benchmark.metrics.rates.supportedRate - baseline.benchmark.metrics.rates.supportedRate,
+    supportedOrPartialRate: (run.effectiveness?.narrative.supportedOrPartialRate ?? 0)
+      - (baseline.effectiveness?.narrative.supportedOrPartialRate ?? 0),
     evidenceCoverageRate: run.benchmark.metrics.rates.evidenceCoverageRate - baseline.benchmark.metrics.rates.evidenceCoverageRate,
     sourceCount: run.counts.sourceCount - baseline.counts.sourceCount,
+    subjectRate: (run.effectiveness?.coverage.subjectRate ?? 0) - (baseline.effectiveness?.coverage.subjectRate ?? 0),
+    aspectRate: (run.effectiveness?.coverage.aspectRate ?? 0) - (baseline.effectiveness?.coverage.aspectRate ?? 0),
+    cellRate: (run.effectiveness?.coverage.cellRate ?? 0) - (baseline.effectiveness?.coverage.cellRate ?? 0),
+    subjectBodyRate: (run.effectiveness?.evidence.subjectBodyRate ?? 0) - (baseline.effectiveness?.evidence.subjectBodyRate ?? 0),
   }));
 }
 
@@ -84,6 +91,15 @@ export async function compareStrategySessions({
 
     runs.push({
       ...stats,
+      effectiveness: scoreStrategyEffectiveness({
+        query: artifacts.meta?.query || stats.query,
+        strategy: stats.strategyLabel,
+        report: artifacts.report,
+        findings: artifacts.findings,
+        sources: artifacts.sources,
+        claims: artifacts.claims,
+        usage: artifacts.quality?.budget?.usage || stats.cost,
+      }),
       benchmark: {
         evaluation: benchmark.evaluation,
         metrics: benchmark.metrics,
