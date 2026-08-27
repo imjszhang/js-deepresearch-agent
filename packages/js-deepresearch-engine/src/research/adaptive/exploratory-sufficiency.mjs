@@ -1,3 +1,4 @@
+import { isSuccessfulBody } from '../body-quality.mjs';
 import { evaluateEvidenceSufficiency } from '../quality-gates.mjs';
 
 const DEFINITIONAL = /^(what(?:['’]?s| is| are)|who(?:['’]?s| is| are)|define|definition of|explain|什么是|谁是|定义)\b/i;
@@ -17,7 +18,9 @@ export function normalizeQuestion(value) {
 }
 
 export function questionTokens(value) {
-  return new Set(normalizeQuestion(value).split(' ').filter((token) => token.length > 1 && !STOP_WORDS.has(token)));
+  return new Set(normalizeQuestion(value).split(' ').filter((token) => (
+    !STOP_WORDS.has(token) && (token.length > 1 || /^\d+$/.test(token))
+  )));
 }
 
 export function similarQuestions(left, right, threshold = 0.7) {
@@ -59,7 +62,7 @@ export function classifyResearchQuery(query) {
 }
 
 export function sourceHasBody(source) {
-  return Boolean(source && (source.fetchStatus === 'ok' || source.content || source.summary));
+  return isSuccessfulBody(source);
 }
 
 export function findingsHaveBodyEvidence(findings = []) {
@@ -119,10 +122,23 @@ export function evaluateExploratorySufficiency({
     if (idx >= 0) flags.splice(idx, 1);
   }
 
+  const requiredHostMissing = resolvedGaps.some((gap) => (
+    (gap.requiredHosts || []).length > 0
+    && gap.priority === 'critical'
+    && !['verified'].includes(gap.status)
+    && !(state?.gapHasRequiredHostBody?.(gap.id))
+  ));
+  if (requiredHostMissing && !flags.includes('required_host_missing')) {
+    flags.push('required_host_missing');
+  }
+
   const criticalOpen = resolvedGaps.filter((gap) => {
     const covered = state?.gapCovered?.(gap.id)
-      || (gap.status === 'resolved')
+      || ['resolved', 'verified', 'body_read'].includes(gap.status)
       || resolvedFindings.some((finding) => finding.gapId === gap.id && (finding.sources || []).some(sourceHasBody));
+    if (gap.priority === 'critical' && (gap.requiredHosts || []).length && !['verified'].includes(gap.status) && !state?.gapHasRequiredHostBody?.(gap.id)) {
+      return true;
+    }
     return gap.priority === 'critical' && !covered;
   });
 
@@ -135,7 +151,7 @@ export function evaluateExploratorySufficiency({
 
   let sufficient = false;
   let inconclusive = false;
-  if (!hasBody || flags.includes('primary_source_missing') || flags.includes('freshness_unknown')) {
+  if (!hasBody || flags.includes('primary_source_missing') || flags.includes('freshness_unknown') || flags.includes('required_host_missing')) {
     sufficient = false;
   } else if (shape.kind === 'comparison') {
     sufficient = missingSubjects.length === 0 && criticalOpen.length === 0;

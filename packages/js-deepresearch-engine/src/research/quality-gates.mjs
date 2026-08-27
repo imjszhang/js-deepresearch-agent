@@ -52,8 +52,9 @@ export function evaluatePreReport({ findings = [], gaps = [], query = '' }) {
   if (sourceCount > 0 && directEvidenceSources === 0) flags.push('no_direct_evidence');
   const primaryRequired = /\b(open[ -]?source|software|project|framework|architecture|implementation|standard|scientific|research)\b|开源|软件|项目|框架|架构|实现|标准|论文|研究/i.test(query);
   if (primaryRequired && !sources.some(isPrimarySource)) flags.push('primary_source_missing');
-  const criticalGaps = gaps.filter((gap) => gap.priority === 'critical' && gap.status !== 'resolved').map((gap) => gap.question);
-  const openGaps = gaps.filter((gap) => gap.status !== 'resolved');
+  const closed = new Set(['resolved', 'verified', 'body_read']);
+  const criticalGaps = gaps.filter((gap) => gap.priority === 'critical' && !closed.has(gap.status)).map((gap) => gap.question);
+  const openGaps = gaps.filter((gap) => !closed.has(gap.status));
   if (criticalGaps.length) flags.push('critical_gaps_open');
   if (openGaps.length) flags.push('open_gaps');
   const limitations = [...criticalGaps];

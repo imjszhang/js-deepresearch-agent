@@ -1,7 +1,7 @@
 import { hostnameOf } from './research-state.mjs';
 import { isOrthogonalGap } from './exploratory-sufficiency.mjs';
 
-const ACTION_SCHEMA = '{"action":"search|read|reflect|answer|stop","reasonCode":"short_code","gapId":"gap-1","query":"...","queries":["..."],"sourceIds":["..."],"gapQuestion":"..."}';
+const ACTION_SCHEMA = '{"action":"search|read|reflect|draft|finalize","reasonCode":"short_code","gapId":"gap-1","query":"...","queries":["..."],"sourceIds":["..."],"gapQuestion":"..."}';
 
 function extractJson(text) {
   const raw = String(text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
@@ -11,9 +11,17 @@ function extractJson(text) {
   try { return JSON.parse(raw.slice(start, end + 1)); } catch { return null; }
 }
 
+function normalizeDecision(parsed) {
+  if (!parsed || typeof parsed !== 'object') return parsed;
+  if (parsed.action === 'answer') parsed.action = 'finalize';
+  if (parsed.action === 'stop') parsed.action = 'finalize';
+  return parsed;
+}
+
 export async function decideAdaptiveAction({ llm, state, signal }) {
   const snapshot = state.snapshot();
   const belowMin = Boolean(snapshot.budget?.belowMin);
+  const gatePass = Boolean(snapshot.readiness?.pass);
   const response = await llm.complete({
     purpose: 'agent_decision',
     signal,
@@ -21,30 +29,26 @@ export async function decideAdaptiveAction({ llm, state, signal }) {
     maxTokens: 600,
     messages: [{ role: 'system', content: [
       'You are a budget-aware research agent. Choose exactly one next action.',
+      'Actions: search, read, reflect, draft, finalize. "answer" is an alias for finalize.',
       'Token budget has a floor and a ceiling. The floor is a minimum explore spend, not a stop target.',
-      'While budget.belowMin is true, keep exploring: search or read missing subjects and open gaps. Do not answer yet.',
-      'After budget.minReached, answer when sufficiency.sufficient is true or body evidence covers every critical gap.',
-      'budget.hardCapLlmTokens / remainingVsHardCap is the hard ceiling. Reserve report tokens and do not exceed it.',
-      'Prefer high evidence-per-token actions. Do not pad tokens after the floor if evidence is already sufficient.',
-      'Candidate "score" values are optional observations, never mandatory source choices.',
-      'Top-ranked sources are harvested automatically after each search; that harvest is not a decision step.',
-      'Use read only to pick additional unread sources the auto-harvest skipped. Consecutive reads of different unread sources are allowed.',
+      'While budget.belowMin is true, keep exploring: search or read missing subjects and open gaps. Do not finalize yet.',
+      'readiness.pass is the only evidence-sufficient signal. You cannot override a failed readiness gate.',
+      'After a search, you must read a real body before draft/finalize. Snippets, WAF, and shell pages do not count.',
+      'Prefer required/primary hosts before media reprints. When a gap lists requiredHosts, search with site:host queries.',
+      'Use read to pick unread sources for the current focus gap. Consecutive reads of different unread sources are allowed.',
       'Use reflect only when you have a genuinely new orthogonal gap that is not a paraphrase of an existing gap.',
-      'Prefer working on focusGapId unless another open gap is clearly more urgent.',
-      'Do not repeat the exact previous action with no new information (same search query, or reflect without a new gap).',
-      'Never answer immediately after a search unless body-level evidence was already harvested.',
+      'Use draft for a candidate answer that will be checked; failed drafts become repair gaps.',
+      'Use finalize only when readiness.pass is true and you are not below the token floor.',
+      'Never repeat or closely paraphrase a query listed in searchedQueries.',
       'A search action may include up to 3 distinct queries in "queries"; make them complementary, not paraphrases.',
       'A read action should include 2-4 sourceIds when several promising unread candidates exist.',
-      'Never repeat or closely paraphrase a query listed in searchedQueries; propose a genuinely different query instead.',
-      'If the research question compares multiple subjects, ensure searches and reads cover each subject; check knowledge for subjects with no dedicated evidence yet.',
-      'Use knowledge, gap coverage, and sufficiency to judge whether collected evidence already answers the open gaps.',
-      'When answering because the evidence is enough, set reasonCode to evidence_sufficient.',
-      belowMin ? 'You are still below the token floor. Do not answer. Explore another unread source or uncovered subject.' : '',
-      'Budget fields: usedLlmTokens, minLlmTokens, remainingVsMin, remainingVsHardCap, reservedReportTokens (prompt+completion reserved for the final report), and actionCostEstimates.',
+      belowMin ? 'You are still below the token floor. Do not finalize. Explore another unread source or uncovered subject.' : '',
+      gatePass ? 'The deterministic readiness gate currently passes.' : 'The deterministic readiness gate currently fails; keep searching or reading.',
+      'Budget fields: usedLlmTokens, minLlmTokens, remainingVsMin, remainingVsHardCap, and actionCostEstimates.',
       `Return JSON only: ${ACTION_SCHEMA}`,
     ].filter(Boolean).join('\n') }, { role: 'user', content: JSON.stringify(snapshot) }],
   });
-  return extractJson(response);
+  return normalizeDecision(extractJson(response));
 }
 
 export async function decomposeQuery({ llm, state, signal, maxSubQuestions = 3 }) {
@@ -81,7 +85,10 @@ function readHostnames(state) {
   return hostnames;
 }
 
-export function pickUnreadCandidates(state, count = 2) {
+export function pickUnreadCandidates(state, count = 2, gapId = null) {
+  if (typeof state.pickPolicyReads === 'function') {
+    return state.pickPolicyReads(count, gapId);
+  }
   const rankedUnread = state.rankedCandidates().filter((candidate) => !state.readSourceIds.has(candidate.id));
   if (!rankedUnread.length) return [];
   const alreadyRead = readHostnames(state);
@@ -99,17 +106,20 @@ export function pickUnreadCandidates(state, count = 2) {
 }
 
 export function fallbackAdaptiveAction(state, options = {}) {
+  const readiness = options.readiness || state.readiness;
   const sufficiency = options.sufficiency || state.sufficiency;
   const belowMin = Boolean(options.belowMin);
-  if (sufficiency?.sufficient && !belowMin) {
+  const gatePass = readiness ? Boolean(readiness.pass) : Boolean(sufficiency?.sufficient);
+  if (gatePass && !belowMin) {
     return { action: 'answer', reasonCode: 'fallback_evidence_sufficient' };
   }
-  const picks = pickUnreadCandidates(state, 2);
+  const focusId = state.focusGap?.()?.id || 'gap-1';
+  const picks = pickUnreadCandidates(state, 2, focusId);
   if (picks.length) {
     return {
       action: 'read',
       sourceIds: picks.map((candidate) => candidate.id),
-      gapId: picks[0].gapId,
+      gapId: picks[0].gapId || focusId,
       reasonCode: 'fallback_read_evidence',
     };
   }
@@ -117,19 +127,29 @@ export function fallbackAdaptiveAction(state, options = {}) {
   if ((state.candidates.size === 0 || !searchedOriginal) && state.lastAction !== 'search') {
     return { action: 'search', query: state.query, gapId: 'gap-1', reasonCode: 'fallback_initial_search' };
   }
+  const uncovered = (state.gaps || []).find((gap) => (
+    !state.gapCovered(gap.id) && !state.searchedQueries().includes(gap.question)
+  ));
+  if (uncovered && state.lastAction !== 'search') {
+    const siteQueries = (gap) => (gap.requiredHosts || []).map((host) => `site:${host} ${gap.question}`);
+    return {
+      action: 'search',
+      query: uncovered.question,
+      queries: siteQueries(uncovered),
+      gapId: uncovered.id,
+      reasonCode: belowMin ? 'fallback_explore_below_min' : 'fallback_search_open_gap',
+    };
+  }
   if (belowMin) {
-    const uncovered = (state.gaps || []).find((gap) => (
-      !state.gapCovered(gap.id) && !state.searchedQueries().includes(gap.question)
-    ));
-    if (uncovered) {
-      return {
-        action: 'search',
-        query: uncovered.question,
-        gapId: uncovered.id,
-        reasonCode: 'fallback_explore_below_min',
-      };
-    }
-    return { action: 'answer', reasonCode: 'fallback_exploration_exhausted' };
+    return {
+      action: 'search',
+      query: `${state.query} additional primary sources`,
+      gapId: uncovered?.id || 'gap-1',
+      reasonCode: 'fallback_explore_below_min',
+    };
+  }
+  if (!gatePass && (state.readiness || (state.profile?.requiredHosts || []).length)) {
+    return { action: 'answer', reasonCode: 'fallback_source_blocked' };
   }
   return { action: 'answer', reasonCode: 'fallback_evidence_available' };
 }
@@ -146,20 +166,26 @@ export async function evaluateAnswerReadiness({ llm, state, signal }) {
       temperature: 0,
       maxTokens: 400,
       messages: [{ role: 'system', content: [
-        'You review whether collected research knowledge is sufficient to definitively answer the question.',
-        'Fail only when a clearly important aspect of the question has no supporting knowledge at all.',
+        'You review missing evidence. You cannot mark the research sufficient when the deterministic gate failed.',
+        'Propose one concrete repair sub-question when something important is missing.',
         'Return JSON only: {"pass":true|false,"missingAspect":"one concrete unanswered sub-question or empty string"}',
       ].join('\n') }, { role: 'user', content: JSON.stringify({
         query: state.query,
         gaps: state.gaps,
         knowledge: state.knowledge,
         findingsCount: state.findings.length,
+        readiness: state.readiness,
         sufficiency: state.sufficiency,
       }) }],
     });
     const parsed = extractJson(response);
     if (!parsed || typeof parsed.pass !== 'boolean') return null;
-    return { pass: parsed.pass, missingAspect: String(parsed.missingAspect || '').trim() };
+    const gatePass = Boolean(state.readiness?.pass);
+    return {
+      pass: parsed.pass && gatePass,
+      llmPass: parsed.pass,
+      missingAspect: String(parsed.missingAspect || '').trim(),
+    };
   } catch {
     return null;
   }

@@ -57,6 +57,8 @@ export function resolveExploratorySettings(settings = {}) {
     maxEvaluationRetries: raw.maxEvaluationRetries === undefined ? 1 : Number(raw.maxEvaluationRetries),
     answerGate: raw.answerGate !== false,
     autoReadTopK: raw.autoReadTopK,
+    maxCandidateEvaluationTokens: countBound(raw.maxCandidateEvaluationTokens, 0),
+    maxPostReportEvaluationTokens: countBound(raw.maxPostReportEvaluationTokens, 0),
   };
 }
 
@@ -65,6 +67,12 @@ export function applyExploratoryBudget(budget, exploratory) {
   if (!budget?.limits) return;
   budget.limits.searchRequests = countBound(exploratory?.maxSearchRequests, 0);
   budget.limits.sourceReads = countBound(exploratory?.maxSourceReads, 0);
+  if (exploratory?.maxCandidateEvaluationTokens !== undefined) {
+    budget.limits.candidateEvaluationTokens = countBound(exploratory.maxCandidateEvaluationTokens, 0);
+  }
+  if (exploratory?.maxPostReportEvaluationTokens !== undefined) {
+    budget.limits.postReportEvaluationTokens = countBound(exploratory.maxPostReportEvaluationTokens, 0);
+  }
 }
 
 export function applyExploratoryTokenBudget(budget, exploratory) {

@@ -58,11 +58,14 @@ export class ActionCostTracker {
 function explorationUsed(budget = {}) {
   if (typeof budget.explorationUsed === 'function') return budget.explorationUsed();
   const exploration = Number(budget?.usage?.explorationTokens) || 0;
+  const report = Number(budget?.usage?.reportTokens) || 0;
+  const candidate = Number(budget?.usage?.candidateEvaluationTokens) || 0;
+  const post = Number(budget?.usage?.postReportEvaluationTokens) || 0;
   const evaluation = Number(budget?.usage?.evaluationTokens) || 0;
-  if (exploration > 0 || evaluation > 0 || Number(budget?.usage?.reportTokens) > 0) {
-    return exploration + evaluation;
+  if (exploration > 0 || report > 0 || candidate > 0 || post > 0 || evaluation > 0) {
+    return exploration;
   }
-  return Math.max(0, (Number(budget?.usage?.llmTokens) || 0) - (Number(budget?.usage?.reportTokens) || 0));
+  return Math.max(0, (Number(budget?.usage?.llmTokens) || 0) - report - candidate - post - evaluation);
 }
 
 export function buildBudgetView({ budget, actionCosts, minLlmTokens, targetLlmTokens } = {}) {
