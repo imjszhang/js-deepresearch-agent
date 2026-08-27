@@ -1,3 +1,11 @@
+import { isRawBinaryDocumentText } from './body-quality.mjs';
+import {
+  convertDocumentToMarkdown,
+  detectDocumentFormat,
+  extractMarkdownTitle,
+  filenameFromUrl,
+} from './document-converter.mjs';
+
 function stripHtml(html = '') {
   return String(html)
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
@@ -30,7 +38,31 @@ function extractLinks(html = '', baseUrl = '') {
   return [...new Set(links)];
 }
 
-export async function fetchUrlContent(url, { signal, maxChars = 8000, timeoutMs = 15000 } = {}) {
+const DEFAULT_DOCUMENT_MAX_CHARS = 32000;
+
+function truncateContent(content, maxChars) {
+  if (!maxChars || content.length <= maxChars) return content;
+  return `${content.slice(0, maxChars)}\n[...truncated]`;
+}
+
+async function readResponseBytes(response) {
+  if (typeof response.arrayBuffer === 'function') {
+    return new Uint8Array(await response.arrayBuffer());
+  }
+  const raw = await response.text();
+  return new TextEncoder().encode(raw);
+}
+
+function decodeText(bytes) {
+  return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+}
+
+export async function fetchUrlContent(url, {
+  signal,
+  maxChars = 8000,
+  timeoutMs = 15000,
+  convertDocument,
+} = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -49,7 +81,14 @@ export async function fetchUrlContent(url, { signal, maxChars = 8000, timeoutMs 
       signal: controller.signal,
       headers: {
         'user-agent': 'js-deepresearch-agent/1.0 (+research)',
-        accept: 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8',
+        accept: [
+          'text/html',
+          'application/xhtml+xml',
+          'application/pdf;q=0.9',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document;q=0.8',
+          'text/plain;q=0.7',
+          '*/*;q=0.5',
+        ].join(','),
       },
       redirect: 'follow',
     });
@@ -62,14 +101,53 @@ export async function fetchUrlContent(url, { signal, maxChars = 8000, timeoutMs 
     }
 
     const contentType = response.headers.get('content-type') || '';
-    const raw = await response.text();
+    const bytes = await readResponseBytes(response);
+    const format = detectDocumentFormat({ bytes, contentType, url });
+
+    if (format) {
+      const converted = await convertDocumentToMarkdown(bytes, {
+        format,
+        convert: convertDocument,
+      });
+      if (!converted.ok) {
+        return {
+          status: 'failed',
+          error: converted.error,
+          documentFormat: format,
+        };
+      }
+      if (isRawBinaryDocumentText(converted.markdown)) {
+        return {
+          status: 'failed',
+          error: 'Document converter returned raw file bytes',
+          documentFormat: format,
+        };
+      }
+      const content = truncateContent(
+        converted.markdown,
+        Math.max(Number(maxChars) || 0, DEFAULT_DOCUMENT_MAX_CHARS),
+      );
+      return {
+        status: 'ok',
+        title: extractMarkdownTitle(content) || filenameFromUrl(url) || url,
+        content,
+        links: [],
+        converter: 'anydoc',
+        documentFormat: format,
+      };
+    }
+
+    const raw = decodeText(bytes);
+    if (isRawBinaryDocumentText(raw)) {
+      return {
+        status: 'failed',
+        error: 'Binary document decoded as text',
+      };
+    }
     const title = extractTitle(raw) || url;
     const links = contentType.includes('html') ? extractLinks(raw, url) : [];
     let content = contentType.includes('html') ? stripHtml(raw) : raw.trim();
-
-    if (content.length > maxChars) {
-      content = `${content.slice(0, maxChars)}\n[...truncated]`;
-    }
+    content = truncateContent(content, maxChars);
 
     if (!content) {
       return {

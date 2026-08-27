@@ -17,6 +17,14 @@ export function isWafShellText(text = '') {
   return WAF_OR_ERROR_NEEDLES.some((pattern) => pattern.test(String(text || '')));
 }
 
+export function isRawBinaryDocumentText(text = '') {
+  const content = String(text || '');
+  if (/^\s*%PDF-/i.test(content)) return true;
+  if (/\/Type\s*\/Catalog/i.test(content) && /endobj/i.test(content)) return true;
+  if (/^\s*\{\\rtf/i.test(content)) return true;
+  return false;
+}
+
 export function isWafOrErrorBody(text = '', { fetchClaimedOk = false, minChars = MIN_FETCHED_BODY_CHARS } = {}) {
   const content = String(text || '');
   if (isWafShellText(content)) return true;
@@ -36,7 +44,7 @@ export function isSuccessfulBody(source = {}) {
   }
   const text = sourceBodyText(source);
   if (!text) return false;
-  if (isWafShellText(text)) return false;
+  if (isWafShellText(text) || isRawBinaryDocumentText(text)) return false;
   if (source.contentOrigin === 'fetched' && text.length < MIN_FETCHED_BODY_CHARS) return false;
   if (text.length < MIN_PROVIDED_BODY_CHARS) return false;
   return source.fetchStatus !== 'failed';
@@ -49,6 +57,9 @@ export function classifyFetchedBody(source = {}) {
   }
   if (!text) {
     return { status: 'failed', successful: false, reason: 'empty_body' };
+  }
+  if (isRawBinaryDocumentText(text)) {
+    return { status: 'failed', successful: false, reason: 'raw_document_bytes' };
   }
   if (isWafShellText(text) || isWafOrErrorBody(text, { fetchClaimedOk: source.contentOrigin === 'fetched' })) {
     return { status: 'waf', successful: false, reason: 'waf_or_shell' };
