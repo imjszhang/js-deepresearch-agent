@@ -51,6 +51,62 @@ function resolveEmbedding(config, { fetch } = {}) {
   throw new Error(`Unsupported embedding provider: ${config.provider}`);
 }
 
+function wrapEmbedding(embedding, { onEvent } = {}) {
+  if (!embedding) return null;
+  const wrapped = {
+    ...embedding,
+    provider: embedding.provider,
+    model: embedding.model,
+    async embedDocuments(texts = [], options = {}) {
+      const startedAt = Date.now();
+      const purpose = options.purpose || 'embed';
+      const inputCount = Array.isArray(texts) ? texts.length : 0;
+      onEvent?.({
+        operation: 'embed',
+        status: 'started',
+        provider: embedding.provider || null,
+        model: embedding.model || null,
+        purpose,
+        inputCount,
+      });
+      try {
+        const vectors = await embedding.embedDocuments(texts, options);
+        onEvent?.({
+          operation: 'embed',
+          status: 'completed',
+          provider: embedding.provider || null,
+          model: embedding.model || null,
+          purpose,
+          inputCount,
+          durationMs: Date.now() - startedAt,
+          fallback: false,
+        });
+        return vectors;
+      } catch (error) {
+        onEvent?.({
+          operation: 'embed',
+          status: 'degraded',
+          provider: embedding.provider || null,
+          model: embedding.model || null,
+          purpose,
+          inputCount,
+          durationMs: Date.now() - startedAt,
+          fallback: true,
+          errorCode: error?.code || error?.name || 'EMBEDDING_ERROR',
+        });
+        throw error;
+      }
+    },
+  };
+  if (typeof embedding.embed === 'function') {
+    wrapped.embed = (text, options) => embedding.embed(text, options);
+  }
+  if (typeof embedding.similarity === 'function') {
+    wrapped.similarity = (left, right, options) => embedding.similarity(left, right, options);
+  }
+  return wrapped;
+}
+
 function wrapRerank(primary, fallback, { budget, onEvent } = {}) {
   return {
     provider: primary.provider,
@@ -78,7 +134,7 @@ export function createResearchProviders(config = {}, runtime = {}) {
   const fetch = runtime.fetch;
   const fallback = new RulesRerankProvider(config.rerank || {});
   const rerank = resolveRerank(config.rerank, { budget: runtime.budget, fetch });
-  const embedding = resolveEmbedding(config.embedding, { fetch });
+  const embedding = wrapEmbedding(resolveEmbedding(config.embedding, { fetch }), runtime);
   return {
     ...deterministicResearchProviders,
     ...config,

@@ -247,9 +247,12 @@ describe('exploratory budget snapshot and sufficiency', () => {
   it('persists covered gap status so snapshots stay truthful', () => {
     const state = new ResearchState({ query: 'topic', maxSteps: 6 });
     state.addGap('sub-question two');
-    state.findings.push({ gapId: 'gap-2', sources: [{ url: 'https://x.test', fetchStatus: 'ok' }] });
+    state.findings.push({
+      gapId: 'gap-2',
+      sources: [{ url: 'https://x.test', fetchStatus: 'ok', content: 'Sub-question two now has a successful body with enough detail.' }],
+    });
     state.syncGapCoverage();
-    assert.equal(state.gaps.find((gap) => gap.id === 'gap-2').status, 'resolved');
+    assert.equal(state.gaps.find((gap) => gap.id === 'gap-2').status, 'body_read');
     assert.equal(state.gaps.find((gap) => gap.id === 'gap-1').status, 'open');
     const snapshot = state.snapshot();
     assert.equal(snapshot.gaps.find((gap) => gap.id === 'gap-2').covered, true);

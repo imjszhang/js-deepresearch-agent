@@ -13,8 +13,13 @@ export class BudgetExceededError extends Error {
 
 function purposeBucket(purpose, report = false) {
   if (report || purpose === 'report') return 'reportTokens';
-  if (purpose === 'answer_evaluation' || purpose === 'claim_entailment') return 'evaluationTokens';
+  if (purpose === 'claim_entailment') return 'postReportEvaluationTokens';
+  if (purpose === 'answer_evaluation') return 'candidateEvaluationTokens';
   return 'explorationTokens';
+}
+
+function isEvaluationBucket(bucket) {
+  return bucket === 'candidateEvaluationTokens' || bucket === 'postReportEvaluationTokens' || bucket === 'evaluationTokens';
 }
 
 export class BudgetManager {
@@ -29,6 +34,8 @@ export class BudgetManager {
       rerankRequests: limit(budget.maxRerankRequests),
       rerankTokens: limit(budget.maxRerankTokens),
       estimatedCost: limit(budget.maxEstimatedCost),
+      candidateEvaluationTokens: limit(budget.maxCandidateEvaluationTokens),
+      postReportEvaluationTokens: limit(budget.maxPostReportEvaluationTokens),
     };
     this.maxReportOutputTokens = limit(report.maxOutputTokens);
     this.reserveReportTokens = 0;
@@ -46,6 +53,8 @@ export class BudgetManager {
       explorationTokens: 0,
       reportTokens: 0,
       evaluationTokens: 0,
+      candidateEvaluationTokens: 0,
+      postReportEvaluationTokens: 0,
       searchRequests: 0,
       sourceReads: 0,
       rerankRequests: 0,
@@ -73,9 +82,15 @@ export class BudgetManager {
   }
 
   explorationUsed() {
-    const bucketed = (this.usage.explorationTokens || 0) + (this.usage.evaluationTokens || 0);
-    if (bucketed > 0 || (this.usage.reportTokens || 0) > 0) return bucketed;
-    return Math.max(0, (this.usage.llmTokens || 0) - (this.usage.reportTokens || 0));
+    const exploration = this.usage.explorationTokens || 0;
+    const report = this.usage.reportTokens || 0;
+    const candidate = this.usage.candidateEvaluationTokens || 0;
+    const post = this.usage.postReportEvaluationTokens || 0;
+    const combinedEval = this.usage.evaluationTokens || 0;
+    if (exploration > 0 || report > 0 || candidate > 0 || post > 0 || combinedEval > 0) {
+      return exploration;
+    }
+    return Math.max(0, (this.usage.llmTokens || 0) - report - candidate - post - combinedEval);
   }
 
   remainingVsHardCap() {
@@ -110,6 +125,9 @@ export class BudgetManager {
     if (kind === 'llmTokens') {
       const bucket = purposeBucket(options.purpose, options.report);
       this.usage[bucket] = (this.usage[bucket] || 0) + amount;
+      if (isEvaluationBucket(bucket)) {
+        this.usage.evaluationTokens = (this.usage.evaluationTokens || 0) + amount;
+      }
     }
   }
 
@@ -117,6 +135,9 @@ export class BudgetManager {
     this.usage.llmTokens = Math.max(0, (this.usage.llmTokens || 0) - amount);
     const bucket = purposeBucket(options.purpose, options.report);
     this.usage[bucket] = Math.max(0, (this.usage[bucket] || 0) - amount);
+    if (isEvaluationBucket(bucket)) {
+      this.usage.evaluationTokens = Math.max(0, (this.usage.evaluationTokens || 0) - amount);
+    }
   }
 
   markExhausted(kind) {
@@ -132,6 +153,9 @@ export class BudgetManager {
       this.usage.llmTokens += tokens;
       const bucket = purposeBucket(options.purpose, options.report);
       this.usage[bucket] = (this.usage[bucket] || 0) + tokens;
+      if (isEvaluationBucket(bucket)) {
+        this.usage.evaluationTokens = (this.usage.evaluationTokens || 0) + tokens;
+      }
     } else this.unknown.llmTokens = true;
     const cost = Number(usage?.estimatedCost ?? usage?.estimated_cost);
     if (Number.isFinite(cost)) {
@@ -159,6 +183,15 @@ export class BudgetManager {
         return false;
       }
       if (this.isReportClaim(options)) return true;
+      const bucket = purposeBucket(options.purpose, options.report);
+      if (bucket === 'postReportEvaluationTokens') {
+        const cap = this.limits.postReportEvaluationTokens || 0;
+        return cap === 0 || (this.usage.postReportEvaluationTokens || 0) + amount <= cap;
+      }
+      if (bucket === 'candidateEvaluationTokens') {
+        const cap = this.limits.candidateEvaluationTokens || 0;
+        return cap === 0 || (this.usage.candidateEvaluationTokens || 0) + amount <= cap;
+      }
       const cap = this.limits.llmTokens || 0;
       if (cap === 0) return true;
       return this.explorationUsed() + amount <= cap;

@@ -65,7 +65,22 @@ export {
   resolveCitations,
   resolveCitedSourceIds,
 } from './research/citations.mjs';
-export { ReportGenerationError, validateReportOutput, looksTruncated, isPlaceholderSummary } from './research/report-builder.mjs';
+export { ReportGenerationError, validateReportOutput, looksTruncated, isPlaceholderSummary, emptyBulletLines } from './research/report-builder.mjs';
+export {
+  isWafOrErrorBody,
+  isSuccessfulBody,
+  isRawBinaryDocumentText,
+  classifyFetchedBody,
+  MIN_FETCHED_BODY_CHARS,
+} from './research/body-quality.mjs';
+export {
+  detectDocumentFormat,
+  convertDocumentToMarkdown,
+} from './research/document-converter.mjs';
+export { inferResearchProfile } from './research/adaptive/research-profile.mjs';
+export { evaluateReadinessGate } from './research/adaptive/readiness-gate.mjs';
+export { classifySourceTier, hostnameOf, registrableDomainFromUrl, selectReadsByPolicy } from './research/adaptive/source-policy.mjs';
+export { normalizeExploratoryStopReason, EXPLORATORY_STOP_REASONS } from './research/adaptive/stop-reasons.mjs';
 export {
   assembleReport,
   reviseUnsupportedKeyClaims,

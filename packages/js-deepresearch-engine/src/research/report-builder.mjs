@@ -143,7 +143,16 @@ export function validateReportOutput(report, {
   }
   const dangling = unresolvedCitations(text, findings);
   if (dangling.length) flags.push('report_unresolved_citations');
+  if (hasEmptyBulletLines(text)) flags.push('report_empty_bullets');
   return { ok: flags.length === 0, text, outputChars: text.length, flags };
+}
+
+export function emptyBulletLines(report = '') {
+  return String(report || '').split('\n').filter((line) => /^\s*(?:[-*]|\d+[.)])\s*$/.test(line));
+}
+
+function hasEmptyBulletLines(report = '') {
+  return emptyBulletLines(report).length > 0;
 }
 
 export async function buildReport({

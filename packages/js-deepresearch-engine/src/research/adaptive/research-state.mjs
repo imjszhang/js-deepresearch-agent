@@ -4,15 +4,27 @@ import {
   similarQuestions,
   sourceHasBody,
 } from './exploratory-sufficiency.mjs';
+import { createGapRecord, createRootGap, inferResearchProfile } from './research-profile.mjs';
+import { evaluateReadinessGate } from './readiness-gate.mjs';
+import {
+  classifySourceTier,
+  hostnameOf as policyHostnameOf,
+  hostnamesMatch,
+  registrableDomainFromUrl,
+  selectReadsByPolicy,
+} from './source-policy.mjs';
+import { UrlPool } from './url-pool.mjs';
 
-const ACTIONS = new Set(['search', 'read', 'reflect', 'answer', 'stop']);
+export { hostnameOf } from './source-policy.mjs';
+
+const ACTIONS = new Set(['search', 'read', 'reflect', 'draft', 'finalize', 'answer', 'stop']);
+const FINALIZE_ACTIONS = new Set(['draft', 'finalize', 'answer', 'stop']);
 const RANKED_CANDIDATE_LIMIT = 20;
 const SNAPSHOT_CANDIDATE_LIMIT = 8;
 const MAX_CANDIDATES_PER_HOSTNAME = 2;
 const KNOWLEDGE_SNIPPET_CHARS = 160;
 const DIARY_SNAPSHOT_LINES = 12;
 
-// Official repos and documentation hosts tend to carry primary evidence.
 const BOOST_HOSTNAME_PATTERNS = [
   /(^|\.)github\.com$/,
   /(^|\.)gitlab\.com$/,
@@ -20,7 +32,6 @@ const BOOST_HOSTNAME_PATTERNS = [
   /^docs\./,
   /(^|\.)wikipedia\.org$/,
 ];
-// Download portals, app stores, and shopping sites rarely answer research questions.
 const PENALIZE_HOSTNAME_PATTERNS = [
   /(^|\.)softonic\.com$/,
   /(^|\.)cnet\.com$/,
@@ -33,20 +44,30 @@ const PENALIZE_HOSTNAME_PATTERNS = [
 const HOSTNAME_BOOST = 0.3;
 const HOSTNAME_PENALTY = -0.6;
 
-export function hostnameOf(url) {
-  try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; }
-}
-
 export function hostnameWeight(url) {
-  const hostname = hostnameOf(url);
+  const hostname = policyHostnameOf(url);
   if (!hostname) return 0;
   if (PENALIZE_HOSTNAME_PATTERNS.some((pattern) => pattern.test(hostname))) return HOSTNAME_PENALTY;
   if (BOOST_HOSTNAME_PATTERNS.some((pattern) => pattern.test(hostname))) return HOSTNAME_BOOST;
   return 0;
 }
 
+function normalizeAction(action) {
+  if (action === 'answer') return 'finalize';
+  if (action === 'stop') return 'finalize';
+  return action;
+}
+
 export class ResearchState {
-  constructor({ query, maxSteps = 0, maxGapDepth = 2, minLlmTokens = 0, targetLlmTokens = 0, budget = null } = {}) {
+  constructor({
+    query,
+    maxSteps = 0,
+    maxGapDepth = 2,
+    minLlmTokens = 0,
+    targetLlmTokens = 0,
+    budget = null,
+    profile = null,
+  } = {}) {
     this.query = query;
     const parsedSteps = Number(maxSteps);
     this.maxSteps = Number.isFinite(parsedSteps) && parsedSteps > 0 ? Math.floor(parsedSteps) : 0;
@@ -57,16 +78,26 @@ export class ResearchState {
     this.actionCosts = new ActionCostTracker();
     this.budgetView = null;
     this.sufficiency = null;
+    this.readiness = null;
+    this.profile = profile || inferResearchProfile(query);
     this.step = 0;
     this.lastAction = null;
-    this.gaps = [{ id: 'gap-1', question: query, status: 'open', priority: 'critical', depth: 0 }];
+    this.gaps = [createRootGap(query, this.profile)];
     this.findings = [];
     this.candidates = new Map();
+    this.urlPool = new UrlPool({ maxPerHostname: MAX_CANDIDATES_PER_HOSTNAME });
     this.readSourceIds = new Set();
     this.knowledge = [];
     this.observations = [];
     this.diary = [];
     this.evaluationRetries = 0;
+    this.embeddingTraces = [];
+    this.cycle = {
+      afterSearch: false,
+      successfulBodyReads: 0,
+      newUrlCount: 0,
+      lastSearchQuery: null,
+    };
   }
 
   addDiary(line) {
@@ -75,33 +106,105 @@ export class ResearchState {
     this.diary.push(`step ${this.step}: ${text}`);
   }
 
-  addGap(question, priority = 'normal', { depth } = {}) {
+  addGap(question, priority = 'normal', options = {}) {
     const text = String(question || '').trim();
     if (!text) return null;
     if (this.gaps.some((gap) => similarQuestions(gap.question, text))) return null;
-    const nextDepth = depth ?? 1;
+    const nextDepth = options.depth ?? 1;
     if (this.maxGapDepth > 0 && nextDepth > this.maxGapDepth) return null;
-    const gap = { id: `gap-${this.gaps.length + 1}`, question: text, status: 'open', priority, depth: nextDepth };
+    const gap = createGapRecord({
+      id: `gap-${this.gaps.length + 1}`,
+      question: text,
+      priority,
+      depth: nextDepth,
+      profile: this.profile,
+      requiredHosts: options.requiredHosts,
+      preferredHosts: options.preferredHosts,
+      requiredSourceTypes: options.requiredSourceTypes,
+      minIndependentSources: options.minIndependentSources,
+    });
     this.gaps.push(gap);
     return gap;
   }
 
+  getGap(gapId) {
+    return this.gaps.find((gap) => gap.id === gapId) || this.gaps[0];
+  }
+
   gapCovered(gapId) {
+    const gap = this.getGap(gapId);
+    if (gap && ['verified', 'resolved'].includes(gap.status)) return true;
+    if (gap?.requiredHosts?.length && !this.gapHasRequiredHostBody(gapId)) return false;
     return this.findings.some((finding) => finding.gapId === gapId
       && (finding.sources || []).some(sourceHasBody));
+  }
+
+  gapHasRequiredHostBody(gapId) {
+    const gap = this.getGap(gapId);
+    if (!gap?.requiredHosts?.length) return true;
+    return this.findings.some((finding) => (
+      finding.gapId === gapId
+      && (finding.sources || []).some((source) => (
+        sourceHasBody(source)
+        && gap.requiredHosts.some((host) => hostnamesMatch(policyHostnameOf(source.url || source.id), host))
+      ))
+    ));
   }
 
   hasBodyEvidence() {
     return this.findings.some((finding) => (finding.sources || []).some(sourceHasBody));
   }
 
+  cycleHasSuccessfulBody() {
+    return this.cycle.successfulBodyReads > 0;
+  }
+
+  beginSearchCycle() {
+    this.cycle.afterSearch = true;
+    this.cycle.successfulBodyReads = 0;
+    this.cycle.newUrlCount = 0;
+  }
+
+  noteSuccessfulBody() {
+    this.cycle.successfulBodyReads += 1;
+  }
+
   syncGapCoverage() {
     for (const gap of this.gaps) {
-      if (this.gapCovered(gap.id) && gap.status === 'open') {
-        gap.status = 'resolved';
+      const sources = this.findings
+        .filter((finding) => finding.gapId === gap.id)
+        .flatMap((finding) => (finding.sources || []).filter(sourceHasBody));
+      gap.readSourceIds = [...new Set([
+        ...(gap.readSourceIds || []),
+        ...sources.map((source) => source.id || source.url).filter(Boolean),
+      ])];
+      const hasBody = sources.length > 0;
+      const requiredOk = this.gapHasRequiredHostBody(gap.id);
+      const domains = new Set(sources.map((source) => registrableDomainFromUrl(source.url || source.id)).filter(Boolean));
+      const independentOk = domains.size >= (Number(gap.minIndependentSources) || 1);
+      if (gap.status === 'blocked' || gap.status === 'missing') continue;
+      if (hasBody && requiredOk && independentOk) {
+        gap.status = 'verified';
+        gap.resolvedAtStep = this.step;
+      } else if (hasBody) {
+        gap.status = 'body_read';
         gap.resolvedAtStep = this.step;
       }
     }
+  }
+
+  markGapStatus(gapId, status, reason = null) {
+    const gap = this.getGap(gapId);
+    if (!gap) return;
+    gap.status = status;
+    if (reason) gap.blockedReason = reason;
+  }
+
+  recordSearchedQuery(gapId, query) {
+    const gap = this.getGap(gapId);
+    if (!gap || !query) return;
+    if (!gap.searchedQueries.includes(query)) gap.searchedQueries.push(query);
+    if (gap.status === 'open') gap.status = 'searched';
   }
 
   refreshBudgetView({ budget, minLlmTokens, targetLlmTokens, actionCosts } = {}) {
@@ -125,27 +228,45 @@ export class ResearchState {
       });
     }
     this.syncGapCoverage();
+    this.readiness = evaluateReadinessGate({
+      query: this.query,
+      findings: this.findings,
+      gaps: this.gaps,
+      profile: this.profile,
+      state: this,
+    });
     this.sufficiency = evaluateExploratorySufficiency({
       query: this.query,
       findings: this.findings,
       gaps: this.gaps,
       state: this,
     });
+    this.sufficiency = {
+      ...this.sufficiency,
+      sufficient: Boolean(this.readiness?.pass),
+      readiness: this.readiness,
+      method: 'readiness_gate',
+    };
     return this.budgetView;
   }
 
   focusGap() {
-    const open = this.gaps.filter((gap) => gap.status === 'open' && !this.gapCovered(gap.id));
-    const pool = open.length ? open : this.gaps.filter((gap) => gap.status === 'open');
+    const actionable = this.gaps.filter((gap) => (
+      ['open', 'searched', 'missing'].includes(gap.status) || (gap.status === 'body_read' && gap.requiredHosts?.length)
+    ));
+    const pool = actionable.length ? actionable : this.gaps;
     if (!pool.length) return this.gaps[0];
     return pool[this.step % pool.length];
   }
 
   searchedQueries() {
-    return [...new Set(this.observations
-      .filter((observation) => observation.type === 'search_result')
-      .map((observation) => observation.query)
-      .filter(Boolean))];
+    return [...new Set([
+      ...this.gaps.flatMap((gap) => gap.searchedQueries || []),
+      ...this.observations
+        .filter((observation) => observation.type === 'search_result')
+        .map((observation) => observation.query)
+        .filter(Boolean),
+    ])];
   }
 
   addKnowledge({ gapId, sourceId, learned }) {
@@ -155,7 +276,8 @@ export class ResearchState {
   }
 
   candidateScore(candidate) {
-    return (candidate.rerank?.score || 0) + (candidate.freq || 0) * 0.1 + hostnameWeight(candidate.url);
+    const tierBoost = candidate.tier === 'required_primary' ? 1 : (candidate.tier === 'other_primary' ? 0.4 : 0);
+    return (candidate.rerank?.score || candidate.rerankScore || 0) + (candidate.freq || 0) * 0.1 + hostnameWeight(candidate.url) + tierBoost;
   }
 
   rankedCandidates() {
@@ -163,9 +285,9 @@ export class ResearchState {
     const perHostname = new Map();
     const selected = [];
     for (const candidate of ranked) {
-      const hostname = hostnameOf(candidate.url);
+      const hostname = policyHostnameOf(candidate.url);
       const count = perHostname.get(hostname) || 0;
-      if (hostname && count >= MAX_CANDIDATES_PER_HOSTNAME && !this.readSourceIds.has(candidate.id)) continue;
+      if (hostname && count >= MAX_CANDIDATES_PER_HOSTNAME && !this.readSourceIds.has(candidate.id) && candidate.status === 'unread') continue;
       perHostname.set(hostname, count + 1);
       selected.push(candidate);
       if (selected.length >= RANKED_CANDIDATE_LIMIT) break;
@@ -184,14 +306,21 @@ export class ResearchState {
       maxSteps: this.maxSteps,
       stepsRemaining: this.maxSteps > 0 ? Math.max(0, this.maxSteps - this.step) : null,
       lastAction: this.lastAction,
+      profile: {
+        flags: this.profile?.flags || {},
+        requiredHosts: this.profile?.requiredHosts || [],
+        minIndependentSources: this.profile?.minIndependentSources || 1,
+      },
       gaps,
       focusGapId: this.focusGap()?.id || 'gap-1',
       findingsCount: this.findings.length,
       bodyEvidenceCoverage: {
         hasBodyEvidence: this.hasBodyEvidence(),
-        resolvedGaps: gaps.filter((gap) => gap.covered || gap.status === 'resolved').map((gap) => gap.id),
-        openGaps: gaps.filter((gap) => gap.status === 'open' && !gap.covered).map((gap) => gap.id),
+        resolvedGaps: gaps.filter((gap) => gap.covered || ['verified', 'resolved', 'body_read'].includes(gap.status)).map((gap) => gap.id),
+        openGaps: gaps.filter((gap) => ['open', 'searched', 'missing'].includes(gap.status) && !gap.covered).map((gap) => gap.id),
       },
+      cycle: { ...this.cycle },
+      readiness: this.readiness,
       candidates: this.rankedCandidates().slice(0, SNAPSHOT_CANDIDATE_LIMIT).map((candidate) => ({
         id: candidate.id,
         title: candidate.title,
@@ -205,34 +334,87 @@ export class ResearchState {
       evaluationRetries: this.evaluationRetries,
       budget: this.budgetView,
       sufficiency: this.sufficiency,
-      qualityGate: this.sufficiency ? {
+      qualityGate: this.readiness ? {
+        sufficient: this.readiness.pass,
+        inconclusive: !this.readiness.pass,
+        flags: this.readiness.flags,
+        decision: this.readiness.decision,
+        method: this.readiness.method,
+      } : (this.sufficiency ? {
         sufficient: this.sufficiency.sufficient,
         inconclusive: this.sufficiency.inconclusive,
         flags: this.sufficiency.flags,
         decision: this.sufficiency.decision,
         method: this.sufficiency.method,
-      } : null,
+      } : null),
     };
   }
 
-  addCandidates(sources, gapId) {
+  addCandidates(sources, gapId, { query = '', clusterById = {} } = {}) {
+    const gap = this.getGap(gapId);
+    let added = 0;
     for (const source of sources || []) {
       const id = source.id || source.url;
       if (!id) continue;
       const existing = this.candidates.get(id) || {};
-      this.candidates.set(id, {
+      const record = {
         ...existing,
         ...source,
         id,
         gapId: gapId || existing.gapId || 'gap-1',
+        hostname: existing.hostname || policyHostnameOf(source.url || id),
+        registrableDomain: existing.registrableDomain || registrableDomainFromUrl(source.url || id),
+        tier: classifySourceTier(source, gap),
+        clusterId: clusterById[id] || existing.clusterId || source.clusterId || null,
+        status: existing.status || 'unread',
         freq: (existing.freq || 0) + 1,
-      });
+      };
+      const pooled = this.urlPool.add(record, { gapId, query, gap, clusterId: record.clusterId });
+      if (pooled?.record?.status === 'duplicate') record.status = 'duplicate';
+      if (pooled?.added) added += 1;
+      this.candidates.set(id, { ...record, ...(pooled?.record || {}) });
+      if (gap && !gap.candidateUrls.includes(id)) gap.candidateUrls.push(id);
     }
+    this.cycle.newUrlCount += added;
+    return added;
+  }
+
+  markCandidateStatus(id, status, reason = null) {
+    const candidate = this.candidates.get(id);
+    if (candidate) {
+      candidate.status = status;
+      if (reason) candidate.skipReason = reason;
+    }
+    this.urlPool.mark(id, status, reason);
+  }
+
+  pickPolicyReads(count = 2, gapId = null) {
+    const gap = this.getGap(gapId || this.focusGap()?.id);
+    const unread = [...this.candidates.values()].filter((candidate) => (
+      !this.readSourceIds.has(candidate.id)
+      && candidate.status !== 'read'
+      && candidate.status !== 'failed'
+      && candidate.status !== 'waf'
+      && candidate.status !== 'duplicate'
+      && (!gapId || candidate.gapId === gap.id)
+    ));
+    const alreadyRead = new Set(
+      [...this.readSourceIds].map((id) => policyHostnameOf(this.candidates.get(id)?.url || id)).filter(Boolean),
+    );
+    return selectReadsByPolicy({
+      candidates: unread,
+      gap,
+      alreadyReadHostnames: alreadyRead,
+      maxPerHostname: MAX_CANDIDATES_PER_HOSTNAME,
+      minCount: Math.min(2, count),
+      maxCount: count,
+    });
   }
 
   validate(action) {
     if (!ACTIONS.has(action?.action)) return 'unknown_action';
-    if (this.maxSteps > 0 && this.step >= this.maxSteps && !['answer', 'stop'].includes(action.action)) return 'max_steps';
+    const normalized = normalizeAction(action.action);
+    if (this.maxSteps > 0 && this.step >= this.maxSteps && !FINALIZE_ACTIONS.has(action.action)) return 'max_steps';
     if (action.action === 'read') {
       if (!action.sourceIds?.length) return 'missing_source_ids';
       if (action.sourceIds.some((id) => !this.candidates.has(id))) return 'unknown_source';
@@ -241,10 +423,10 @@ export class ResearchState {
         if (!unread.length) return 'repeat_action';
       }
     }
-    if (action.action === this.lastAction && !['answer', 'stop', 'read', 'search'].includes(action.action)) {
+    if (action.action === this.lastAction && !['answer', 'stop', 'read', 'search', 'draft', 'finalize'].includes(action.action)) {
       return 'repeat_action';
     }
-    if (action.action === 'answer' && this.lastAction === 'search' && !this.hasBodyEvidence()) {
+    if (FINALIZE_ACTIONS.has(action.action) && (this.cycle.afterSearch || this.lastAction === 'search') && !this.cycleHasSuccessfulBody()) {
       return 'answer_after_search';
     }
     if (action.action === 'search') {
@@ -258,12 +440,40 @@ export class ResearchState {
         const sameQuery = lastSearch && merged.includes(lastSearch.query);
         if (!emptySearchRetry && sameQuery) return 'repeat_action';
       }
+      const searched = this.searchedQueries();
+      if (merged.every((query) => searched.some((seen) => similarQuestions(seen, query, 0.86)))) {
+        return 'duplicate_query';
+      }
     }
     if (action.action === 'reflect') {
       const question = String(action.gapQuestion || '').trim();
       if (question && this.gaps.some((gap) => similarQuestions(gap.question, question))) return 'repeat_gap';
     }
-    if (action.action === 'answer' && this.findings.length === 0 && this.candidates.size === 0) return 'no_evidence';
+    if (normalized === 'finalize' && this.findings.length === 0 && this.candidates.size === 0) return 'no_evidence';
     return null;
+  }
+
+  unresolvedReportNotes() {
+    const unresolved = this.gaps.filter((gap) => ['open', 'searched', 'missing', 'blocked'].includes(gap.status)
+      || (gap.status === 'body_read' && gap.requiredHosts?.length && !this.gapHasRequiredHostBody(gap.id)));
+    const blockedHosts = [...new Set(unresolved.flatMap((gap) => gap.requiredHosts || []))];
+    const secondaryOnly = this.findings.flatMap((finding) => (finding.sources || [])
+      .filter(sourceHasBody)
+      .filter((source) => ['mainstream', 'reprint', 'ugc', 'unknown'].includes(source.tier || classifySourceTier(source, this.getGap(finding.gapId))))
+      .map((source) => source.url || source.id));
+    return {
+      unresolvedGaps: unresolved.map((gap) => ({
+        id: gap.id,
+        question: gap.question,
+        status: gap.status,
+        requiredHosts: gap.requiredHosts,
+        reason: gap.blockedReason,
+      })),
+      blockedHosts,
+      secondaryOnlyClaims: secondaryOnly.slice(0, 12),
+      unsupportedDecisions: this.readiness?.pass
+        ? []
+        : (this.readiness?.failures || []).map((failure) => failure.message),
+    };
   }
 }

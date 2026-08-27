@@ -123,7 +123,10 @@ describe('exploratory agent loop', () => {
     }
     assert.deepEqual([...new Set(focusAtStep)].sort(), ['gap-1', 'gap-2', 'gap-3']);
 
-    state.findings.push({ gapId: 'gap-2', sources: [{ url: 'https://x.test', fetchStatus: 'ok' }] });
+    state.findings.push({
+      gapId: 'gap-2',
+      sources: [{ url: 'https://x.test', fetchStatus: 'ok', content: 'Sub-question two has a successful body with enough detail.' }],
+    });
     const snapshot = state.snapshot();
     assert.equal(snapshot.gaps.find((gap) => gap.id === 'gap-2').covered, true);
     assert.equal(snapshot.gaps.find((gap) => gap.id === 'gap-1').covered, false);
@@ -555,7 +558,7 @@ describe('exploratory agent loop', () => {
     });
     assert.equal(result.findings[0].sources[0].url, 'https://first.test');
     assert.equal(result.findings[0].degraded, true);
-    assert.ok(result.trace.some((entry) => entry.reasonCode === 'max_budget_exhausted'));
+    assert.ok(result.trace.some((entry) => ['budget_exhausted', 'max_budget_exhausted'].includes(entry.reasonCode)));
     assert.equal(decisionCalls, 1);
     assert.ok(!result.trace.some((entry) => entry.reasonCode === 'should_not_decide_after_cap'));
   });
@@ -587,7 +590,7 @@ describe('exploratory agent loop', () => {
     assert.match(texts, /llama\.cpp/);
   });
 
-  it('maps a model sufficient_evidence reason onto evidence_sufficient', async () => {
+  it('does not let a model sufficient_evidence reason pass a failed readiness gate', async () => {
     const decisions = [
       { action: 'search', query: 'ollama overview', gapId: 'gap-1', reasonCode: 'search_ollama' },
       { action: 'answer', reasonCode: 'sufficient_evidence' },
@@ -604,8 +607,9 @@ describe('exploratory agent loop', () => {
       } },
       llm: llmFor(decisions, { onDecompose: () => JSON.stringify({ subQuestions: ['How does Ollama work?', 'How does llama.cpp work?'] }) }),
     });
-    assert.equal(result.quality.stopReason, 'evidence_sufficient');
-    assert.equal(result.quality.budget.controllerStopReason, 'evidence_sufficient');
+    assert.notEqual(result.quality.stopReason, 'evidence_sufficient');
+    assert.ok(['source_blocked', 'safety_cap', 'budget_exhausted'].includes(result.quality.stopReason));
+    assert.notEqual(result.quality.budget.controllerStopReason, 'evidence_sufficient');
   });
 
   it('stops a definitional query on evidence_sufficient without opening paraphrased gaps', async () => {
@@ -730,7 +734,7 @@ describe('exploratory agent loop', () => {
       llm: llmFor(decisions),
     });
     assert.notEqual(result.quality.stopReason, 'max_steps');
-    assert.ok(['agent_stop', 'evidence_sufficient'].includes(result.quality.stopReason));
+    assert.ok(['source_blocked', 'evidence_sufficient', 'safety_cap', 'budget_exhausted'].includes(result.quality.stopReason));
     assert.ok(events.some((message) => /Enriching sources for step \d+\/\d+/.test(message)));
     assert.ok(events.every((message) => !/undefined\/undefined/.test(message)));
     assert.ok(!events.some((message) => /Research stopped: max_steps/.test(message)));
@@ -758,7 +762,7 @@ describe('exploratory agent loop', () => {
       } },
       llm: llmFor(decisions, { onDecompose: () => 'no json' }),
     });
-    assert.equal(result.quality.stopReason, 'max_budget_exhausted');
+    assert.equal(result.quality.stopReason, 'budget_exhausted');
     assert.notEqual(result.quality.stopReason, 'max_steps');
     assert.equal(result.quality.budget.reservedReportTotalTokens, 0);
     assert.ok(result.report);
@@ -773,7 +777,7 @@ describe('exploratory agent loop', () => {
     registerContentFetchHandler(async (_url, context) => ({
       status: 'ok',
       title: context.source?.title || 'Source',
-      content: context.source?.content || 'Body evidence.',
+      content: context.source?.content || 'Official body evidence with enough characters to count as a successful fetched page.',
       backend: 'test',
     }));
     let searchIndex = 0;
@@ -808,7 +812,7 @@ describe('exploratory agent loop', () => {
           return [1, 2, 3].map((n) => ({
             title: `${subject} ${n}`,
             url: `https://${subject}-${n}.example/page`,
-            content: `${subject} official docs item ${n}.`,
+            content: `${subject} official documentation item ${n} with enough fetched body text for evidence.`,
             fetchStatus: 'ok',
           }));
         } },
@@ -826,7 +830,7 @@ describe('exploratory agent loop', () => {
     registerContentFetchHandler(async (_url, context) => ({
       status: 'ok',
       title: context.source?.title || 'Source',
-      content: context.source?.content || 'Body evidence.',
+      content: context.source?.content || 'Official body evidence with enough characters to count as a successful fetched page.',
       backend: 'test',
     }));
     let decisionCalls = 0;
@@ -869,8 +873,8 @@ describe('exploratory agent loop', () => {
         },
       });
       assert.equal(decisionCalls, 1);
-      assert.equal(result.quality.stopReason, 'max_budget_exhausted');
-      assert.ok(result.trace.some((entry) => entry.reasonCode === 'max_budget_exhausted'));
+      assert.equal(result.quality.stopReason, 'budget_exhausted');
+      assert.ok(result.trace.some((entry) => ['budget_exhausted', 'max_budget_exhausted'].includes(entry.reasonCode)));
       assert.ok(!result.trace.some((entry) => entry.reasonCode === 'should_not_run'));
     } finally {
       resetContentFetchHandlers();

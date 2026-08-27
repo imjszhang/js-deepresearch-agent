@@ -44,8 +44,12 @@ export class ResearchRunner {
       budget,
       fetch: proxiedFetch,
       onEvent: (event) => {
-        trace.push({ step: trace.length + 1, action: 'rerank', reasonCode: `${event.operation}_${event.status}`, ...event, createdAt: new Date().toISOString() });
-        emit({ stage: event.status === 'started' ? 'rerank_started' : (event.status === 'degraded' ? 'rerank_degraded' : 'rerank_completed'), ...event });
+        const action = event.operation === 'embed' ? 'embed' : 'rerank';
+        trace.push({ step: trace.length + 1, action, reasonCode: `${event.operation}_${event.status}`, ...event, createdAt: new Date().toISOString() });
+        const stage = event.operation === 'embed'
+          ? (event.status === 'started' ? 'embed_started' : (event.status === 'degraded' ? 'embed_degraded' : 'embed_completed'))
+          : (event.status === 'started' ? 'rerank_started' : (event.status === 'degraded' ? 'rerank_degraded' : 'rerank_completed'));
+        emit({ stage, ...event });
       },
     });
     const queryMemory = new QueryMemory({
@@ -65,11 +69,26 @@ export class ResearchRunner {
     }
 
     const tracksGaps = strategy === 'exploratory' || strategy === 'focused';
-    let gaps = tracksGaps ? buildGapsFromFindings(findings, query) : [];
+    const exploratoryLoop = findings?.exploratoryLoop || null;
+    let gaps = exploratoryLoop?.gaps?.length
+      ? exploratoryLoop.gaps
+      : (tracksGaps ? buildGapsFromFindings(findings, query) : []);
     const preReport = evaluatePreReport({ findings, gaps, query });
     const budgetBeforeReport = budget.snapshot();
     const budgetLimitation = budgetBeforeReport.stopReason
       ? `The ${budgetBeforeReport.stopReason} budget was exhausted; remaining research actions were not scheduled.`
+      : null;
+    const unresolvedLimitation = exploratoryLoop?.unresolvedGaps?.length
+      ? `Unresolved gaps: ${exploratoryLoop.unresolvedGaps.map((gap) => `${gap.id} (${gap.status}) ${gap.question}`).join('; ')}`
+      : null;
+    const blockedHostLimitation = exploratoryLoop?.blockedHosts?.length
+      ? `Blocked or unread required hosts: ${exploratoryLoop.blockedHosts.join(', ')}.`
+      : null;
+    const secondaryLimitation = exploratoryLoop?.secondaryOnlyClaims?.length
+      ? 'Some conclusions rest only on secondary or reprint sources and cannot be treated as primary-source verified.'
+      : null;
+    const unsupportedLimitation = exploratoryLoop?.unsupportedDecisions?.length
+      ? `The report cannot support: ${exploratoryLoop.unsupportedDecisions.join('; ')}`
       : null;
     const degradedLimitation = findings.some((finding) => finding?.degraded)
       ? 'Evidence gathering was cut short before completion; treat the collected evidence as incomplete and state remaining uncertainty explicitly.'
@@ -83,6 +102,10 @@ export class ResearchRunner {
       ...(budgetLimitation ? [budgetLimitation] : []),
       ...(degradedLimitation ? [degradedLimitation] : []),
       ...(snippetLimitation ? [snippetLimitation] : []),
+      ...(unresolvedLimitation ? [unresolvedLimitation] : []),
+      ...(blockedHostLimitation ? [blockedHostLimitation] : []),
+      ...(secondaryLimitation ? [secondaryLimitation] : []),
+      ...(unsupportedLimitation ? [unsupportedLimitation] : []),
     ];
     if (focused.preReportGate.blockUnsupportedClaims && preReport.gate === 'fail') {
       const error = new Error(`Research quality gate failed: ${preReport.flags.join(', ')}`);
@@ -138,7 +161,9 @@ export class ResearchRunner {
       options: { ...evidenceOptions, strategy },
     });
     findings = evidence.findings;
-    gaps = tracksGaps ? buildGapsFromFindings(findings, query) : [];
+    if (!exploratoryLoop?.gaps?.length) {
+      gaps = tracksGaps ? buildGapsFromFindings(findings, query) : [];
+    }
     if (evidenceOptions.claimAlignment) {
       emit({ stage: 'evaluating_report' });
       trace.push({ step: trace.length + 1, action: 'evaluate_report', reasonCode: 'claim_evidence_alignment', createdAt: new Date().toISOString() });
@@ -198,6 +223,10 @@ export class ResearchRunner {
       limitations: [
         ...preReport.limitations,
         ...(budgetLimitation ? [budgetLimitation] : []),
+        ...(unresolvedLimitation ? [unresolvedLimitation] : []),
+        ...(blockedHostLimitation ? [blockedHostLimitation] : []),
+        ...(secondaryLimitation ? [secondaryLimitation] : []),
+        ...(unsupportedLimitation ? [unsupportedLimitation] : []),
         ...(noClaims ? ['No evaluable claims could be extracted from the report.'] : []),
         ...unverifiedKeyClaims.map((claim) => `Insufficient direct evidence for: ${claim.text}`),
       ],
