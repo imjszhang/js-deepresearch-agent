@@ -99,6 +99,12 @@ function summarySectionBody(report) {
   return body.join('\n');
 }
 
+export function hasEmptyBullets(text = '') {
+  return String(text || '')
+    .split(/\r?\n/)
+    .some((line) => /^\s*(?:[-*]|\d+[.)])\s*(?:\[[\d.,\s]+\]\s*)?$/.test(line));
+}
+
 export function isPlaceholderSummary(text = '') {
   const stripped = String(text)
     .replace(/[#*_`[\]()>]/g, '')
@@ -131,6 +137,9 @@ export function validateReportOutput(report, {
   if (text && containsSourceDump(narrativeText)) flags.push('report_contains_source_dump');
   if (text && isPlaceholderSummary(summarySectionBody(narrativeText))) {
     flags.push('report_empty_summary');
+  }
+  if (text && hasEmptyBullets(text)) {
+    flags.push('report_empty_bullets');
   }
   if (text && !extractQualityClaims(narrativeText).some((claim) => claim.kind === 'key_claim')) {
     flags.push('report_missing_key_claims');

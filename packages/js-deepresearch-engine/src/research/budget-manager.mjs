@@ -13,8 +13,17 @@ export class BudgetExceededError extends Error {
 
 function purposeBucket(purpose, report = false) {
   if (report || purpose === 'report') return 'reportTokens';
-  if (purpose === 'answer_evaluation' || purpose === 'claim_entailment') return 'evaluationTokens';
+  if (purpose === 'answer_evaluation' || purpose === 'candidate_evaluation') return 'candidateEvaluationTokens';
+  if (purpose === 'claim_entailment' || purpose === 'post_report_evaluation') return 'postReportEvaluationTokens';
   return 'explorationTokens';
+}
+
+function isCandidateEvaluation(options = {}) {
+  return options.purpose === 'answer_evaluation' || options.purpose === 'candidate_evaluation';
+}
+
+function isPostReportEvaluation(options = {}) {
+  return options.purpose === 'claim_entailment' || options.purpose === 'post_report_evaluation';
 }
 
 export class BudgetManager {
@@ -40,12 +49,16 @@ export class BudgetManager {
     this.targetLlmTokens = this.minLlmTokens;
     this.controllerStopReason = null;
     this.defaultLlmMaxTokens = limit(settings?.llm?.maxTokens) || 4000;
+    this.maxCandidateEvaluationTokens = limit(settings?.research?.exploratory?.maxCandidateEvaluationTokens);
+    this.maxPostReportEvaluationTokens = limit(settings?.research?.exploratory?.maxPostReportEvaluationTokens);
     this.usage = {
       llmRequests: 0,
       llmTokens: 0,
       explorationTokens: 0,
       reportTokens: 0,
       evaluationTokens: 0,
+      candidateEvaluationTokens: 0,
+      postReportEvaluationTokens: 0,
       searchRequests: 0,
       sourceReads: 0,
       rerankRequests: 0,
@@ -73,9 +86,13 @@ export class BudgetManager {
   }
 
   explorationUsed() {
-    const bucketed = (this.usage.explorationTokens || 0) + (this.usage.evaluationTokens || 0);
-    if (bucketed > 0 || (this.usage.reportTokens || 0) > 0) return bucketed;
-    return Math.max(0, (this.usage.llmTokens || 0) - (this.usage.reportTokens || 0));
+    const exploration = this.usage.explorationTokens || 0;
+    const report = this.usage.reportTokens || 0;
+    const candidate = this.usage.candidateEvaluationTokens || 0;
+    const postReport = this.usage.postReportEvaluationTokens || 0;
+    const legacyEval = this.usage.evaluationTokens || 0;
+    if (exploration > 0 || report > 0 || candidate > 0 || postReport > 0) return exploration;
+    return Math.max(0, (this.usage.llmTokens || 0) - report - candidate - postReport - legacyEval);
   }
 
   remainingVsHardCap() {
@@ -110,6 +127,9 @@ export class BudgetManager {
     if (kind === 'llmTokens') {
       const bucket = purposeBucket(options.purpose, options.report);
       this.usage[bucket] = (this.usage[bucket] || 0) + amount;
+      if (bucket === 'candidateEvaluationTokens' || bucket === 'postReportEvaluationTokens') {
+        this.usage.evaluationTokens = (this.usage.evaluationTokens || 0) + amount;
+      }
     }
   }
 
@@ -117,6 +137,9 @@ export class BudgetManager {
     this.usage.llmTokens = Math.max(0, (this.usage.llmTokens || 0) - amount);
     const bucket = purposeBucket(options.purpose, options.report);
     this.usage[bucket] = Math.max(0, (this.usage[bucket] || 0) - amount);
+    if (bucket === 'candidateEvaluationTokens' || bucket === 'postReportEvaluationTokens') {
+      this.usage.evaluationTokens = Math.max(0, (this.usage.evaluationTokens || 0) - amount);
+    }
   }
 
   markExhausted(kind) {
@@ -132,6 +155,9 @@ export class BudgetManager {
       this.usage.llmTokens += tokens;
       const bucket = purposeBucket(options.purpose, options.report);
       this.usage[bucket] = (this.usage[bucket] || 0) + tokens;
+      if (bucket === 'candidateEvaluationTokens' || bucket === 'postReportEvaluationTokens') {
+        this.usage.evaluationTokens = (this.usage.evaluationTokens || 0) + tokens;
+      }
     } else this.unknown.llmTokens = true;
     const cost = Number(usage?.estimatedCost ?? usage?.estimated_cost);
     if (Number.isFinite(cost)) {
@@ -159,6 +185,14 @@ export class BudgetManager {
         return false;
       }
       if (this.isReportClaim(options)) return true;
+      if (isPostReportEvaluation(options)) {
+        const cap = this.maxPostReportEvaluationTokens || 0;
+        return cap === 0 || (this.usage.postReportEvaluationTokens || 0) + amount <= cap;
+      }
+      if (isCandidateEvaluation(options)) {
+        const cap = this.maxCandidateEvaluationTokens || 0;
+        return cap === 0 || (this.usage.candidateEvaluationTokens || 0) + amount <= cap;
+      }
       const cap = this.limits.llmTokens || 0;
       if (cap === 0) return true;
       return this.explorationUsed() + amount <= cap;

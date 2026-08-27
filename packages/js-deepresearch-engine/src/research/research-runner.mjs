@@ -44,13 +44,31 @@ export class ResearchRunner {
       budget,
       fetch: proxiedFetch,
       onEvent: (event) => {
-        trace.push({ step: trace.length + 1, action: 'rerank', reasonCode: `${event.operation}_${event.status}`, ...event, createdAt: new Date().toISOString() });
-        emit({ stage: event.status === 'started' ? 'rerank_started' : (event.status === 'degraded' ? 'rerank_degraded' : 'rerank_completed'), ...event });
+        const action = event.operation === 'embed' ? 'embed' : 'rerank';
+        trace.push({
+          step: trace.length + 1,
+          action,
+          reasonCode: `${event.operation}_${event.status}`,
+          ...event,
+          createdAt: new Date().toISOString(),
+        });
+        if (event.operation === 'embed') {
+          emit({
+            stage: event.status === 'started' ? 'embed_started' : (event.status === 'failed' ? 'embed_failed' : 'embed_completed'),
+            ...event,
+          });
+          return;
+        }
+        emit({
+          stage: event.status === 'started' ? 'rerank_started' : (event.status === 'degraded' ? 'rerank_degraded' : 'rerank_completed'),
+          ...event,
+        });
       },
     });
     const queryMemory = new QueryMemory({
       ...focused.queryMemory,
-      similarityProvider: researchProviders.similarity,
+      semanticDedup: Boolean(focused.queryMemory?.semanticDedup) || Boolean(strategy === 'exploratory' && researchProviders.embedding),
+      similarityProvider: researchProviders.embedding || researchProviders.similarity,
       onSkip: (event) => trace.push({ step: trace.length + 1, action: 'query_skipped_duplicate', ...event, createdAt: new Date().toISOString() }),
     });
 
@@ -65,7 +83,10 @@ export class ResearchRunner {
     }
 
     const tracksGaps = strategy === 'exploratory' || strategy === 'focused';
-    let gaps = tracksGaps ? buildGapsFromFindings(findings, query) : [];
+    const controller = findings?.exploratoryController || null;
+    let gaps = controller?.gaps?.length
+      ? controller.gaps.map((gap) => ({ ...gap }))
+      : (tracksGaps ? buildGapsFromFindings(findings, query) : []);
     const preReport = evaluatePreReport({ findings, gaps, query });
     const budgetBeforeReport = budget.snapshot();
     const budgetLimitation = budgetBeforeReport.stopReason
@@ -83,6 +104,7 @@ export class ResearchRunner {
       ...(budgetLimitation ? [budgetLimitation] : []),
       ...(degradedLimitation ? [degradedLimitation] : []),
       ...(snippetLimitation ? [snippetLimitation] : []),
+      ...((controller?.limitations || []).filter(Boolean)),
     ];
     if (focused.preReportGate.blockUnsupportedClaims && preReport.gate === 'fail') {
       const error = new Error(`Research quality gate failed: ${preReport.flags.join(', ')}`);
@@ -138,7 +160,11 @@ export class ResearchRunner {
       options: { ...evidenceOptions, strategy },
     });
     findings = evidence.findings;
-    gaps = tracksGaps ? buildGapsFromFindings(findings, query) : [];
+    if (controller?.gaps?.length) {
+      gaps = controller.gaps.map((gap) => ({ ...gap }));
+    } else {
+      gaps = tracksGaps ? buildGapsFromFindings(findings, query) : [];
+    }
     if (evidenceOptions.claimAlignment) {
       emit({ stage: 'evaluating_report' });
       trace.push({ step: trace.length + 1, action: 'evaluate_report', reasonCode: 'claim_evidence_alignment', createdAt: new Date().toISOString() });

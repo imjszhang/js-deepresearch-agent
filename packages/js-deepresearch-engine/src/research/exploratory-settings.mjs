@@ -57,6 +57,10 @@ export function resolveExploratorySettings(settings = {}) {
     maxEvaluationRetries: raw.maxEvaluationRetries === undefined ? 1 : Number(raw.maxEvaluationRetries),
     answerGate: raw.answerGate !== false,
     autoReadTopK: raw.autoReadTopK,
+    profilePlanner: raw.profilePlanner !== false,
+    maxUnreadPerHostname: Number(raw.maxUnreadPerHostname) || 2,
+    maxCandidateEvaluationTokens: countBound(raw.maxCandidateEvaluationTokens, 0),
+    maxPostReportEvaluationTokens: countBound(raw.maxPostReportEvaluationTokens, 0),
   };
 }
 

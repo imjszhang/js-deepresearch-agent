@@ -51,6 +51,55 @@ function resolveEmbedding(config, { fetch } = {}) {
   throw new Error(`Unsupported embedding provider: ${config.provider}`);
 }
 
+function wrapEmbedding(embedding, { onEvent } = {}) {
+  if (!embedding) return null;
+  return {
+    ...embedding,
+    provider: embedding.provider,
+    model: embedding.model,
+    async embedDocuments(texts = [], options = {}) {
+      const startedAt = Date.now();
+      const purpose = options.purpose || 'unspecified';
+      const inputCount = texts?.length || 0;
+      onEvent?.({
+        operation: 'embed',
+        status: 'started',
+        purpose,
+        provider: embedding.provider,
+        model: embedding.model,
+        inputCount,
+      });
+      try {
+        const vectors = await embedding.embedDocuments(texts, options);
+        onEvent?.({
+          operation: 'embed',
+          status: 'completed',
+          purpose,
+          provider: embedding.provider,
+          model: embedding.model,
+          inputCount,
+          durationMs: Date.now() - startedAt,
+          fallback: false,
+        });
+        return vectors;
+      } catch (error) {
+        onEvent?.({
+          operation: 'embed',
+          status: 'failed',
+          purpose,
+          provider: embedding.provider,
+          model: embedding.model,
+          inputCount,
+          durationMs: Date.now() - startedAt,
+          fallback: true,
+          errorCode: error?.code || error?.name || 'EMBEDDING_ERROR',
+        });
+        throw error;
+      }
+    },
+  };
+}
+
 function wrapRerank(primary, fallback, { budget, onEvent } = {}) {
   return {
     provider: primary.provider,
@@ -82,7 +131,7 @@ export function createResearchProviders(config = {}, runtime = {}) {
   return {
     ...deterministicResearchProviders,
     ...config,
-    embedding,
+    embedding: wrapEmbedding(embedding, runtime),
     rerank: wrapRerank(rerank, fallback, runtime),
   };
 }

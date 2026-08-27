@@ -1,6 +1,7 @@
 import { resolveUrlContent } from './content-resolver.mjs';
 import { focusedSourceSelection } from './focused-settings.mjs';
 import { selectRelevantPassages } from './passage-selector.mjs';
+import { annotateBodyQuality, isWafOrErrorBody } from './adaptive/body-quality.mjs';
 
 function relatedLinksFromFetch(fetched, settings) {
   const selection = focusedSourceSelection(settings);
@@ -65,18 +66,29 @@ async function enrichOneSource(source, {
       ...source,
       fetchStatus: 'failed',
       fetchError: fetched.error || 'Fetch failed',
+      bodyQuality: 'failed',
     };
+  }
+  if (isWafOrErrorBody(fetched.content) || isWafOrErrorBody(fetched.title)) {
+    return annotateBodyQuality({
+      ...source,
+      title: source.title || fetched.title,
+      content: fetched.content,
+      contentOrigin: 'fetched',
+      fetchStatus: 'waf',
+      fetchError: 'WAF or error page',
+    });
   }
 
   if (fetchMode === 'full') {
-    return {
+    return annotateBodyQuality({
       ...source,
       title: source.title || fetched.title,
       content: fetched.content,
       contentOrigin: 'fetched',
       fetchStatus: 'ok',
       relatedLinks: relatedLinksFromFetch(fetched, settings),
-    };
+    });
   }
 
   if (fetchMode === 'extract') {
@@ -88,7 +100,7 @@ async function enrichOneSource(source, {
       embedding,
       signal,
     });
-    return {
+    return annotateBodyQuality({
       ...source,
       title: source.title || fetched.title,
       content: fetched.content,
@@ -97,7 +109,7 @@ async function enrichOneSource(source, {
       extractionMethod: embedding ? 'embedding' : 'overlap',
       fetchStatus: 'ok',
       relatedLinks: relatedLinksFromFetch(fetched, settings),
-    };
+    });
   }
 
   const summary = await llm.complete({
@@ -114,7 +126,7 @@ async function enrichOneSource(source, {
     purpose: 'source_summary',
   });
 
-  return {
+  return annotateBodyQuality({
     ...source,
     title: source.title || fetched.title,
     content: fetched.content,
@@ -122,7 +134,7 @@ async function enrichOneSource(source, {
     summary: String(summary || '').trim() || source.snippet,
     fetchStatus: 'ok',
     relatedLinks: relatedLinksFromFetch(fetched, settings),
-  };
+  });
 }
 
 export async function enrichFindingSources(finding, options = {}) {

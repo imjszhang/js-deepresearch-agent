@@ -137,7 +137,7 @@ npm exec --package=. -- jdr research "Explain the current state of local-first A
 | `--exploratory-max-reads-per-step` | `research.exploratory.maxReadsPerStep` | 探索性调研每步阅读数 |
 | `--exploratory-max-search-requests` | `research.exploratory.maxSearchRequests` | 探索性搜索次数上限，`0` 不限制（默认）。不继承全局 `research.budget` |
 | `--exploratory-max-source-reads` | `research.exploratory.maxSourceReads` | 探索性阅读次数上限，`0` 不限制（默认）。不继承全局 `research.budget` |
-| `--exploratory-min-llm-tokens` | `research.exploratory.minLlmTokens` | 探索性调研 LLM token 下限（默认 60000）；未达到前继续探索，不允许因证据充分而早停。`--exploratory-target-llm-tokens` 仍是该键的兼容别名 |
+| `--exploratory-min-llm-tokens` | `research.exploratory.minLlmTokens` | 探索性调研 LLM token 下限（默认 60000）。下限只表示“还要继续探索”，不是停点；`evidence_sufficient` 只能由确定性证据门槛给出。`--exploratory-target-llm-tokens` 仍是该键的兼容别名 |
 | `--exploratory-max-llm-tokens` | `research.exploratory.maxLlmTokens` | 探索性调研 LLM token 上限（默认 200000），只约束探索，不含最终报告。`--max-llm-tokens` 若更小则取更紧的硬上限 |
 | `--report-max-output-tokens` | `research.report.maxOutputTokens` | 报告输出上限，`0` 不设应用层限制（默认）。`--reserve-report-tokens` 是已废弃别名 |
 | `--max-total-llm-tokens` | `research.budget.maxTotalLlmTokens` | 可选的探索+报告总保险丝，`0` 不限制（默认） |
@@ -605,19 +605,19 @@ npm run benchmark:strategies -- \
 |---|---|---|---|---|
 | `quick` | 快速调研 | 快 | 浅 | 快速了解主题、发现方向；不承诺正文级证据。1 轮 = 原 Rapid，多轮 = 原 Parallel |
 | `focused` | 专题调研 | 均衡 | 深 | **默认**；针对明确问题阅读来源并形成有依据的报告 |
-| `exploratory` | 探索性调研 | 可变 | 深 | 复杂、开放或多主体问题；主约束是 token 下限/上限。搜索/阅读次数和步数默认不限制，不继承全局 18/16 |
+| `exploratory` | 探索性调研 | 可变 | 深 | 复杂、开放或多主体问题。token 下限只约束继续探索，不是停点；`evidence_sufficient` 必须通过确定性 Search-Read-Reason 门槛。搜索/阅读次数和步数默认不限制，不继承全局 18/16 |
 
 Agent 选型建议：
 
 - 用户要**快速答案** → `--strategy quick`（默认单轮；`--iterations` 未指定时不会沿用专题调研的轮次）
 - 用户要**引用与深度** → `--strategy focused`（默认；轮次由 `iterationControl` 管，`--iterations` 仅在关闭早停时生效）
-- 用户要**开放探索** → `--strategy exploratory`；用 `--exploratory-min-llm-tokens` 设下限、`--exploratory-max-llm-tokens` 或 `--max-llm-tokens` 设上限。未到下限前继续探索；证据充分且已过下限才停，不要把下限当成停点。次数和步数上限默认关闭；若要限制用 `--max-source-reads` / `--exploratory-max-steps`（用尽后立刻写报告）
+- 用户要**开放探索** → `--strategy exploratory`；用 `--exploratory-min-llm-tokens` 设下限、`--exploratory-max-llm-tokens` 或 `--max-llm-tokens` 设上限。未到下限前必须继续探索，即使模型认为证据已经够了。过了下限之后也只有确定性门槛通过才能以 `evidence_sufficient` 结束；缺一手来源或 required gap 未关闭时继续搜索/阅读，或在预算耗尽/来源阻塞时写带未完成项的报告。次数和步数上限默认关闭；若要限制用 `--max-source-reads` / `--exploratory-max-steps`（用尽后立刻写报告，停止原因为 `budget_exhausted` 或 `safety_cap`）
 
 旧 ID（`rapid`、`parallel`、`source-based`、`adaptive`）不再注册。CLI 传入旧值会报迁移错误。历史 `work_dir` / Intel / SQLite 记录仍可读取。
 
 ### 研究控制与 Schema v3
 
-预算、查询记忆、来源聚类、passage/claim 证据链与自适应停轮**默认已开启**（质量优先预设）。快速摸底可用 `--focused-fetch-mode disabled`、`--focused-evidence-passages false` 等 flag 单次关闭。`preReportGate` 与 LLM 相关性过滤仍默认关闭。专题/快速的次数预算是 `research.budget.maxSearchRequests`（默认 18）和 `maxSourceReads`（默认 16），可用 `--max-search-requests` / `--max-source-reads` 覆盖。探索性调研以 `research.exploratory.minLlmTokens`（默认 60000）为探索下限、`research.exploratory.maxLlmTokens`（默认 200000）为上限；这两项只约束探索，不含最终报告。搜索/阅读次数和 `maxSteps` 默认 `0`（不限制）。显式设了探索性次数上限时，用尽后立刻写报告，不再空转决策。仅当探索性与全局 token 硬上限都关闭时，才用 64 步安全阀防止廉价死循环。报告默认不截断；`research.budget.reserveReportTokens` 不再预留探索额度。
+预算、查询记忆、来源聚类、passage/claim 证据链与自适应停轮**默认已开启**（质量优先预设）。快速摸底可用 `--focused-fetch-mode disabled`、`--focused-evidence-passages false` 等 flag 单次关闭。`preReportGate` 与 LLM 相关性过滤仍默认关闭。专题/快速的次数预算是 `research.budget.maxSearchRequests`（默认 18）和 `maxSourceReads`（默认 16），可用 `--max-search-requests` / `--max-source-reads` 覆盖。探索性调研以 `research.exploratory.minLlmTokens`（默认 60000）为探索下限、`research.exploratory.maxLlmTokens`（默认 200000）为上限；这两项只约束探索循环，不含最终报告和 post-report 蕴含判定。**token 下限不是停点**：未达到前不得因“证据够了”早停。**`evidence_sufficient` 是硬门槛**：required/critical gap 未关闭、必需一手来源未读成功、WAF/空壳页、或只有同域转载时，模型不能把失败改成通过。允许的停止原因只有 `evidence_sufficient`、`budget_exhausted`、`source_blocked`、`safety_cap`、`user_cancelled`。搜索之后必须先成功读到正文才能 draft/finalize；选源先走 required policy / source tier，再对当前 gap 做 rerank。搜索/阅读次数和 `maxSteps` 默认 `0`（不限制）。显式设了探索性次数上限时，用尽后立刻写报告并列出未关闭 gap，不再空转决策。仅当探索性与全局 token 硬上限都关闭时，才用 64 步安全阀防止廉价死循环。报告默认不截断；`research.budget.reserveReportTokens` 不再预留探索额度。
 
 Schema v3 在旧四件套之外写入 `gaps.json`、`passages.json`、`claims.json`、`quality.json`、`trace.json`。Intel Store 继续读取 v2；`intel import --upgrade-existing` 可从有正文的旧产物派生 passage/claim，不能从 snippet 伪造正文证据。Wiki 会为 v3 生成 `Evidence/` 与 `Open Questions/` 页面。主支持率 `supportedRate` 只统计 Summary / Key Findings 的原子事实（完全 supported / 全部分母）；`supportedOrPartialRate` 把 partial 也算进分子。Evidence / Sources / Caveats 不进这个分母。对比旧 run 时看 `qualityMetricsVersion` 与 `claimExtractionVersion`，不要直接比口径变更前后的百分比。已引用且有正文、规则尚未明确 supported/unsupported 的 key claim，默认再走 `research.quality.entailment=rules_then_llm` 做蕴含判定；设为 `rules` 可关掉。snippet-only 与无引用不能靠 LLM 洗白。
 

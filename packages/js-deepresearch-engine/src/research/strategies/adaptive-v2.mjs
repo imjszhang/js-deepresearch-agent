@@ -1,17 +1,25 @@
 import { enrichFindings } from '../source-enricher.mjs';
 import { resolveFocusedSettings } from '../focused-settings.mjs';
 import { applyExploratoryBudget, effectiveExploratoryMaxSteps, resolveExploratorySettings } from '../exploratory-settings.mjs';
-import { decideAdaptiveAction, fallbackAdaptiveAction, evaluateAnswerReadiness, decomposeQuery, pickUnreadCandidates } from '../adaptive/agent-policy.mjs';
+import {
+  decideAdaptiveAction,
+  fallbackAdaptiveAction,
+  evaluateAnswerReadiness,
+  decomposeQuery,
+  pickUnreadCandidates,
+  normalizeAgentAction,
+} from '../adaptive/agent-policy.mjs';
 import { ResearchState, hostnameOf } from '../adaptive/research-state.mjs';
 import { classifyResearchQuery } from '../adaptive/exploratory-sufficiency.mjs';
-
-const STOP_REASONS = {
-  evidenceSufficient: 'evidence_sufficient',
-  targetBudgetReached: 'target_budget_reached',
-  maxBudgetExhausted: 'max_budget_exhausted',
-  maxStepsSafety: 'max_steps_safety',
-  agentStop: 'agent_stop',
-};
+import { inferResearchProfile, planResearchProfile, plannedOrthogonalGaps } from '../adaptive/research-profile.mjs';
+import { evaluateReadinessGate, repairGapsFromGate } from '../adaptive/readiness-gate.mjs';
+import { annotateBodyQuality, isSuccessfulBody } from '../adaptive/body-quality.mjs';
+import { requiredHostQueries } from '../adaptive/source-policy.mjs';
+import { unreadForGap, markCandidateStatus } from '../adaptive/url-pool.mjs';
+import { clusterUrlPool, queriesAreNearDuplicates, readAddedNewInfo } from '../adaptive/embedding-signals.mjs';
+import { STOP_REASONS, mapControllerStopReason } from '../adaptive/stop-reasons.mjs';
+import { attachExploratoryController, buildForcedReportLimitations } from '../adaptive/unresolved-report.mjs';
+import { selectRelevantPassages } from '../passage-selector.mjs';
 
 function abort(signal) {
   signal?.throwIfAborted?.();
@@ -52,42 +60,9 @@ function countCapsExhausted(budget) {
   );
 }
 
-const EVIDENCE_SUFFICIENT_REASON_CODES = new Set([
-  'evidence_sufficient',
-  'fallback_evidence_sufficient',
-  'agent_evidence_sufficient',
-  'sufficient_evidence',
-  'enough_evidence',
-  'evidence_enough',
-]);
-
-function mapAnswerStopReason(action, pendingStopReason) {
-  if (pendingStopReason) return pendingStopReason;
-  const code = String(action?.reasonCode || '').trim();
-  if (EVIDENCE_SUFFICIENT_REASON_CODES.has(code)) {
-    return STOP_REASONS.evidenceSufficient;
-  }
-  if (code === 'target_budget_reached') return STOP_REASONS.targetBudgetReached;
-  if (code === 'forced_final_answer') return STOP_REASONS.maxStepsSafety;
-  return STOP_REASONS.agentStop;
-}
-
-async function observeRerank({ state, query, providers, signal }) {
-  if (!providers?.rerank || state.candidates.size === 0) return;
-  const documents = [...state.candidates.values()].map((source) => ({
-    id: source.id,
-    text: [source.title, source.snippet, source.summary].filter(Boolean).join('\n'),
-  }));
-  const result = await providers.rerank.rerank({ query, documents, signal });
-  for (const item of result.items) {
-    const candidate = state.candidates.get(item.id);
-    if (candidate) candidate.rerank = { score: item.score, provider: result.provider, degraded: result.degraded };
-  }
-}
-
 function selectedFinding(state, sourceIds, gapId) {
   const sources = sourceIds.map((id) => state.candidates.get(id)).filter(Boolean);
-  const gap = state.gaps.find((item) => item.id === gapId) || state.gaps[0];
+  const gap = state.gapById(gapId);
   return { question: gap.question, gapId: gap.id, sources };
 }
 
@@ -105,6 +80,44 @@ function normalizeSearchQueries(action, maxQueries) {
   return [...new Set(merged.filter(Boolean))].slice(0, maxQueries);
 }
 
+function gatePasses(state) {
+  return Boolean(state.readiness?.pass || state.sufficiency?.sufficient);
+}
+
+async function observeRerank({ state, gap, providers, signal, trace, budget }) {
+  const unread = unreadForGap(state.candidates, gap?.id).filter((candidate) => candidate.status === 'unread');
+  if (!providers?.rerank || !unread.length) return null;
+  const query = gap?.question || state.query;
+  const documents = unread.map((source) => ({
+    id: source.id,
+    text: [source.title, source.snippet, source.summary].filter(Boolean).join('\n'),
+  }));
+  const startedAt = Date.now();
+  const result = await providers.rerank.rerank({ query, documents, signal });
+  for (const item of result.items) {
+    const candidate = state.candidates.get(item.id);
+    if (candidate) {
+      candidate.rerank = { score: item.score, provider: result.provider, model: result.model, degraded: result.degraded };
+      candidate.rerankScore = item.score;
+    }
+  }
+  const record = {
+    query,
+    model: result.model,
+    provider: result.provider,
+    inputCount: documents.length,
+    durationMs: result.durationMs ?? (Date.now() - startedAt),
+    degraded: Boolean(result.degraded),
+    selectedReason: 'current_gap_unread',
+    gapId: gap?.id || null,
+  };
+  addTrace(trace, state, 'rerank', {
+    reasonCode: result.degraded ? 'rerank_degraded' : 'rerank_completed',
+    ...record,
+  }, budget, result.degraded ? 'degraded' : 'success');
+  return record;
+}
+
 export async function runAdaptiveV2(context) {
   const { query, llm, search, signal, emit, settings, budget, queryMemory, trace, researchProviders } = context;
   const exploratory = resolveExploratorySettings(settings);
@@ -112,6 +125,7 @@ export async function runAdaptiveV2(context) {
   const queryShape = classifyResearchQuery(query);
   applyExploratoryBudget(budget, exploratory);
   const maxSteps = effectiveExploratoryMaxSteps(exploratory, budget?.limits?.llmTokens);
+  const embedding = researchProviders?.embedding || null;
   const state = new ResearchState({
     query,
     maxSteps,
@@ -119,12 +133,14 @@ export async function runAdaptiveV2(context) {
     minLlmTokens: exploratory.minLlmTokens,
     targetLlmTokens: exploratory.minLlmTokens,
     budget,
+    profile: inferResearchProfile(query),
   });
   const maxReads = Math.max(1, Number(exploratory.maxReadsPerStep) || 3);
   const maxRetries = Math.max(0, Number(exploratory.maxEvaluationRetries) || 0);
   const maxOpenGaps = Number(exploratory.maxOpenGaps) || 8;
   const maxQueriesPerStep = Math.max(1, Number(exploratory.maxQueriesPerStep) || 3);
   const autoReadTopK = Math.min(Math.max(0, Number(exploratory.autoReadTopK ?? 2)), maxReads);
+  const minPolicyReads = Math.min(maxReads, Math.max(2, autoReadTopK || 0));
   const answerGateEnabled = exploratory.answerGate !== false;
   const gateMode = exploratory.gateMode || 'rules-then-llm';
   let degraded = false;
@@ -132,8 +148,20 @@ export async function runAdaptiveV2(context) {
   let pendingStopReason = null;
 
   emit({ stage: 'assessing_query', step: 0, maxSteps: state.maxSteps });
+  if (queryShape.kind !== 'definitional' && exploratory.profilePlanner !== false) {
+    const tokensBefore = budget?.usage?.llmTokens || 0;
+    state.applyProfile(await planResearchProfile({ query, llm, signal }));
+    state.actionCosts.record('reflect', (budget?.usage?.llmTokens || 0) - tokensBefore);
+  } else {
+    state.applyProfile(state.profile);
+  }
   emit({ stage: 'gap_opened', gapId: 'gap-1', question: query });
-  addTrace(trace, state, 'assess', { reasonCode: 'agent_loop_v2', targetGapIds: ['gap-1'] }, budget);
+  addTrace(trace, state, 'assess', {
+    reasonCode: 'agent_loop_v2',
+    targetGapIds: ['gap-1'],
+    profile: state.profile?.requirements || null,
+    requiredHosts: state.profile?.requiredHosts || [],
+  }, budget);
 
   function refreshState() {
     state.refreshBudgetView({
@@ -163,21 +191,78 @@ export async function runAdaptiveV2(context) {
       signal,
       settings,
       budget,
-      embedding: researchProviders?.embedding,
+      embedding,
     }))[0];
+    finding.sources = (finding.sources || []).map((source) => annotateBodyQuality(source));
+    if (embedding && focused.fetchMode !== 'extract') {
+      for (const source of finding.sources) {
+        if (!isSuccessfulBody(source) || String(source.content || '').length < 600) continue;
+        try {
+          source.summary = await selectRelevantPassages({
+            query,
+            question: finding.question,
+            content: source.content,
+            snippet: source.snippet,
+            embedding,
+            signal,
+          }) || source.summary;
+          source.extractionMethod = source.extractionMethod || 'embedding';
+        } catch {
+          // Passage selection is optional; keep the fetched body.
+        }
+      }
+    }
+    const previousTexts = state.knowledge.map((item) => item.learned);
     state.findings.push(finding);
     const readHostnames = [];
+    let successful = 0;
+    const gap = state.gapById(finding.gapId);
     for (const source of finding.sources || []) {
       const id = source.id || source.url;
-      state.readSourceIds.add(id);
       const existing = state.candidates.get(id) || {};
-      state.candidates.set(id, { ...existing, ...source, id, freq: existing.freq || 1 });
-      state.addKnowledge({ gapId: finding.gapId, sourceId: id, learned: source.summary || source.content || source.snippet });
+      const merged = { ...existing, ...source, id, freq: existing.freq || 1 };
+      if (isSuccessfulBody(merged)) {
+        merged.status = 'read';
+        state.readSourceIds.add(id);
+        successful += 1;
+        if (gap && !gap.readSourceIds.includes(id)) gap.readSourceIds.push(id);
+        const novelty = await readAddedNewInfo({
+          embedding,
+          traces: state.embeddingTraces,
+          signal,
+          previousTexts,
+          nextText: source.summary || source.content || source.snippet,
+        });
+        source.novelty = novelty;
+        state.addKnowledge({ gapId: finding.gapId, sourceId: id, learned: source.summary || source.content || source.snippet });
+      } else if (merged.fetchStatus === 'waf' || merged.bodyQuality === 'waf') {
+        merged.status = 'waf';
+        state.failedSourceIds.add(id);
+        markCandidateStatus(state.candidates, id, 'waf', 'waf_or_error_body');
+        if (gap && hostnameOf(merged.url)) {
+          const host = hostnameOf(merged.url);
+          if ((gap.requiredHosts || []).some((required) => host.endsWith(required))) {
+            if (!gap.blockedHosts.includes(host)) gap.blockedHosts.push(host);
+          }
+        }
+      } else {
+        merged.status = 'failed';
+        state.failedSourceIds.add(id);
+        markCandidateStatus(state.candidates, id, 'failed', source.fetchError || 'read_failed');
+      }
+      state.candidates.set(id, merged);
       const hostname = hostnameOf(source.url || id);
       if (hostname) readHostnames.push(hostname);
     }
-    state.observations.push({ type: 'read_result', sourceIds, successful: (finding.sources || []).filter((source) => source.fetchStatus === 'ok').length, harvest });
-    state.addDiary(`${harvest ? 'auto-harvested' : 'read'} ${sourceIds.length} source(s) (${readHostnames.join(', ') || 'unknown hosts'}) for ${finding.gapId}`);
+    state.recordSuccessfulBodies(successful);
+    state.observations.push({
+      type: 'read_result',
+      sourceIds,
+      successful,
+      harvest,
+      waf: (finding.sources || []).filter((source) => source.fetchStatus === 'waf').length,
+    });
+    state.addDiary(`${harvest ? 'policy-read' : 'read'} ${sourceIds.length} source(s) (${readHostnames.join(', ') || 'unknown hosts'}) for ${finding.gapId}; ${successful} successful`);
     state.actionCosts.record('read', (budget?.usage?.llmTokens || 0) - tokensBefore);
     state.syncGapCoverage();
     addTrace(trace, state, 'read', {
@@ -187,7 +272,9 @@ export async function runAdaptiveV2(context) {
       knowledgeCount: state.knowledge.length,
       harvest,
       decisionStep: !harvest,
+      successfulBodyReads: successful,
     }, budget);
+    return successful;
   }
 
   if (queryShape.kind === 'definitional') {
@@ -205,6 +292,11 @@ export async function runAdaptiveV2(context) {
       const gap = state.addGap(question);
       if (gap) emit({ stage: 'gap_opened', gapId: gap.id, question: gap.question });
     }
+    for (const planned of plannedOrthogonalGaps(state.profile, state.gaps)) {
+      if (state.gaps.length >= maxOpenGaps) break;
+      const gap = state.addGap(planned.question, planned.priority, planned);
+      if (gap) emit({ stage: 'gap_opened', gapId: gap.id, question: gap.question });
+    }
     addTrace(trace, state, 'decompose', {
       reasonCode: subQuestions.length ? 'query_decomposed' : 'decompose_skipped',
       targetGapIds: state.gaps.map((gap) => gap.id),
@@ -218,38 +310,56 @@ export async function runAdaptiveV2(context) {
       refreshState();
 
       if (budget && !loopCanAfford(budget, state.actionCosts.estimate('decide'))) {
-        stopReason = STOP_REASONS.maxBudgetExhausted;
-        addTrace(trace, state, 'stop', { reasonCode: STOP_REASONS.maxBudgetExhausted }, budget, 'budget_exhausted');
+        stopReason = STOP_REASONS.budgetExhausted;
+        state.markRemainingGapsMissing();
+        addTrace(trace, state, 'stop', { reasonCode: STOP_REASONS.budgetExhausted }, budget, 'budget_exhausted');
         break;
       }
 
       const belowMin = Boolean(state.budgetView?.belowMin);
       let action;
       if (state.budgetView?.hardCapReached) {
-        stopReason = STOP_REASONS.maxBudgetExhausted;
-        addTrace(trace, state, 'stop', { reasonCode: STOP_REASONS.maxBudgetExhausted }, budget, 'budget_exhausted');
+        stopReason = STOP_REASONS.budgetExhausted;
+        state.markRemainingGapsMissing();
+        addTrace(trace, state, 'stop', { reasonCode: STOP_REASONS.budgetExhausted }, budget, 'budget_exhausted');
         break;
       } else if (countCapsExhausted(budget)) {
-        action = { action: 'answer', reasonCode: STOP_REASONS.maxBudgetExhausted };
-        pendingStopReason = STOP_REASONS.maxBudgetExhausted;
+        action = { action: 'finalize', reasonCode: STOP_REASONS.budgetExhausted };
+        pendingStopReason = STOP_REASONS.budgetExhausted;
         degraded = true;
-      } else if (state.sufficiency?.sufficient && state.hasBodyEvidence() && !belowMin) {
-        action = { action: 'answer', reasonCode: 'evidence_sufficient' };
+      } else if (gatePasses(state) && !belowMin) {
+        action = { action: 'finalize', reasonCode: 'evidence_sufficient' };
       } else {
         const tokensBefore = budget?.usage?.llmTokens || 0;
         action = await decideAdaptiveAction({ llm, state, signal });
         state.actionCosts.record('decide', (budget?.usage?.llmTokens || 0) - tokensBefore);
-        if (belowMin && action && ['answer', 'stop'].includes(action.action)) {
-          action = fallbackAdaptiveAction(state, { belowMin: true, sufficiency: state.sufficiency });
+        if (belowMin && action && ['answer', 'stop', 'finalize', 'draft'].includes(action.action)) {
+          action = fallbackAdaptiveAction(state, { belowMin: true, sufficiency: state.sufficiency, readiness: state.readiness });
         }
       }
 
-      let invalid = pendingStopReason === STOP_REASONS.maxBudgetExhausted ? null : state.validate(action);
+      action = normalizeAgentAction(action);
+      let invalid = pendingStopReason === STOP_REASONS.budgetExhausted ? null : state.validate(action);
       let searchQueries = [];
       if (!invalid && action.action === 'search') {
         for (const candidateQuery of normalizeSearchQueries(action, maxQueriesPerStep)) {
           const duplicate = await queryMemory?.findDuplicate?.(candidateQuery, action.gapId || 'gap-1');
-          if (!duplicate) searchQueries.push(candidateQuery);
+          if (duplicate) continue;
+          let nearDuplicate = state.searchedQueries().some((previous) => previous === candidateQuery);
+          if (!nearDuplicate) {
+            for (const previous of state.searchedQueries()) {
+              const near = await queriesAreNearDuplicates(candidateQuery, previous, {
+                embedding,
+                traces: state.embeddingTraces,
+                signal,
+              });
+              if (near.duplicate) {
+                nearDuplicate = true;
+                break;
+              }
+            }
+          }
+          if (!nearDuplicate) searchQueries.push(candidateQuery);
         }
         if (!searchQueries.length) invalid = 'duplicate_query';
       }
@@ -257,29 +367,40 @@ export async function runAdaptiveV2(context) {
         state.observations.push({ type: 'invalid_action', reason: invalid, action: action?.action || null });
         state.addDiary(`${action?.action || 'unknown'} rejected (${invalid})`);
         addTrace(trace, state, action?.action || 'unknown', { reasonCode: invalid }, budget, 'rejected');
-        action = fallbackAdaptiveAction(state, {
+        action = normalizeAgentAction(fallbackAdaptiveAction(state, {
           sufficiency: state.sufficiency,
+          readiness: state.readiness,
           belowMin,
-        });
+        }));
         invalid = state.validate(action);
-        if (invalid) action = { action: 'stop', reasonCode: invalid };
+        if (invalid) action = { action: 'finalize', reasonCode: invalid };
         if (action.action === 'search') searchQueries = normalizeSearchQueries(action, maxQueriesPerStep);
       }
       const stepsRemaining = hasStepCap(state.maxSteps) ? state.maxSteps - state.step : null;
-      if (stepsRemaining !== null && stepsRemaining <= 1 && !['answer', 'stop'].includes(action.action)
+      if (stepsRemaining !== null && stepsRemaining <= 1 && !['finalize', 'draft', 'answer', 'stop'].includes(action.action)
         && (state.findings.length > 0 || state.candidates.size > 0)) {
         addTrace(trace, state, action.action, { reasonCode: 'forced_final_answer' }, budget, 'forced');
-        action = { action: 'answer', reasonCode: 'forced_final_answer' };
-        pendingStopReason = STOP_REASONS.maxStepsSafety;
+        action = { action: 'finalize', reasonCode: 'forced_final_answer' };
+        pendingStopReason = STOP_REASONS.safetyCap;
       }
       state.step += 1;
-      state.lastAction = action.action;
+      state.lastAction = action.action === 'finalize' && action.reasonCode === 'forced_final_answer'
+        ? 'finalize'
+        : (action.action === 'finalize' ? 'finalize' : action.action);
       abort(signal);
 
       if (action.action === 'search') {
-        const gapId = action.gapId || 'gap-1';
+        const gapId = action.gapId || state.focusGap()?.id || 'gap-1';
+        const gap = state.gapById(gapId);
+        const seeded = [...searchQueries];
+        if ((gap.requiredHosts || []).length) {
+          for (const hostQuery of requiredHostQueries(gap, { alreadySearched: [...state.searchedQueries(), ...seeded] })) {
+            if (seeded.length >= maxQueriesPerStep) break;
+            seeded.push(hostQuery);
+          }
+        }
         const allowedQueries = [];
-        for (const searchQuery of searchQueries) {
+        for (const searchQuery of seeded) {
           if (allowedQueries.length === 0 || !budget || budget.canClaim('searchRequests', allowedQueries.length + 1)) {
             allowedQueries.push(searchQuery);
           }
@@ -297,21 +418,54 @@ export async function runAdaptiveV2(context) {
           return { searchQuery, results };
         }));
         let totalResults = 0;
+        let newUrls = 0;
         for (const { searchQuery, results } of searchResults) {
           totalResults += results.length;
           queryMemory?.record?.({ query: searchQuery, gapId, status: results.length ? 'useful' : 'empty', results });
-          state.addCandidates(results, gapId);
+          const added = state.addCandidates(results, gapId, searchQuery);
+          newUrls += added.added || 0;
           addSerpKnowledge(state, results, gapId);
-          state.observations.push({ type: 'search_result', query: searchQuery, resultCount: results.length });
+          state.markGapSearched(gapId, searchQuery);
+          state.observations.push({ type: 'search_result', query: searchQuery, resultCount: results.length, newUrls: added.added || 0 });
         }
-        await observeRerank({ state, query: allowedQueries[0] || query, providers: researchProviders, signal });
+        state.recordSearchCycle({ gapId, newUrls });
+        await clusterUrlPool(state.candidates, { embedding, traces: state.embeddingTraces, signal });
+        await observeRerank({
+          state,
+          gap,
+          providers: researchProviders,
+          signal,
+          trace,
+          budget,
+        });
         state.addDiary(`searched ${allowedQueries.length} quer${allowedQueries.length === 1 ? 'y' : 'ies'}, +${state.candidates.size - candidatesBefore} candidates`);
-        addTrace(trace, state, 'search', { reasonCode: action.reasonCode || 'agent_search', targetGapIds: [gapId], queryCount: allowedQueries.length, resultCount: totalResults, decisionStep: true }, budget);
+        addTrace(trace, state, 'search', {
+          reasonCode: action.reasonCode || 'agent_search',
+          targetGapIds: [gapId],
+          queryCount: allowedQueries.length,
+          resultCount: totalResults,
+          newUrlCount: newUrls,
+          decisionStep: true,
+        }, budget);
+
+        if (newUrls === 0) {
+          const nextHostQuery = requiredHostQueries(gap, { alreadySearched: state.searchedQueries() })[0];
+          const otherGap = state.gaps.find((item) => item.id !== gapId && !state.gapCovered(item.id) && item.status !== 'blocked');
+          if (nextHostQuery) {
+            state.addDiary(`search added no new URLs; will try required-host query`);
+          } else if (otherGap) {
+            state.addDiary(`search added no new URLs; switching to ${otherGap.id}`);
+          } else if ((gap.requiredHosts || []).length) {
+            state.markGapBlocked(gapId);
+            addTrace(trace, state, 'search', { reasonCode: 'source_blocked', targetGapIds: [gapId] }, budget, 'blocked');
+          }
+        }
 
         if (autoReadTopK > 0) {
-          let autoReadCount = autoReadTopK;
+          let autoReadCount = Math.max(autoReadTopK, minPolicyReads);
+          autoReadCount = Math.min(autoReadCount, maxReads);
           while (budget && autoReadCount > 0 && !budget.canClaim('sourceReads', autoReadCount)) autoReadCount -= 1;
-          const picks = autoReadCount > 0 ? pickUnreadCandidates(state, autoReadCount) : [];
+          const picks = autoReadCount > 0 ? pickUnreadCandidates(state, autoReadCount, gap) : [];
           if (picks.length) {
             await performRead({
               sourceIds: picks.map((candidate) => candidate.id).slice(0, autoReadCount),
@@ -321,6 +475,7 @@ export async function runAdaptiveV2(context) {
             });
           }
         }
+        state.lastAction = 'search';
         continue;
       }
 
@@ -348,17 +503,19 @@ export async function runAdaptiveV2(context) {
           else gapQuestion = '';
         }
         state.addDiary(gapQuestion ? `reflected, opened gap "${gapQuestion.slice(0, 80)}"` : 'reflected, no new gap');
-        addTrace(trace, state, 'reflect', { reasonCode: action.reasonCode || 'agent_reflect', targetGapIds: state.gaps.map((gap) => gap.id), decisionStep: true }, budget);
+        addTrace(trace, state, 'reflect', { reasonCode: action.reasonCode || 'agent_reflect', targetGapIds: state.gaps.map((item) => item.id), decisionStep: true }, budget);
         continue;
       }
 
-      if (action.action === 'answer') {
+      if (action.action === 'draft' || action.action === 'finalize') {
         refreshState();
         const canContinue = (!hasStepCap(state.maxSteps) || state.step < state.maxSteps)
           && loopCanAfford(budget, state.actionCosts.estimate('search'))
           && !state.budgetView?.hardCapReached
-          && !countCapsExhausted(budget);
-        const hasDirectEvidence = state.hasBodyEvidence();
+          && !countCapsExhausted(budget)
+          && pendingStopReason !== STOP_REASONS.budgetExhausted
+          && pendingStopReason !== STOP_REASONS.safetyCap;
+        const hasDirectEvidence = state.hasBodyEvidence() && (state.cycleHadSuccessfulBody() || state.lastAction !== 'search');
         if (!hasDirectEvidence && canContinue && state.evaluationRetries < maxRetries && budget?.canClaim('searchRequests')) {
           state.evaluationRetries += 1;
           state.observations.push({ type: 'evaluation', verdict: 'needs_more_evidence' });
@@ -366,54 +523,127 @@ export async function runAdaptiveV2(context) {
           addTrace(trace, state, 'evaluate_report', { reasonCode: 'missing_direct_evidence', allowedAdditionalActions: 1 }, budget, 'retry');
           continue;
         }
-        const rulesSufficient = Boolean(state.sufficiency?.sufficient);
+
+        const deterministicGate = evaluateReadinessGate({
+          query: state.query,
+          profile: state.profile,
+          gaps: state.gaps,
+          findings: state.findings,
+          missingSubjects: state.sufficiency?.missingSubjects || [],
+        });
         const shouldLlmGate = answerGateEnabled
-          && hasDirectEvidence
-          && !rulesSufficient
+          && !deterministicGate.pass
           && (gateMode === 'llm' || gateMode === 'rules-then-llm')
           && state.evaluationRetries < maxRetries;
-        if (shouldLlmGate) {
-          const tokensBefore = budget?.usage?.llmTokens || 0;
-          const evaluation = await evaluateAnswerReadiness({ llm, state, signal });
-          state.actionCosts.record('decide', (budget?.usage?.llmTokens || 0) - tokensBefore);
-          if (evaluation && evaluation.pass === false) {
-            if (canContinue) {
-              state.evaluationRetries += 1;
-              if (evaluation.missingAspect && state.gaps.length < maxOpenGaps) {
-                const gap = state.addGap(evaluation.missingAspect);
-                if (gap) emit({ stage: 'gap_opened', gapId: gap.id, question: gap.question });
-              }
-              state.observations.push({ type: 'evaluation', verdict: 'answer_gate_failed', missingAspect: evaluation.missingAspect || null });
-              state.addDiary(`answer gate failed${evaluation.missingAspect ? `: ${evaluation.missingAspect.slice(0, 80)}` : ''}`);
-              addTrace(trace, state, 'evaluate_report', { reasonCode: 'answer_gate_failed', missingAspect: evaluation.missingAspect || null }, budget, 'retry');
-              continue;
+        const llmEvaluation = shouldLlmGate
+          ? await (async () => {
+            const tokensBefore = budget?.usage?.llmTokens || 0;
+            const evaluation = await evaluateAnswerReadiness({ llm, state, signal });
+            state.actionCosts.record('decide', (budget?.usage?.llmTokens || 0) - tokensBefore);
+            return evaluation;
+          })()
+          : null;
+
+        const gate = evaluateReadinessGate({
+          query: state.query,
+          profile: state.profile,
+          gaps: state.gaps,
+          findings: state.findings,
+          llmPass: llmEvaluation?.pass ?? null,
+          missingSubjects: state.sufficiency?.missingSubjects || [],
+        });
+        state.readiness = gate;
+        if (state.sufficiency) state.sufficiency.sufficient = gate.pass;
+
+        if (!gate.pass && pendingStopReason !== STOP_REASONS.budgetExhausted && pendingStopReason !== STOP_REASONS.safetyCap) {
+          if (canContinue && state.evaluationRetries < maxRetries) {
+            state.evaluationRetries += 1;
+            const repairs = repairGapsFromGate(gate, state.gaps);
+            for (const repair of repairs) {
+              if (state.gaps.length >= maxOpenGaps) break;
+              const opened = state.addGap(repair.question, repair.priority, repair);
+              if (opened) emit({ stage: 'gap_opened', gapId: opened.id, question: opened.question });
             }
-            state.observations.push({ type: 'evaluation', verdict: 'answer_gate_failed_terminal', missingAspect: evaluation.missingAspect || null });
-            addTrace(trace, state, 'evaluate_report', { reasonCode: 'answer_gate_failed', missingAspect: evaluation.missingAspect || null, terminal: true }, budget, 'failed');
+            if (llmEvaluation?.pass === false && llmEvaluation.missingAspect && state.gaps.length < maxOpenGaps) {
+              const opened = state.addGap(llmEvaluation.missingAspect, 'critical', { inheritProfile: true });
+              if (opened) emit({ stage: 'gap_opened', gapId: opened.id, question: opened.question });
+            }
+            state.observations.push({
+              type: 'evaluation',
+              verdict: 'answer_gate_failed',
+              missingAspect: llmEvaluation?.missingAspect || gate.failures[0]?.repairQuestion || null,
+              llmPassIgnored: llmEvaluation?.pass === true,
+            });
+            state.addDiary(`readiness gate failed${gate.failures[0] ? `: ${gate.failures[0].code}` : ''}`);
+            addTrace(trace, state, 'evaluate_report', {
+              reasonCode: 'answer_gate_failed',
+              missingAspect: llmEvaluation?.missingAspect || gate.failures[0]?.repairQuestion || null,
+              llmOverrideIgnored: llmEvaluation?.pass === true,
+              failures: gate.failures,
+            }, budget, 'retry');
+            continue;
           }
+          if (gate.decision === 'source_blocked' || gate.blockedRequired) {
+            pendingStopReason = pendingStopReason || STOP_REASONS.sourceBlocked;
+          }
+          state.observations.push({
+            type: 'evaluation',
+            verdict: 'answer_gate_failed_terminal',
+            missingAspect: llmEvaluation?.missingAspect || null,
+          });
+          addTrace(trace, state, 'evaluate_report', {
+            reasonCode: 'answer_gate_failed',
+            missingAspect: llmEvaluation?.missingAspect || null,
+            terminal: true,
+            llmOverrideIgnored: llmEvaluation?.pass === true,
+          }, budget, 'failed');
         }
-        stopReason = mapAnswerStopReason(action, pendingStopReason);
-        addTrace(trace, state, 'answer', { reasonCode: action.reasonCode || 'agent_evidence_sufficient', stopReason }, budget);
+
+        const mapped = mapControllerStopReason(action, pendingStopReason, gate.pass);
+        const hitStepCap = hasStepCap(state.maxSteps) && state.step >= state.maxSteps;
+        stopReason = mapped
+          || (gate.pass && !pendingStopReason ? STOP_REASONS.evidenceSufficient : null)
+          || pendingStopReason
+          || (gate.blockedRequired ? STOP_REASONS.sourceBlocked : null)
+          || (hitStepCap ? STOP_REASONS.safetyCap : STOP_REASONS.budgetExhausted);
+        if (stopReason === STOP_REASONS.evidenceSufficient && !gate.pass) {
+          stopReason = pendingStopReason
+            || (gate.blockedRequired ? STOP_REASONS.sourceBlocked : null)
+            || (hitStepCap ? STOP_REASONS.safetyCap : STOP_REASONS.budgetExhausted);
+        }
+        if (['budget_exhausted', 'source_blocked', 'safety_cap'].includes(stopReason)) {
+          state.markRemainingGapsMissing();
+        }
+        addTrace(trace, state, action.action === 'draft' ? 'draft' : 'answer', {
+          reasonCode: action.reasonCode || (gate.pass ? 'agent_evidence_sufficient' : stopReason),
+          stopReason,
+        }, budget);
         break;
       }
 
-      stopReason = action.reasonCode === STOP_REASONS.maxBudgetExhausted
-        ? STOP_REASONS.maxBudgetExhausted
-        : STOP_REASONS.agentStop;
-      addTrace(trace, state, 'stop', { reasonCode: action.reasonCode || STOP_REASONS.agentStop }, budget);
+      stopReason = action.reasonCode === STOP_REASONS.budgetExhausted
+        ? STOP_REASONS.budgetExhausted
+        : STOP_REASONS.safetyCap;
+      addTrace(trace, state, 'stop', { reasonCode: action.reasonCode || stopReason }, budget);
       break;
     }
   } catch (error) {
+    if (error?.name === 'AbortError') {
+      stopReason = STOP_REASONS.userCancelled;
+      addTrace(trace, state, 'stop', { reasonCode: STOP_REASONS.userCancelled }, budget, 'cancelled');
+      throw error;
+    }
     if (error?.name !== 'BudgetExceededError') throw error;
     degraded = true;
-    stopReason = STOP_REASONS.maxBudgetExhausted;
-    addTrace(trace, state, 'stop', { reasonCode: STOP_REASONS.maxBudgetExhausted, kind: error.kind }, budget, 'budget_exhausted');
+    stopReason = STOP_REASONS.budgetExhausted;
+    state.markRemainingGapsMissing();
+    addTrace(trace, state, 'stop', { reasonCode: STOP_REASONS.budgetExhausted, kind: error.kind }, budget, 'budget_exhausted');
   }
 
   if (!stopReason) {
-    if (budget?.limits?.llmTokens && !budget.canClaim('llmTokens', 1)) stopReason = STOP_REASONS.maxBudgetExhausted;
-    else if (hasStepCap(state.maxSteps) && state.step >= state.maxSteps) stopReason = STOP_REASONS.maxStepsSafety;
-    else stopReason = STOP_REASONS.agentStop;
+    if (budget?.limits?.llmTokens && !budget.canClaim('llmTokens', 1)) stopReason = STOP_REASONS.budgetExhausted;
+    else if (hasStepCap(state.maxSteps) && state.step >= state.maxSteps) stopReason = STOP_REASONS.safetyCap;
+    else stopReason = gatePasses(state) ? STOP_REASONS.evidenceSufficient : STOP_REASONS.budgetExhausted;
   }
 
   if (state.findings.length === 0 && state.candidates.size > 0) {
@@ -424,13 +654,36 @@ export async function runAdaptiveV2(context) {
   if (degraded) {
     for (const finding of state.findings) finding.degraded = true;
   }
-  budget?.setControllerStopReason?.(stopReason);
   refreshState();
+  const limitations = buildForcedReportLimitations({
+    stopReason,
+    gaps: state.gaps,
+    findings: state.findings,
+    candidates: state.candidates,
+    profile: state.profile,
+  });
+  budget?.setControllerStopReason?.(stopReason);
   emit({
     stage: 'research_stopped',
     reason: stopReason,
     step: state.step,
     maxSteps: state.maxSteps,
   });
-  return state.findings;
+  return attachExploratoryController(state.findings, {
+    profile: state.profile,
+    gaps: state.gaps,
+    readiness: state.readiness,
+    stopReason,
+    limitations,
+    embeddingTraces: state.embeddingTraces,
+    urlPool: [...state.candidates.values()].map((candidate) => ({
+      id: candidate.id,
+      hostname: candidate.hostname,
+      tier: candidate.tier,
+      status: candidate.status,
+      gapId: candidate.gapId,
+      selectReason: candidate.selectReason || null,
+      skipReason: candidate.skipReason || null,
+    })),
+  });
 }

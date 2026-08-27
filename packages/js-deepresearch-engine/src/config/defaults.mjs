@@ -126,6 +126,10 @@ export const defaultSettings = Object.freeze({
       gateMode: 'rules-then-llm',
       maxEvaluationRetries: 1,
       answerGate: true,
+      profilePlanner: true,
+      maxUnreadPerHostname: 2,
+      maxCandidateEvaluationTokens: 0,
+      maxPostReportEvaluationTokens: 0,
     },
   },
 });

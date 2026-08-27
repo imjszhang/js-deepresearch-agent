@@ -112,6 +112,9 @@ export function mapStructuredProgressEvent(event) {
     case 'rerank_started': return { message: `Reranking ${event.inputCount || 0} candidate sources`, progress: null, level };
     case 'rerank_completed': return { message: `Rerank completed (${event.provider}, ${event.durationMs ?? 0}ms)`, progress: null, level };
     case 'rerank_degraded': return { message: `Rerank provider degraded to local rules (${event.errorCode})`, progress: null, level: 'warn' };
+    case 'embed_started': return { message: `Embedding ${event.inputCount || 0} texts (${event.purpose || 'unspecified'})`, progress: null, level };
+    case 'embed_completed': return { message: `Embedding completed (${event.provider || 'embedding'}, ${event.durationMs ?? 0}ms)`, progress: null, level };
+    case 'embed_failed': return { message: `Embedding failed; falling back to overlap rules (${event.errorCode || 'error'})`, progress: null, level: 'warn' };
     case 'research_stopped': return { message: `Research stopped: ${event.reason || 'complete'}`, progress: 78, level };
     case 'budget_exhausted': return { message: `Research budget exhausted: ${event.kind}`, progress: 78, level };
     default:

@@ -65,7 +65,7 @@ export {
   resolveCitations,
   resolveCitedSourceIds,
 } from './research/citations.mjs';
-export { ReportGenerationError, validateReportOutput, looksTruncated, isPlaceholderSummary } from './research/report-builder.mjs';
+export { ReportGenerationError, validateReportOutput, looksTruncated, isPlaceholderSummary, hasEmptyBullets } from './research/report-builder.mjs';
 export {
   assembleReport,
   reviseUnsupportedKeyClaims,

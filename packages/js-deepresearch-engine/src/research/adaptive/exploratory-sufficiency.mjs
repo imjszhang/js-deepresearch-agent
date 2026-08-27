@@ -1,4 +1,6 @@
 import { evaluateEvidenceSufficiency } from '../quality-gates.mjs';
+import { isSuccessfulBody } from './body-quality.mjs';
+import { evaluateReadinessGate } from './readiness-gate.mjs';
 
 const DEFINITIONAL = /^(what(?:['’]?s| is| are)|who(?:['’]?s| is| are)|define|definition of|explain|什么是|谁是|定义)\b/i;
 const COMPARISON = /\b(compare|versus|vs\.?|comparison|对比|比较)\b/i;
@@ -59,7 +61,7 @@ export function classifyResearchQuery(query) {
 }
 
 export function sourceHasBody(source) {
-  return Boolean(source && (source.fetchStatus === 'ok' || source.content || source.summary));
+  return isSuccessfulBody(source);
 }
 
 export function findingsHaveBodyEvidence(findings = []) {
@@ -133,20 +135,20 @@ export function evaluateExploratorySufficiency({
       .filter(Boolean)),
   ).size;
 
-  let sufficient = false;
-  let inconclusive = false;
-  if (!hasBody || flags.includes('primary_source_missing') || flags.includes('freshness_unknown')) {
-    sufficient = false;
-  } else if (shape.kind === 'comparison') {
-    sufficient = missingSubjects.length === 0 && criticalOpen.length === 0;
-  } else if (shape.kind === 'definitional') {
-    sufficient = criticalOpen.length === 0;
-  } else if (bodySourceCount < 2) {
-    inconclusive = true;
-  } else {
-    sufficient = criticalOpen.length === 0 && !flags.includes('comparison_coverage_incomplete');
-    inconclusive = !sufficient;
+  const gate = evaluateReadinessGate({
+    query: resolvedQuery,
+    profile: state?.profile || null,
+    gaps: resolvedGaps,
+    findings: resolvedFindings,
+    missingSubjects,
+  });
+  for (const flag of gate.flags || []) {
+    if (!flags.includes(flag)) flags.push(flag);
   }
+
+  // Deterministic readiness is the only path to evidence_sufficient.
+  const sufficient = Boolean(gate.pass);
+  const inconclusive = !sufficient && hasBody && !flags.includes('primary_source_missing');
 
   return {
     ...base,
@@ -158,8 +160,9 @@ export function evaluateExploratorySufficiency({
     bodySourceCount,
     criticalOpenCount: criticalOpen.length,
     sufficient,
-    inconclusive: inconclusive || (!sufficient && !flags.includes('primary_source_missing') && hasBody && shape.kind === 'open'),
-    decision: sufficient ? 'stop' : (criticalOpen.length || missingSubjects.length ? 'continue_with_focus' : 'continue'),
+    inconclusive,
+    readiness: gate,
+    decision: gate.decision === 'stop' ? 'stop' : (criticalOpen.length || missingSubjects.length || gate.openRequired ? 'continue_with_focus' : 'continue'),
     method: 'rules',
   };
 }
