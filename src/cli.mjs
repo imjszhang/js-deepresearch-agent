@@ -385,7 +385,7 @@ Commands:
     Optional total fuse: --max-total-llm-tokens 0 (exploration + report; default unlimited)
     Optional rerank: --rerank-provider rules|disabled|jina|http|local --rerank-model <name> --rerank-base-url <url> --rerank-api-key <key> --rerank-timeout-ms 30000
     Focused: --focused-fetch-mode summary|disabled|full|extract --focused-fetch-backend auto|http|js-eyes --focused-max-urls 12 --focused-cluster-results true|false --focused-max-per-hostname 2
-    Exploratory: --exploratory-max-steps 0 --exploratory-max-reads-per-step 4 --exploratory-min-llm-tokens 60000 --exploratory-max-llm-tokens 200000 --exploratory-max-search-requests 0 --exploratory-max-source-reads 0
+    Exploratory: --exploratory-max-steps 0 --exploratory-max-reads-per-step 4 --exploratory-min-llm-tokens 600000 --exploratory-max-llm-tokens 1000000 --exploratory-max-search-requests 0 --exploratory-max-source-reads 0
     On --strategy exploratory, --max-search-requests / --max-source-reads write exploratory count caps (default 0 = unlimited) and do not inherit global budget counts.
     Press Ctrl+C once to cancel gracefully; press again to force exit.
   config get [key]

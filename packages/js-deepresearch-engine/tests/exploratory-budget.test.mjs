@@ -119,8 +119,8 @@ describe('exploratory budget snapshot and sufficiency', () => {
     assert.equal(resolved.maxSearchRequests, 0);
     assert.equal(resolved.maxSourceReads, 0);
     assert.equal(resolved.maxSteps, 0);
-    assert.equal(resolved.minLlmTokens, 60000);
-    assert.equal(resolved.maxLlmTokens, 200000);
+    assert.equal(resolved.minLlmTokens, 600000);
+    assert.equal(resolved.maxLlmTokens, 1000000);
   });
 
   it('keeps maxSteps unlimited when a token ceiling is set and uses a safety valve only when both are off', () => {

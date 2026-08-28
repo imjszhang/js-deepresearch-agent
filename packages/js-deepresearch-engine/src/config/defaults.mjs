@@ -112,9 +112,9 @@ export const defaultSettings = Object.freeze({
     },
     exploratory: {
       maxSteps: 0,
-      minLlmTokens: 60000,
-      maxLlmTokens: 200000,
-      targetLlmTokens: 60000,
+      minLlmTokens: 600000,
+      maxLlmTokens: 1000000,
+      targetLlmTokens: 600000,
       maxGapDepth: 2,
       maxOpenGaps: 8,
       maxQueriesPerStep: 3,
