@@ -1,17 +1,17 @@
 import { enrichFindings } from '../source-enricher.mjs';
 import { resolveFocusedSettings } from '../focused-settings.mjs';
 import { applyExploratoryBudget, effectiveExploratoryMaxSteps, resolveExploratorySettings } from '../exploratory-settings.mjs';
-import { decideAdaptiveAction, fallbackAdaptiveAction, evaluateAnswerReadiness, decomposeQuery, pickUnreadCandidates } from '../adaptive/agent-policy.mjs';
+import { decideAdaptiveAction, fallbackAdaptiveAction, evaluateAnswerReadiness, decomposeQuery, pickUnreadCandidates, buildAngleChangeSearch, belowHardCapFrom } from '../adaptive/agent-policy.mjs';
 import { ResearchState } from '../adaptive/research-state.mjs';
 import { classifyResearchQuery } from '../adaptive/exploratory-sufficiency.mjs';
 import { inferResearchProfile, planResearchProfile } from '../adaptive/research-profile.mjs';
 import { repairGapsFromGate } from '../adaptive/readiness-gate.mjs';
 import { classifyFetchedBody } from '../body-quality.mjs';
-import { buildSiteHostQueries } from '../adaptive/source-policy.mjs';
+import { gapHasPolicyHosts, nextUnusedSiteQueries, shortSearchTerms } from '../adaptive/source-policy.mjs';
 import {
   EXPLORATORY_STOP_REASONS,
   mapFinalizeStopReason,
-  normalizeExploratoryStopReason,
+  resolveNewRunStopReason,
 } from '../adaptive/stop-reasons.mjs';
 import {
   clusterUrlRecords,
@@ -23,13 +23,8 @@ import { similarQuestions } from '../adaptive/exploratory-sufficiency.mjs';
 const STOP_REASONS = {
   evidenceSufficient: EXPLORATORY_STOP_REASONS.evidenceSufficient,
   budgetExhausted: EXPLORATORY_STOP_REASONS.budgetExhausted,
-  sourceBlocked: EXPLORATORY_STOP_REASONS.sourceBlocked,
   safetyCap: EXPLORATORY_STOP_REASONS.safetyCap,
   userCancelled: EXPLORATORY_STOP_REASONS.userCancelled,
-  targetBudgetReached: EXPLORATORY_STOP_REASONS.budgetExhausted,
-  maxBudgetExhausted: EXPLORATORY_STOP_REASONS.budgetExhausted,
-  maxStepsSafety: EXPLORATORY_STOP_REASONS.safetyCap,
-  agentStop: EXPLORATORY_STOP_REASONS.sourceBlocked,
 };
 
 const FINALIZE_ACTIONS = new Set(['answer', 'finalize', 'stop', 'draft']);
@@ -166,7 +161,7 @@ async function observeRerank({ state, gap, providers, signal, trace, budget }) {
   return traceRecord;
 }
 
-export async function runAdaptiveV2(context) {
+export async function runExploratoryLoop(context) {
   const { query, llm, search, signal, emit, settings, budget, queryMemory, trace, researchProviders } = context;
   const exploratory = resolveExploratorySettings(settings);
   const focused = resolveFocusedSettings(settings);
@@ -202,7 +197,7 @@ export async function runAdaptiveV2(context) {
   emit({ stage: 'assessing_query', step: 0, maxSteps: state.maxSteps });
   emit({ stage: 'gap_opened', gapId: 'gap-1', question: query });
   addTrace(trace, state, 'assess', {
-    reasonCode: 'agent_loop_v2',
+    reasonCode: 'exploratory_loop',
     targetGapIds: ['gap-1'],
     profile: {
       flags: profile.flags,
@@ -359,6 +354,7 @@ export async function runAdaptiveV2(context) {
       }
 
       const belowMin = Boolean(state.budgetView?.belowMin);
+      const belowHardCap = belowHardCapFrom(state);
       let action;
       if (state.budgetView?.hardCapReached) {
         stopReason = STOP_REASONS.budgetExhausted;
@@ -374,8 +370,21 @@ export async function runAdaptiveV2(context) {
         const tokensBefore = budget?.usage?.llmTokens || 0;
         action = await decideAdaptiveAction({ llm, state, signal });
         state.actionCosts.record('decide', (budget?.usage?.llmTokens || 0) - tokensBefore);
-        if (belowMin && action && FINALIZE_ACTIONS.has(action.action)) {
-          action = fallbackAdaptiveAction(state, { belowMin: true, readiness: gate, sufficiency: state.sufficiency });
+        if (
+          !action
+          || (
+            FINALIZE_ACTIONS.has(action.action)
+            && (belowMin || state.forbidFinalizeUntilExplore)
+            && pendingStopReason !== STOP_REASONS.budgetExhausted
+            && pendingStopReason !== STOP_REASONS.safetyCap
+          )
+        ) {
+          action = fallbackAdaptiveAction(state, {
+            belowMin,
+            belowHardCap,
+            readiness: gate,
+            sufficiency: state.sufficiency,
+          });
         }
         if (FINALIZE_ACTIONS.has(action?.action) && !gate?.pass && pendingStopReason !== STOP_REASONS.budgetExhausted) {
           action = {
@@ -390,8 +399,8 @@ export async function runAdaptiveV2(context) {
       if (!invalid && action.action === 'search') {
         const gap = state.getGap(action.gapId || state.focusGap()?.id);
         const rawQueries = normalizeSearchQueries(action, maxQueriesPerStep);
-        if ((gap.requiredHosts || []).length) {
-          for (const siteQuery of buildSiteHostQueries(gap, gap.question)) {
+        if (gapHasPolicyHosts(gap)) {
+          for (const siteQuery of nextUnusedSiteQueries(gap, state.query, state.searchedQueries(), { limit: 2 }).reverse()) {
             if (!rawQueries.includes(siteQuery)) rawQueries.unshift(siteQuery);
           }
         }
@@ -412,15 +421,48 @@ export async function runAdaptiveV2(context) {
           sufficiency: state.sufficiency,
           readiness: gate,
           belowMin,
+          belowHardCap,
         });
         invalid = state.validate(action);
-        if (invalid) action = { action: 'stop', reasonCode: invalid };
+        if (invalid && belowHardCap && canContinueLoop()) {
+          action = buildAngleChangeSearch(state);
+          if (!normalizeSearchQueries(action, maxQueriesPerStep).length) {
+            action = {
+              action: 'search',
+              query: `${shortSearchTerms(state.query)} primary source ${state.step + 1}`,
+              gapId: state.focusGap()?.id || 'gap-1',
+              reasonCode: 'fallback_angle_change',
+            };
+          }
+          invalid = state.validate(action);
+        }
+        if (invalid) {
+          if (belowHardCap && canContinueLoop()) {
+            action = {
+              action: 'search',
+              query: `${shortSearchTerms(state.query)} filing ${state.step}-${state.evaluationRetries}`,
+              gapId: state.focusGap()?.id || 'gap-1',
+              reasonCode: 'fallback_angle_change',
+            };
+            invalid = state.validate(action);
+          }
+          if (invalid) {
+            stopReason = resolveNewRunStopReason(pendingStopReason, {
+              step: state.step,
+              maxSteps: state.maxSteps,
+              budget,
+            });
+            addTrace(trace, state, 'stop', { reasonCode: stopReason }, budget);
+            break;
+          }
+        }
         if (action.action === 'search') searchQueries = normalizeSearchQueries(action, maxQueriesPerStep);
       }
       const stepsRemaining = hasStepCap(state.maxSteps) ? state.maxSteps - state.step : null;
       if (stepsRemaining !== null && stepsRemaining <= 1 && !FINALIZE_ACTIONS.has(action.action)
         && (state.findings.length > 0 || state.candidates.size > 0)) {
         addTrace(trace, state, action.action, { reasonCode: 'forced_final_answer' }, budget, 'forced');
+        state.forbidFinalizeUntilExplore = false;
         action = { action: 'answer', reasonCode: 'forced_final_answer' };
         pendingStopReason = STOP_REASONS.safetyCap;
       }
@@ -431,6 +473,7 @@ export async function runAdaptiveV2(context) {
       if (action.action === 'search') {
         const gapId = action.gapId || state.focusGap()?.id || 'gap-1';
         const gap = state.getGap(gapId);
+        state.forbidFinalizeUntilExplore = false;
         state.beginSearchCycle();
         const allowedQueries = [];
         for (const searchQuery of searchQueries) {
@@ -490,10 +533,8 @@ export async function runAdaptiveV2(context) {
           decisionStep: true,
         }, budget);
 
-        if (newUrls === 0 && totalResults === 0 && (gap.requiredHosts || []).length) {
-          state.markGapStatus(gapId, 'blocked', 'required_host_unreadable');
-        } else if (newUrls === 0 && totalResults === 0) {
-          state.addDiary(`search added no new URLs for ${gapId}`);
+        if (newUrls === 0 && totalResults === 0) {
+          state.addDiary(`empty search for ${gapId}; will retry with different short site terms`);
         }
 
         if (autoReadTopK > 0) {
@@ -513,6 +554,7 @@ export async function runAdaptiveV2(context) {
       }
 
       if (action.action === 'read') {
+        state.forbidFinalizeUntilExplore = false;
         await performRead({
           sourceIds: action.sourceIds.slice(0, maxReads),
           gapId: action.gapId,
@@ -574,8 +616,9 @@ export async function runAdaptiveV2(context) {
               missingAspect: evaluation.missingAspect || null,
             }, budget, 'rejected');
           }
-          if (continueOk && maxRetries > 0 && state.evaluationRetries < maxRetries) {
+          if (continueOk && belowHardCapFrom(state) && pendingStopReason !== STOP_REASONS.budgetExhausted && pendingStopReason !== STOP_REASONS.safetyCap) {
             state.evaluationRetries += 1;
+            state.forbidFinalizeUntilExplore = true;
             if (evaluation?.missingAspect && state.gaps.length < maxOpenGaps) {
               const gap = state.addGap(evaluation.missingAspect, 'critical');
               if (gap) emit({ stage: 'gap_opened', gapId: gap.id, question: gap.question });
@@ -584,6 +627,7 @@ export async function runAdaptiveV2(context) {
               if (repair.reuseId || state.gaps.length >= maxOpenGaps) continue;
               const gap = state.addGap(repair.question, repair.priority, {
                 requiredHosts: repair.requiredHosts,
+                requiredSourceTypes: repair.requiredSourceTypes,
               });
               if (gap) emit({ stage: 'gap_opened', gapId: gap.id, question: gap.question });
             }
@@ -592,7 +636,7 @@ export async function runAdaptiveV2(context) {
               verdict: 'answer_gate_failed',
               missingAspect: evaluation?.missingAspect || currentGate.failures?.[0]?.code || null,
             });
-            state.addDiary(`readiness gate failed${evaluation?.missingAspect ? `: ${evaluation.missingAspect.slice(0, 80)}` : ''}`);
+            state.addDiary(`readiness gate failed; keep exploring${evaluation?.missingAspect ? `: ${evaluation.missingAspect.slice(0, 80)}` : ''}`);
             addTrace(trace, state, 'evaluate_report', {
               reasonCode: evaluation?.missingAspect ? 'answer_gate_failed' : (currentGate.failures?.[0]?.code || 'readiness_gate_failed'),
               missingAspect: evaluation?.missingAspect || null,
@@ -600,11 +644,11 @@ export async function runAdaptiveV2(context) {
             }, budget, 'retry');
             continue;
           }
-          if (currentGate.failures?.some((failure) => failure.code === 'required_host_missing')) {
-            stopReason = STOP_REASONS.sourceBlocked;
-          } else {
-            stopReason = pendingStopReason || STOP_REASONS.sourceBlocked;
-          }
+          stopReason = resolveNewRunStopReason(pendingStopReason, {
+            step: state.step,
+            maxSteps: state.maxSteps,
+            budget,
+          });
           addTrace(trace, state, 'evaluate_report', {
             reasonCode: 'answer_gate_failed',
             missingAspect: evaluation?.missingAspect || null,
@@ -629,15 +673,25 @@ export async function runAdaptiveV2(context) {
           }
         }
         stopReason = mapFinalizeStopReason(action, pendingStopReason, Boolean(currentGate?.pass) && !belowMin)
-          || (currentGate?.pass && !belowMin ? STOP_REASONS.evidenceSufficient : STOP_REASONS.sourceBlocked);
+          || (currentGate?.pass && !belowMin
+            ? STOP_REASONS.evidenceSufficient
+            : resolveNewRunStopReason(pendingStopReason, { step: state.step, maxSteps: state.maxSteps, budget }));
         if (stopReason === STOP_REASONS.evidenceSufficient && !currentGate?.pass) {
-          stopReason = STOP_REASONS.sourceBlocked;
+          stopReason = resolveNewRunStopReason(pendingStopReason, {
+            step: state.step,
+            maxSteps: state.maxSteps,
+            budget,
+          });
         }
         addTrace(trace, state, 'answer', { reasonCode: action.reasonCode || 'agent_evidence_sufficient', stopReason }, budget);
         break;
       }
 
-      stopReason = normalizeExploratoryStopReason(action.reasonCode) || STOP_REASONS.sourceBlocked;
+      stopReason = resolveNewRunStopReason(action.reasonCode, {
+        step: state.step,
+        maxSteps: state.maxSteps,
+        budget,
+      });
       addTrace(trace, state, 'stop', { reasonCode: action.reasonCode || stopReason }, budget);
       break;
     }
@@ -655,11 +709,17 @@ export async function runAdaptiveV2(context) {
   }
 
   if (!stopReason) {
-    if (budget?.limits?.llmTokens && !budget.canClaim('llmTokens', 1)) stopReason = STOP_REASONS.budgetExhausted;
-    else if (hasStepCap(state.maxSteps) && state.step >= state.maxSteps) stopReason = STOP_REASONS.safetyCap;
-    else stopReason = STOP_REASONS.sourceBlocked;
+    stopReason = resolveNewRunStopReason(null, {
+      step: state.step,
+      maxSteps: state.maxSteps,
+      budget,
+    });
   }
-  stopReason = normalizeExploratoryStopReason(stopReason) || STOP_REASONS.sourceBlocked;
+  stopReason = resolveNewRunStopReason(stopReason, {
+    step: state.step,
+    maxSteps: state.maxSteps,
+    budget,
+  });
 
   if (state.findings.length === 0 && state.candidates.size > 0) {
     const fallbackFinding = selectedFinding(state, [...state.candidates.keys()], 'gap-1');

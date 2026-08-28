@@ -1,6 +1,6 @@
-import { isSuccessfulBody } from '../body-quality.mjs';
+import { isSuccessfulBody, sourceHasObservableDate } from '../body-quality.mjs';
 import { classifyResearchQuery, subjectsMissingBodyEvidence } from './exploratory-sufficiency.mjs';
-import { hostnamesMatch, independentDomainsFromSources, hostnameOf } from './source-policy.mjs';
+import { classifySourceTier, hostnamesMatch, independentDomainsFromSources, hostnameOf } from './source-policy.mjs';
 
 export const GAP_OPEN_STATUSES = new Set(['open', 'searched', 'missing']);
 export const GAP_CLOSED_STATUSES = new Set(['verified', 'body_read']);
@@ -17,8 +17,19 @@ function sourcesForGap(findings, gapId) {
 
 function requiredHostsRead(gap, findings) {
   const hosts = gap.requiredHosts || [];
-  if (!hosts.length) return { missing: [], read: [] };
   const sources = sourcesForGap(findings, gap.id);
+  if (!hosts.length) {
+    if ((gap.requiredSourceTypes || []).includes('primary_filing')) {
+      const primary = sources.filter((source) => (
+        ['required_primary', 'other_primary'].includes(source.tier || classifySourceTier(source, gap))
+      ));
+      return {
+        missing: primary.length ? [] : ['primary_filing'],
+        read: primary.length ? ['primary_filing'] : [],
+      };
+    }
+    return { missing: [], read: [] };
+  }
   const read = [];
   const missing = [];
   for (const host of hosts) {
@@ -115,7 +126,7 @@ export function evaluateReadinessGate({
   }
 
   if (resolvedProfile.flags?.freshness || /\b(latest|current|today|recent|as of)\b|目前|当前|最新|截至/i.test(resolvedQuery)) {
-    const dated = bodies.some((source) => source.publishedAt || source.date || source.updatedAt);
+    const dated = bodies.some((source) => sourceHasObservableDate(source));
     if (!dated && resolvedProfile.flags?.freshness) {
       failures.push({ code: 'freshness_unknown', message: 'Freshness was required but no dated source body was read.' });
       flags.push('freshness_unknown');
@@ -142,6 +153,15 @@ export function repairGapsFromGate(gate, { query, existingGaps = [] } = {}) {
   for (const failure of gate?.failures || []) {
     if (failure.code === 'required_host_missing') {
       for (const host of failure.hosts || []) {
+        if (host === 'primary_filing') {
+          repairs.push({
+            question: `Find and read a primary filing for: ${query}`,
+            priority: 'critical',
+            requiredSourceTypes: ['primary_filing'],
+            reason: 'required_host_missing',
+          });
+          continue;
+        }
         repairs.push({
           question: `Find and read a primary disclosure on ${host} for: ${query}`,
           priority: 'critical',
@@ -183,8 +203,15 @@ export function repairGapsFromGate(gate, { query, existingGaps = [] } = {}) {
 
 export function describeUnresolvedGaps(gaps = []) {
   return (gaps || [])
-    .filter((gap) => !GAP_CLOSED_STATUSES.has(gap.status) || gap.status === 'body_read' && (gap.requiredHosts || []).length)
+    .filter((gap) => !GAP_CLOSED_STATUSES.has(gap.status) || (
+      gap.status === 'body_read'
+      && ((gap.requiredHosts || []).length || (gap.requiredSourceTypes || []).includes('primary_filing'))
+    ))
     .filter((gap) => ['open', 'searched', 'missing', 'blocked', 'body_read'].includes(gap.status) && (
-      gap.priority === 'critical' || gap.status === 'blocked' || gap.status === 'missing' || (gap.requiredHosts || []).length
+      gap.priority === 'critical'
+      || gap.status === 'blocked'
+      || gap.status === 'missing'
+      || (gap.requiredHosts || []).length
+      || (gap.requiredSourceTypes || []).includes('primary_filing')
     ));
 }

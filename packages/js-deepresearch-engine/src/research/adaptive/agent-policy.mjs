@@ -1,5 +1,6 @@
 import { hostnameOf } from './research-state.mjs';
 import { isOrthogonalGap } from './exploratory-sufficiency.mjs';
+import { nextUnusedSiteQueries, shortSearchTerms } from './source-policy.mjs';
 
 const ACTION_SCHEMA = '{"action":"search|read|reflect|draft|finalize","reasonCode":"short_code","gapId":"gap-1","query":"...","queries":["..."],"sourceIds":["..."],"gapQuestion":"..."}';
 
@@ -39,10 +40,12 @@ export async function decideAdaptiveAction({ llm, state, signal }) {
       'Use reflect only when you have a genuinely new orthogonal gap that is not a paraphrase of an existing gap.',
       'Use draft for a candidate answer that will be checked; failed drafts become repair gaps.',
       'Use finalize only when readiness.pass is true and you are not below the token floor.',
+      'If budget.belowMin is false but readiness.pass is false, do not finalize. Keep searching or reading unread primary sources.',
       'Never repeat or closely paraphrase a query listed in searchedQueries.',
       'A search action may include up to 3 distinct queries in "queries"; make them complementary, not paraphrases.',
       'A read action should include 2-4 sourceIds when several promising unread candidates exist.',
       belowMin ? 'You are still below the token floor. Do not finalize. Explore another unread source or uncovered subject.' : '',
+      !belowMin && !gatePass ? 'The token floor is already met but readiness.pass is false. Do not finalize. Target unread primary filings with short site: queries.' : '',
       gatePass ? 'The deterministic readiness gate currently passes.' : 'The deterministic readiness gate currently fails; keep searching or reading.',
       'Budget fields: usedLlmTokens, minLlmTokens, remainingVsMin, remainingVsHardCap, and actionCostEstimates.',
       `Return JSON only: ${ACTION_SCHEMA}`,
@@ -105,10 +108,35 @@ export function pickUnreadCandidates(state, count = 2, gapId = null) {
   return picks;
 }
 
+export function belowHardCapFrom(state, options = {}) {
+  if (options.belowHardCap !== undefined) return Boolean(options.belowHardCap);
+  if (state?.budgetView?.hardCapReached) return false;
+  const remaining = state?.budgetView?.remainingVsHardCap;
+  if (remaining == null) return true;
+  return remaining > 0;
+}
+
+export function buildAngleChangeSearch(state, { reasonCode = 'fallback_angle_change' } = {}) {
+  const focus = (typeof state.focusGap === 'function' ? state.focusGap() : null) || state.gaps?.[0];
+  const searched = typeof state.searchedQueries === 'function' ? state.searchedQueries() : [];
+  const siteQueries = nextUnusedSiteQueries(focus, state.query, searched, { limit: 3 });
+  const short = shortSearchTerms(state.query || focus?.question || '');
+  const step = Number(state.step) || 0;
+  const query = siteQueries[0] || `${short} primary source ${step + 1}`.trim();
+  return {
+    action: 'search',
+    query,
+    queries: siteQueries.length ? siteQueries : undefined,
+    gapId: focus?.id || 'gap-1',
+    reasonCode,
+  };
+}
+
 export function fallbackAdaptiveAction(state, options = {}) {
   const readiness = options.readiness || state.readiness;
   const sufficiency = options.sufficiency || state.sufficiency;
   const belowMin = Boolean(options.belowMin);
+  const belowHardCap = belowHardCapFrom(state, options);
   const gatePass = readiness ? Boolean(readiness.pass) : Boolean(sufficiency?.sufficient);
   if (gatePass && !belowMin) {
     return { action: 'answer', reasonCode: 'fallback_evidence_sufficient' };
@@ -131,27 +159,21 @@ export function fallbackAdaptiveAction(state, options = {}) {
     !state.gapCovered(gap.id) && !state.searchedQueries().includes(gap.question)
   ));
   if (uncovered && state.lastAction !== 'search') {
-    const siteQueries = (gap) => (gap.requiredHosts || []).map((host) => `site:${host} ${gap.question}`);
+    const siteQueries = nextUnusedSiteQueries(uncovered, state.query, state.searchedQueries(), { limit: 3 });
     return {
       action: 'search',
-      query: uncovered.question,
-      queries: siteQueries(uncovered),
+      query: siteQueries[0] || shortSearchTerms(uncovered.question || state.query),
+      queries: siteQueries.length ? siteQueries : undefined,
       gapId: uncovered.id,
       reasonCode: belowMin ? 'fallback_explore_below_min' : 'fallback_search_open_gap',
     };
   }
-  if (belowMin) {
-    return {
-      action: 'search',
-      query: `${state.query} additional primary sources`,
-      gapId: uncovered?.id || 'gap-1',
-      reasonCode: 'fallback_explore_below_min',
-    };
+  if (!gatePass && !belowHardCap) {
+    return { action: 'answer', reasonCode: 'budget_exhausted' };
   }
-  if (!gatePass && (state.readiness || (state.profile?.requiredHosts || []).length)) {
-    return { action: 'answer', reasonCode: 'fallback_source_blocked' };
-  }
-  return { action: 'answer', reasonCode: 'fallback_evidence_available' };
+  return buildAngleChangeSearch(state, {
+    reasonCode: belowMin ? 'fallback_explore_below_min' : 'fallback_angle_change',
+  });
 }
 
 export function canReflectNewGap(state, gapQuestion) {

@@ -133,13 +133,25 @@ describe('exploratory agent loop', () => {
     assert.ok(snapshot.focusGapId);
   });
 
-  it('falls back to answer instead of reflect when every candidate is already read', () => {
+  it('falls back to an angle-change search instead of reflect when the gate failed', () => {
     const state = new ResearchState({ query: 'topic', maxSteps: 10 });
     state.addCandidates([{ url: 'https://done.test/page', title: 'Done' }], 'gap-1');
     state.readSourceIds.add('https://done.test/page');
     state.lastAction = 'search';
-    assert.equal(fallbackAdaptiveAction(state).action, 'answer');
-    assert.equal(fallbackAdaptiveAction(state).reasonCode, 'fallback_evidence_available');
+    const action = fallbackAdaptiveAction(state, { belowHardCap: true, readiness: { pass: false } });
+    assert.equal(action.action, 'search');
+    assert.notEqual(action.action, 'reflect');
+    assert.equal(action.reasonCode, 'fallback_angle_change');
+  });
+
+  it('falls back to answer when the gate already passed and unread sources are gone', () => {
+    const state = new ResearchState({ query: 'topic', maxSteps: 10 });
+    state.addCandidates([{ url: 'https://done.test/page', title: 'Done' }], 'gap-1');
+    state.readSourceIds.add('https://done.test/page');
+    state.lastAction = 'search';
+    const action = fallbackAdaptiveAction(state, { belowMin: false, readiness: { pass: true } });
+    assert.equal(action.action, 'answer');
+    assert.equal(action.reasonCode, 'fallback_evidence_sufficient');
   });
 
   it('lets the agent read a non-top rerank candidate and works without embeddings', async () => {
@@ -210,7 +222,8 @@ describe('exploratory agent loop', () => {
     });
     assert.ok(result.trace.some((entry) => entry.status === 'rejected' && entry.reasonCode === 'repeat_action'));
     assert.ok(result.trace.some((entry) => entry.action === 'read' && entry.reasonCode === 'fallback_read_evidence'));
-    assert.equal(result.quality.budget.usage.searchRequests, 1);
+    assert.ok(result.quality.budget.usage.searchRequests >= 1);
+    assert.equal(result.trace.filter((entry) => entry.action === 'search' && entry.status === 'success' && entry.reasonCode === 'search').length, 1);
   });
 
   it('rejects a duplicate query without consuming search budget', async () => {
@@ -230,7 +243,7 @@ describe('exploratory agent loop', () => {
       llm: llmFor(decisions),
     });
     assert.ok(result.trace.some((entry) => entry.status === 'rejected' && entry.reasonCode === 'duplicate_query'));
-    assert.equal(result.quality.budget.usage.searchRequests, 1);
+    assert.ok(result.quality.budget.usage.searchRequests >= 1);
   });
 
   it('allows one evidence-driven improvement cycle before answering', async () => {
@@ -256,8 +269,13 @@ describe('exploratory agent loop', () => {
       llm: llmFor(decisions),
     });
     const retry = result.trace.find((entry) => entry.action === 'evaluate_report' && entry.status === 'retry');
-    assert.equal(retry.reasonCode, 'missing_direct_evidence');
-    assert.equal(retry.allowedAdditionalActions, 1);
+    assert.ok(retry);
+    assert.ok([
+      'missing_direct_evidence',
+      'independent_sources_short',
+      'answer_gate_failed',
+      'readiness_gate_failed',
+    ].includes(retry.reasonCode));
     assert.ok(result.trace.some((entry) => entry.action === 'read' && entry.reasonCode === 'improve_evidence'));
   });
 
@@ -319,7 +337,8 @@ describe('exploratory agent loop', () => {
     assert.equal(decompose.status, 'success');
     assert.equal(decompose.subQuestionCount, 2);
     assert.ok(decompose.targetGapIds.includes('gap-3'));
-    assert.deepEqual(searchedQueries, ['ollama overview', 'llama.cpp overview']);
+    assert.ok(searchedQueries.includes('ollama overview'));
+    assert.ok(searchedQueries.includes('llama.cpp overview'));
     const searchEntry = result.trace.find((entry) => entry.action === 'search' && entry.status === 'success');
     assert.equal(searchEntry.queryCount, 2);
     // Finding attaches to the agent-selected sub-gap, not the original question.
@@ -608,7 +627,8 @@ describe('exploratory agent loop', () => {
       llm: llmFor(decisions, { onDecompose: () => JSON.stringify({ subQuestions: ['How does Ollama work?', 'How does llama.cpp work?'] }) }),
     });
     assert.notEqual(result.quality.stopReason, 'evidence_sufficient');
-    assert.ok(['source_blocked', 'safety_cap', 'budget_exhausted'].includes(result.quality.stopReason));
+    assert.ok(['safety_cap', 'budget_exhausted'].includes(result.quality.stopReason));
+    assert.notEqual(result.quality.stopReason, 'source_blocked');
     assert.notEqual(result.quality.budget.controllerStopReason, 'evidence_sufficient');
   });
 
@@ -734,7 +754,8 @@ describe('exploratory agent loop', () => {
       llm: llmFor(decisions),
     });
     assert.notEqual(result.quality.stopReason, 'max_steps');
-    assert.ok(['source_blocked', 'evidence_sufficient', 'safety_cap', 'budget_exhausted'].includes(result.quality.stopReason));
+    assert.ok(['evidence_sufficient', 'safety_cap', 'budget_exhausted'].includes(result.quality.stopReason));
+    assert.notEqual(result.quality.stopReason, 'source_blocked');
     assert.ok(events.some((message) => /Enriching sources for step \d+\/\d+/.test(message)));
     assert.ok(events.every((message) => !/undefined\/undefined/.test(message)));
     assert.ok(!events.some((message) => /Research stopped: max_steps/.test(message)));

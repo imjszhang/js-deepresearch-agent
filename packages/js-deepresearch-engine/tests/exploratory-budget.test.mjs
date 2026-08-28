@@ -107,9 +107,9 @@ describe('exploratory budget snapshot and sufficiency', () => {
     assert.equal(state.validate({ action: 'reflect', gapQuestion: 'What is an open topic space?' }), 'repeat_gap');
     assert.equal(state.validate({ action: 'reflect', gapQuestion: 'What deployment constraint is orthogonal?' }), null);
     assert.ok(similarQuestions('open topic space', 'What is an open topic space?'));
-    const fallback = fallbackAdaptiveAction(state);
+    const fallback = fallbackAdaptiveAction(state, { belowHardCap: true, readiness: { pass: false } });
     assert.notEqual(fallback.action, 'reflect');
-    assert.equal(fallback.action, 'answer');
+    assert.equal(fallback.action, 'search');
   });
 
   it('defaults exploratory count caps to unlimited and does not inherit global budget counts', () => {
@@ -119,8 +119,8 @@ describe('exploratory budget snapshot and sufficiency', () => {
     assert.equal(resolved.maxSearchRequests, 0);
     assert.equal(resolved.maxSourceReads, 0);
     assert.equal(resolved.maxSteps, 0);
-    assert.equal(resolved.minLlmTokens, 60000);
-    assert.equal(resolved.maxLlmTokens, 200000);
+    assert.equal(resolved.minLlmTokens, 600000);
+    assert.equal(resolved.maxLlmTokens, 1000000);
   });
 
   it('keeps maxSteps unlimited when a token ceiling is set and uses a safety valve only when both are off', () => {

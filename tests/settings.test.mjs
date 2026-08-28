@@ -29,11 +29,11 @@ describe('settings defaults', () => {
     assert.equal(defaultSettings.research.focused.queryMemory.enabled, true);
     assert.equal(settings.research.sourceBased, undefined);
     assert.equal(settings.research.adaptive, undefined);
-    assert.equal(settings.research.exploratory.minLlmTokens, 60000);
-    assert.equal(settings.research.exploratory.maxLlmTokens, 200000);
-    assert.equal(settings.research.exploratory.minLlmTokens, 60000);
-    assert.equal(settings.research.exploratory.maxLlmTokens, 200000);
-    assert.equal(settings.research.exploratory.targetLlmTokens, 60000);
+    assert.equal(settings.research.exploratory.minLlmTokens, 600000);
+    assert.equal(settings.research.exploratory.maxLlmTokens, 1000000);
+    assert.equal(settings.research.exploratory.minLlmTokens, 600000);
+    assert.equal(settings.research.exploratory.maxLlmTokens, 1000000);
+    assert.equal(settings.research.exploratory.targetLlmTokens, 600000);
     assert.equal(settings.research.exploratory.maxSteps, 0);
     assert.equal(settings.research.exploratory.maxSearchRequests, 0);
     assert.equal(settings.research.exploratory.maxSourceReads, 0);

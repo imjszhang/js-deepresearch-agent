@@ -163,9 +163,96 @@ export function mediaCannotVerifyRequiredPrimary(source, gap = {}) {
   return ['mainstream', 'reprint', 'ugc', 'unknown'].includes(tier);
 }
 
-export function buildSiteHostQueries(gap, extraTerms = '') {
-  const hosts = [...new Set([...(gap?.requiredHosts || []), ...(gap?.preferredHosts || [])].filter(Boolean))];
-  const terms = String(extraTerms || gap?.question || '').trim();
+const SUBJECT_STOPS = new Set([
+  '截至', '股权', '结构', '核心', '模型', '收入', '竞争', '格局', '监管', '披露',
+  '优先', '官网', '原文', '投资', '尽调', '目前', '当前', '最新', '全面', '完整',
+  '清单', '官方', '一手', '年报', '招股', '半年报', '对比', '比较', '各方',
+  '港交所', '上交所', '深交所', '招股书', '营收', '控股', '股东', '时效',
+  '最近', '公司', '集团', '股份', '有限', '科技',
+]);
+
+const FILING_LIKE = /年报|半年报|招股|prospectus|10-k|10-q|年度报告|招股说明书|filing|公告/i;
+const SITE_ANGLE_EXTRAS = ['年报', '招股', '披露', 'prospectus', 'filing', '公告', '半年报', '招股说明书'];
+
+function uniqueTerms(values = []) {
+  return [...new Set((values || []).map((value) => String(value || '').trim()).filter(Boolean))];
+}
+
+function isSubjectStop(token) {
+  if (SUBJECT_STOPS.has(token)) return true;
+  for (const stop of SUBJECT_STOPS) {
+    if (stop.length >= 2 && token.includes(stop)) return true;
+  }
+  return false;
+}
+
+export function extractQuerySubjects(query = '') {
+  const text = String(query || '');
+  const subjects = [];
+  for (const token of text.match(/[\u4e00-\u9fff]{2,6}/g) || []) {
+    const trimmed = token.replace(/(公司|集团|科技|股份|有限)$/u, '');
+    if (trimmed.length >= 2 && !isSubjectStop(trimmed)) subjects.push(trimmed);
+  }
+  subjects.push(...(text.match(/\b[A-Z][A-Za-z0-9.+-]{1,}\b/g) || []));
+  subjects.push(...(text.match(/\b\d{4,6}\b/g) || []));
+  return uniqueTerms(subjects).slice(0, 8);
+}
+
+export function documentMatchesQuerySubject(source = {}, query = '') {
+  const subjects = extractQuerySubjects(query);
+  if (!subjects.length) return true;
+  const title = String(source.title || '');
+  const body = String(source.content || source.summary || source.snippet || '').slice(0, 500);
+  const hay = `${title}\n${body}`.toLowerCase();
+  if (subjects.some((subject) => hay.includes(String(subject).toLowerCase()))) return true;
+  if (!FILING_LIKE.test(`${title} ${body}`)) return true;
+  return false;
+}
+
+export function gapHasPolicyHosts(gap = {}) {
+  return Boolean((gap?.requiredHosts || []).length || (gap?.preferredHosts || []).length);
+}
+
+export function siteQueryTermVariants(query = '') {
+  const text = String(query || '').trim();
+  const subjects = extractQuerySubjects(text);
+  const cjk = subjects.filter((item) => /[\u4e00-\u9fff]/.test(item));
+  const latin = subjects.filter((item) => /[A-Za-z]/.test(item));
+  const tickers = subjects.filter((item) => /^\d{4,6}$/.test(item));
+  const compact = [cjk[0], tickers[0], latin[0]].filter(Boolean).join(' ');
+  const cjkTicker = [cjk[0], tickers[0]].filter(Boolean).join(' ');
+  const slice8 = text.replace(/\s+/g, ' ').slice(0, 8);
+  const slice12 = text.replace(/\s+/g, ' ').slice(0, 12);
+  const extras = SITE_ANGLE_EXTRAS.map((angle) => [cjk[0] || latin[0] || slice8, angle].filter(Boolean).join(' '));
+  return uniqueTerms([compact, cjkTicker, cjk[0], latin[0], tickers[0], slice8, slice12, ...extras]);
+}
+
+export function shortSearchTerms(query = '', { maxChars = 12 } = {}) {
+  const variants = siteQueryTermVariants(query);
+  if (variants[0]) return variants[0];
+  return String(query || '').replace(/\s+/g, ' ').trim().slice(0, maxChars);
+}
+
+export function nextUnusedSiteQueries(gap, query, searchedQueries = [], { limit = 2 } = {}) {
+  const hosts = uniqueTerms([...(gap?.requiredHosts || []), ...(gap?.preferredHosts || [])]);
+  if (!hosts.length) return [];
+  const searched = new Set((searchedQueries || []).map(String));
+  const variants = siteQueryTermVariants(query || gap?.question);
+  const out = [];
+  for (const terms of variants) {
+    for (const host of hosts) {
+      const next = `site:${host} ${terms}`.trim();
+      if (searched.has(next)) continue;
+      out.push(next);
+      if (out.length >= limit) return out;
+    }
+  }
+  return out;
+}
+
+export function buildSiteHostQueries(gap, extraTerms = '', options = {}) {
+  const hosts = uniqueTerms([...(gap?.requiredHosts || []), ...(gap?.preferredHosts || [])]);
+  const terms = String(extraTerms || '').trim() || shortSearchTerms(options.query || gap?.question || '');
   return hosts.map((host) => `site:${host} ${terms}`.trim());
 }
 

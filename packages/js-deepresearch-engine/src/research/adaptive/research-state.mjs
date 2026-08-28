@@ -8,6 +8,7 @@ import { createGapRecord, createRootGap, inferResearchProfile } from './research
 import { evaluateReadinessGate } from './readiness-gate.mjs';
 import {
   classifySourceTier,
+  documentMatchesQuerySubject,
   hostnameOf as policyHostnameOf,
   hostnamesMatch,
   registrableDomainFromUrl,
@@ -91,6 +92,7 @@ export class ResearchState {
     this.observations = [];
     this.diary = [];
     this.evaluationRetries = 0;
+    this.forbidFinalizeUntilExplore = false;
     this.embeddingTraces = [];
     this.cycle = {
       afterSearch: false,
@@ -131,23 +133,39 @@ export class ResearchState {
     return this.gaps.find((gap) => gap.id === gapId) || this.gaps[0];
   }
 
+  gapNeedsPrimaryEvidence(gap = this.gaps[0]) {
+    return Boolean(
+      gap?.requiredHosts?.length
+      || (gap?.requiredSourceTypes || []).includes('primary_filing'),
+    );
+  }
+
+  sourceSatisfiesPrimary(source, gap) {
+    if (!sourceHasBody(source)) return false;
+    const needsFiling = (gap?.requiredSourceTypes || []).includes('primary_filing');
+    const tier = source.tier || classifySourceTier(source, gap);
+    if (needsFiling && !['required_primary', 'other_primary'].includes(tier)) return false;
+    if (needsFiling && !documentMatchesQuerySubject(source, this.query)) return false;
+    if (gap?.requiredHosts?.length) {
+      return gap.requiredHosts.some((host) => hostnamesMatch(policyHostnameOf(source.url || source.id), host));
+    }
+    return !needsFiling || ['required_primary', 'other_primary'].includes(tier);
+  }
+
   gapCovered(gapId) {
     const gap = this.getGap(gapId);
     if (gap && ['verified', 'resolved'].includes(gap.status)) return true;
-    if (gap?.requiredHosts?.length && !this.gapHasRequiredHostBody(gapId)) return false;
+    if (this.gapNeedsPrimaryEvidence(gap) && !this.gapHasRequiredHostBody(gapId)) return false;
     return this.findings.some((finding) => finding.gapId === gapId
       && (finding.sources || []).some(sourceHasBody));
   }
 
   gapHasRequiredHostBody(gapId) {
     const gap = this.getGap(gapId);
-    if (!gap?.requiredHosts?.length) return true;
+    if (!this.gapNeedsPrimaryEvidence(gap)) return true;
     return this.findings.some((finding) => (
       finding.gapId === gapId
-      && (finding.sources || []).some((source) => (
-        sourceHasBody(source)
-        && gap.requiredHosts.some((host) => hostnamesMatch(policyHostnameOf(source.url || source.id), host))
-      ))
+      && (finding.sources || []).some((source) => this.sourceSatisfiesPrimary(source, gap))
     ));
   }
 
@@ -252,7 +270,8 @@ export class ResearchState {
 
   focusGap() {
     const actionable = this.gaps.filter((gap) => (
-      ['open', 'searched', 'missing'].includes(gap.status) || (gap.status === 'body_read' && gap.requiredHosts?.length)
+      ['open', 'searched', 'missing'].includes(gap.status)
+      || (gap.status === 'body_read' && this.gapNeedsPrimaryEvidence(gap))
     ));
     const pool = actionable.length ? actionable : this.gaps;
     if (!pool.length) return this.gaps[0];
@@ -449,14 +468,18 @@ export class ResearchState {
       const question = String(action.gapQuestion || '').trim();
       if (question && this.gaps.some((gap) => similarQuestions(gap.question, question))) return 'repeat_gap';
     }
+    if (FINALIZE_ACTIONS.has(action.action) && this.forbidFinalizeUntilExplore) return 'finalize_not_allowed';
     if (normalized === 'finalize' && this.findings.length === 0 && this.candidates.size === 0) return 'no_evidence';
     return null;
   }
 
   unresolvedReportNotes() {
     const unresolved = this.gaps.filter((gap) => ['open', 'searched', 'missing', 'blocked'].includes(gap.status)
-      || (gap.status === 'body_read' && gap.requiredHosts?.length && !this.gapHasRequiredHostBody(gap.id)));
-    const blockedHosts = [...new Set(unresolved.flatMap((gap) => gap.requiredHosts || []))];
+      || (gap.status === 'body_read' && this.gapNeedsPrimaryEvidence(gap) && !this.gapHasRequiredHostBody(gap.id)));
+    const blockedHosts = [...new Set(unresolved.flatMap((gap) => [
+      ...(gap.requiredHosts || []),
+      ...((gap.requiredSourceTypes || []).includes('primary_filing') ? (gap.preferredHosts || []) : []),
+    ]))];
     const secondaryOnly = this.findings.flatMap((finding) => (finding.sources || [])
       .filter(sourceHasBody)
       .filter((source) => ['mainstream', 'reprint', 'ugc', 'unknown'].includes(source.tier || classifySourceTier(source, this.getGap(finding.gapId))))

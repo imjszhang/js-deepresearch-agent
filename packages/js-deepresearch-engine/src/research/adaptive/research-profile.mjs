@@ -50,7 +50,7 @@ export function inferRequiredHosts(query = '') {
 export function inferPreferredHosts(query = '', requiredHosts = []) {
   const text = String(query || '');
   const preferred = [...requiredHosts];
-  if (FILING.test(text) && !requiredHosts.length) {
+  if (FILING.test(text) || DECISION.test(text) || PRIMARY_SOURCE.test(text)) {
     preferred.push('hkexnews.hk', 'sec.gov', 'sse.com.cn', 'szse.cn');
   }
   return unique(preferred);
