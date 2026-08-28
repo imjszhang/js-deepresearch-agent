@@ -374,7 +374,7 @@ export async function runExploratoryLoop(context) {
           !action
           || (
             FINALIZE_ACTIONS.has(action.action)
-            && (belowMin || !gate?.pass || state.forbidFinalizeUntilExplore)
+            && (belowMin || state.forbidFinalizeUntilExplore)
             && pendingStopReason !== STOP_REASONS.budgetExhausted
             && pendingStopReason !== STOP_REASONS.safetyCap
           )

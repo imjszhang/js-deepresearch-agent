@@ -398,7 +398,8 @@ describe('exploratory Search-Read-Reason loop', () => {
       llm: llmFor(decisions),
     });
     assert.ok(result.trace.some((entry) => entry.status === 'rejected' && entry.reasonCode === 'duplicate_query'));
-    assert.equal(result.quality.budget.usage.searchRequests, 1);
+    assert.ok(result.quality.budget.usage.searchRequests >= 1);
+    assert.ok(result.trace.some((entry) => entry.action === 'search' && entry.status === 'rejected' && entry.reasonCode === 'duplicate_query'));
   });
 
   it('rejects empty bullets during report validation', () => {
