@@ -41,7 +41,9 @@ function resolveLegacyLoopVersion(context = {}) {
 }
 
 function traceLooksLikeAdaptiveV2(trace) {
-  return Array.isArray(trace) && trace.some((entry) => entry?.reasonCode === 'agent_loop_v2');
+  return Array.isArray(trace) && trace.some((entry) => (
+    entry?.reasonCode === 'agent_loop_v2' || entry?.reasonCode === 'exploratory_loop'
+  ));
 }
 
 /**

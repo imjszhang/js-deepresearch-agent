@@ -107,9 +107,9 @@ describe('exploratory budget snapshot and sufficiency', () => {
     assert.equal(state.validate({ action: 'reflect', gapQuestion: 'What is an open topic space?' }), 'repeat_gap');
     assert.equal(state.validate({ action: 'reflect', gapQuestion: 'What deployment constraint is orthogonal?' }), null);
     assert.ok(similarQuestions('open topic space', 'What is an open topic space?'));
-    const fallback = fallbackAdaptiveAction(state);
+    const fallback = fallbackAdaptiveAction(state, { belowHardCap: true, readiness: { pass: false } });
     assert.notEqual(fallback.action, 'reflect');
-    assert.equal(fallback.action, 'answer');
+    assert.equal(fallback.action, 'search');
   });
 
   it('defaults exploratory count caps to unlimited and does not inherit global budget counts', () => {

@@ -50,6 +50,42 @@ export function isSuccessfulBody(source = {}) {
   return source.fetchStatus !== 'failed';
 }
 
+const DATE_PATTERNS = [
+  /\b(20\d{2}|19\d{2})[-/.](\d{1,2})[-/.](\d{1,2})\b/,
+  /(20\d{2}|19\d{2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日?/,
+];
+
+const MONTH_NAME_DATE = /\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+(\d{1,2}),?\s+(20\d{2}|19\d{2})\b/i;
+const MONTH_INDEX = {
+  jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
+  jul: '07', aug: '08', sep: '09', sept: '09', oct: '10', nov: '11', dec: '12',
+};
+
+function padDatePart(value) {
+  return String(value || '').padStart(2, '0');
+}
+
+export function extractPublishedDate(...parts) {
+  const text = parts.filter((part) => part != null && String(part).trim()).join(' ');
+  if (!text) return null;
+  for (const pattern of DATE_PATTERNS) {
+    const match = text.match(pattern);
+    if (!match) continue;
+    return `${match[1]}-${padDatePart(match[2])}-${padDatePart(match[3])}`;
+  }
+  const named = text.match(MONTH_NAME_DATE);
+  if (named) {
+    const month = MONTH_INDEX[named[1].slice(0, 4).toLowerCase()] || MONTH_INDEX[named[1].slice(0, 3).toLowerCase()];
+    if (month) return `${named[3]}-${month}-${padDatePart(named[2])}`;
+  }
+  return null;
+}
+
+export function sourceHasObservableDate(source = {}) {
+  if (source?.publishedAt || source?.date || source?.updatedAt || source?.published) return true;
+  return Boolean(extractPublishedDate(source?.title, source?.summary, source?.content, source?.snippet));
+}
+
 export function classifyFetchedBody(source = {}) {
   const text = sourceBodyText(source);
   if (source.fetchStatus === 'failed') {

@@ -39,17 +39,41 @@ export function isEvidenceSufficientReasonCode(reason) {
 
 export function mapFinalizeStopReason(action, pendingStopReason, gatePassed = false) {
   const pending = normalizeExploratoryStopReason(pendingStopReason);
-  if (pending && pending !== EXPLORATORY_STOP_REASONS.evidenceSufficient) return pending;
+  if (pending === EXPLORATORY_STOP_REASONS.userCancelled) return pending;
+  if (pending === EXPLORATORY_STOP_REASONS.safetyCap || pending === EXPLORATORY_STOP_REASONS.budgetExhausted) {
+    return pending;
+  }
+  if (pending && pending !== EXPLORATORY_STOP_REASONS.evidenceSufficient && pending !== EXPLORATORY_STOP_REASONS.sourceBlocked) {
+    return pending;
+  }
   if (gatePassed && (pending === EXPLORATORY_STOP_REASONS.evidenceSufficient || isEvidenceSufficientReasonCode(action?.reasonCode))) {
     return EXPLORATORY_STOP_REASONS.evidenceSufficient;
   }
   if (gatePassed && ['finalize', 'answer', 'stop'].includes(action?.action)) {
     return EXPLORATORY_STOP_REASONS.evidenceSufficient;
   }
-  if (pending) return pending;
+  if (pending === EXPLORATORY_STOP_REASONS.evidenceSufficient) return pending;
   const mapped = normalizeExploratoryStopReason(action?.reasonCode);
   if (mapped === EXPLORATORY_STOP_REASONS.evidenceSufficient && !gatePassed) {
     return null;
   }
-  return mapped;
+  if (mapped === EXPLORATORY_STOP_REASONS.sourceBlocked) return null;
+  return mapped && mapped !== EXPLORATORY_STOP_REASONS.sourceBlocked ? mapped : null;
+}
+
+export function resolveNewRunStopReason(reason, { step = 0, maxSteps = 0, budget = null } = {}) {
+  const normalized = normalizeExploratoryStopReason(reason);
+  if (
+    normalized === EXPLORATORY_STOP_REASONS.evidenceSufficient
+    || normalized === EXPLORATORY_STOP_REASONS.userCancelled
+    || normalized === EXPLORATORY_STOP_REASONS.safetyCap
+    || normalized === EXPLORATORY_STOP_REASONS.budgetExhausted
+  ) {
+    return normalized;
+  }
+  if (budget?.limits?.llmTokens && !budget.canClaim?.('llmTokens', 1)) {
+    return EXPLORATORY_STOP_REASONS.budgetExhausted;
+  }
+  if (Number(maxSteps) > 0 && step >= maxSteps) return EXPLORATORY_STOP_REASONS.safetyCap;
+  return EXPLORATORY_STOP_REASONS.budgetExhausted;
 }

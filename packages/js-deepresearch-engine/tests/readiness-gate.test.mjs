@@ -36,6 +36,38 @@ describe('deterministic readiness gate', () => {
     assert.ok(gate.failures.some((failure) => failure.code === 'required_host_missing' || failure.code === 'critical_gap_open'));
   });
 
+  it('fails when primary_filing is required but only reprints were read', () => {
+    const query = '某公司投资尽调 监管披露 年报';
+    const profile = inferResearchProfile(query);
+    assert.equal((profile.requiredHosts || []).length, 0);
+    assert.ok(profile.preferredHosts.includes('hkexnews.hk'));
+    assert.ok(profile.preferredHosts.includes('sse.com.cn'));
+    assert.ok(profile.requiredSourceTypes.includes('primary_filing'));
+    const gate = evaluateReadinessGate({
+      query,
+      profile,
+      gaps: [{
+        id: 'gap-1',
+        question: query,
+        status: 'body_read',
+        priority: 'critical',
+        requiredHosts: [],
+        requiredSourceTypes: ['primary_filing'],
+      }],
+      findings: [{
+        gapId: 'gap-1',
+        sources: [{
+          title: 'Media reprint',
+          url: 'https://finance.sina.com.cn/company',
+          content: 'A media reprint of filing rumors with enough body text.',
+          fetchStatus: 'ok',
+        }],
+      }],
+    });
+    assert.equal(gate.pass, false);
+    assert.ok(gate.failures.some((failure) => failure.code === 'required_host_missing'));
+  });
+
   it('does not treat same-domain reprints as two independent sources', () => {
     const query = 'Compare two local LLM tools for deployment';
     const gate = evaluateReadinessGate({

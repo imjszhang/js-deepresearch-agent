@@ -123,7 +123,7 @@ export function evaluateExploratorySufficiency({
   }
 
   const requiredHostMissing = resolvedGaps.some((gap) => (
-    (gap.requiredHosts || []).length > 0
+    ((gap.requiredHosts || []).length > 0 || (gap.requiredSourceTypes || []).includes('primary_filing'))
     && gap.priority === 'critical'
     && !['verified'].includes(gap.status)
     && !(state?.gapHasRequiredHostBody?.(gap.id))
