@@ -7,6 +7,7 @@ import {
   nextUnusedSiteQueries,
   registrableDomainFromUrl,
   shortSearchTerms,
+  siteQueryTermVariants,
 } from '../src/research/adaptive/source-policy.mjs';
 
 describe('source policy before rerank', () => {
@@ -44,5 +45,14 @@ describe('source policy before rerank', () => {
     const retry = nextUnusedSiteQueries(gap, '智谱 02513', first, { limit: 1 });
     assert.equal(retry.length, 1);
     assert.notEqual(retry[0], first[0]);
+    assert.ok(!retry[0].includes('sse.com.cn'));
+  });
+
+  it('does not inject filing angles into official-docs queries', () => {
+    const variants = siteQueryTermVariants('Compare official docs of llama.cpp and Ollama');
+    assert.ok(!variants.some((item) => /年报|招股|prospectus|filing|公告/i.test(item)));
+    const gap = { question: 'official docs', preferredHosts: ['hkexnews.hk', 'sec.gov'] };
+    assert.deepEqual(nextUnusedSiteQueries(gap, 'official docs', []), []);
+    assert.deepEqual(buildSiteHostQueries(gap), []);
   });
 });

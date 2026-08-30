@@ -8,15 +8,24 @@ function report() {
   return '# Research Report\n\n## Summary\n\nThe selected source provides enough evidence to answer the requested topic while keeping the agent source choice visible. [1.1]\n\n## Key Findings\n\nThe selected source provides evidence for the requested topic and preserves agent source choice. [1.1]';
 }
 
-function llmFor(decisions, { onEvaluation = () => report(), onDecompose = () => 'no json here' } = {}) {
+function llmFor(decisions, {
+  onEvaluation = () => report(),
+  onDecompose = () => 'no json here',
+  onProfile = () => '{}',
+} = {}) {
   return {
     async complete({ purpose }) {
       if (purpose === 'agent_decision') return JSON.stringify(decisions.shift());
       if (purpose === 'answer_evaluation') return onEvaluation();
       if (purpose === 'gap_decomposition') return onDecompose();
+      if (purpose === 'research_profile') return onProfile();
       return report();
     },
   };
+}
+
+function keepExploringProfile() {
+  return JSON.stringify({ minIndependentSources: 2 });
 }
 
 describe('exploratory agent loop', () => {
@@ -240,7 +249,7 @@ describe('exploratory agent loop', () => {
         focused: { fetchMode: 'disabled' },
       } },
       search: { async search() { return [{ title: 'D', url: 'https://dupquery.test', content: 'Duplicate query topic evidence from a selected source.', fetchStatus: 'ok' }]; } },
-      llm: llmFor(decisions),
+      llm: llmFor(decisions, { onProfile: keepExploringProfile }),
     });
     assert.ok(result.trace.some((entry) => entry.status === 'rejected' && entry.reasonCode === 'duplicate_query'));
     assert.ok(result.quality.budget.usage.searchRequests >= 1);
@@ -266,7 +275,7 @@ describe('exploratory agent loop', () => {
         focused: { fetchMode: 'disabled' },
       } },
       search: { async search() { return searches.shift() || []; } },
-      llm: llmFor(decisions),
+      llm: llmFor(decisions, { onProfile: keepExploringProfile }),
     });
     const retry = result.trace.find((entry) => entry.action === 'evaluate_report' && entry.status === 'retry');
     assert.ok(retry);
@@ -303,7 +312,10 @@ describe('exploratory agent loop', () => {
         focused: { fetchMode: 'disabled' },
       } },
       search: { async search() { return searches.shift() || []; } },
-      llm: llmFor(decisions, { onEvaluation: () => evaluations.shift() || JSON.stringify({ pass: true, missingAspect: '' }) }),
+      llm: llmFor(decisions, {
+        onEvaluation: () => evaluations.shift() || JSON.stringify({ pass: true, missingAspect: '' }),
+        onProfile: keepExploringProfile,
+      }),
     });
     const gateEntry = result.trace.find((entry) => entry.action === 'evaluate_report' && entry.reasonCode === 'answer_gate_failed');
     assert.equal(gateEntry.missingAspect, 'What are the deployment costs?');
@@ -383,7 +395,7 @@ describe('exploratory agent loop', () => {
     const result = await new ResearchRunner().run({
       query: 'auto topic',
       settings: { llm: {}, search: {}, research: {
-        strategy: 'exploratory', exploratory: { minLlmTokens: 0, maxLlmTokens: 0, maxSteps: 6, maxEvaluationRetries: 0 },
+        strategy: 'exploratory',         exploratory: { minLlmTokens: 0, maxLlmTokens: 0, maxSteps: 6, maxEvaluationRetries: 0, autoReadTopK: 2 },
         focused: { fetchMode: 'disabled' },
       } },
       search: { async search() { return [
@@ -455,7 +467,7 @@ describe('exploratory agent loop', () => {
     const result = await new ResearchRunner().run({
       query: 'budget read topic',
       settings: { llm: {}, search: {}, research: {
-        strategy: 'exploratory', exploratory: { minLlmTokens: 0, maxLlmTokens: 0, maxSteps: 6, maxEvaluationRetries: 0, maxSourceReads: 1 },
+        strategy: 'exploratory', exploratory: { minLlmTokens: 0, maxLlmTokens: 0, maxSteps: 6, maxEvaluationRetries: 0, maxSourceReads: 1, autoReadTopK: 2 },
         focused: { fetchMode: 'disabled' },
       } },
       search: { async search() { return [
@@ -722,7 +734,7 @@ describe('exploratory agent loop', () => {
           { title: 'C', url: 'https://harvest-c.test/page', content: 'Third host body evidence.', fetchStatus: 'ok' },
         ];
       } },
-      llm: llmFor(decisions),
+      llm: llmFor(decisions, { onProfile: keepExploringProfile }),
     });
     const autoRead = result.trace.find((entry) => entry.action === 'read' && entry.reasonCode === 'auto_read_top_ranked');
     const extraRead = result.trace.find((entry) => entry.action === 'read' && entry.reasonCode === 'extra_read');
@@ -781,7 +793,7 @@ describe('exploratory agent loop', () => {
       search: { async search() {
         return [{ title: 'Cap', url: 'https://budget-cap.test', content: 'Budget exhaustion topic evidence from a selected source.', fetchStatus: 'ok' }];
       } },
-      llm: llmFor(decisions, { onDecompose: () => 'no json' }),
+      llm: llmFor(decisions, { onDecompose: () => 'no json', onProfile: keepExploringProfile }),
     });
     assert.equal(result.quality.stopReason, 'budget_exhausted');
     assert.notEqual(result.quality.stopReason, 'max_steps');
@@ -923,7 +935,7 @@ describe('exploratory agent loop', () => {
           { title: 'B', url: 'https://open-b.test', content: 'Open topic space evidence from host B.', fetchStatus: 'ok' },
         ];
       } },
-      llm: llmFor(decisions),
+      llm: llmFor(decisions, { onProfile: keepExploringProfile }),
     });
     assert.ok(result.trace.some((entry) => entry.status === 'rejected' && entry.reasonCode === 'repeat_action'));
     assert.ok(result.trace.some((entry) => entry.action === 'read' && entry.reasonCode === 'fallback_read_evidence'));

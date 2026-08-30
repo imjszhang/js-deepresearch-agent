@@ -148,57 +148,8 @@ export function evaluateReadinessGate({
   };
 }
 
-export function repairGapsFromGate(gate, { query, existingGaps = [] } = {}) {
-  const repairs = [];
-  for (const failure of gate?.failures || []) {
-    if (failure.code === 'required_host_missing') {
-      for (const host of failure.hosts || []) {
-        if (host === 'primary_filing') {
-          repairs.push({
-            question: `Find and read a primary filing for: ${query}`,
-            priority: 'critical',
-            requiredSourceTypes: ['primary_filing'],
-            reason: 'required_host_missing',
-          });
-          continue;
-        }
-        repairs.push({
-          question: `Find and read a primary disclosure on ${host} for: ${query}`,
-          priority: 'critical',
-          requiredHosts: [host],
-          reason: 'required_host_missing',
-        });
-      }
-    } else if (failure.code === 'comparison_incomplete') {
-      for (const subject of gate.missingSubjects || []) {
-        repairs.push({
-          question: `Collect official body evidence for ${subject}`,
-          priority: 'critical',
-          reason: 'comparison_incomplete',
-        });
-      }
-    } else if (failure.code === 'critical_gap_open') {
-      for (const gapId of failure.gapIds || []) {
-        const gap = existingGaps.find((item) => item.id === gapId);
-        if (gap) {
-          repairs.push({
-            question: gap.question,
-            priority: 'critical',
-            requiredHosts: gap.requiredHosts,
-            reason: 'critical_gap_open',
-            reuseId: gap.id,
-          });
-        }
-      }
-    } else if (failure.code === 'independent_sources_short') {
-      repairs.push({
-        question: `Find an independent primary source, not a reprint, for: ${query}`,
-        priority: 'normal',
-        reason: 'independent_sources_short',
-      });
-    }
-  }
-  return repairs;
+export function repairGapsFromGate() {
+  return [];
 }
 
 export function describeUnresolvedGaps(gaps = []) {

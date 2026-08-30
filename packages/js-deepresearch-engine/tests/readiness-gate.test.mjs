@@ -8,9 +8,14 @@ import { evaluateAnswerReadiness } from '../src/research/adaptive/agent-policy.m
 describe('deterministic readiness gate', () => {
   it('keeps required or critical gaps from becoming evidence_sufficient', () => {
     const query = '智谱 港交所 招股书 营收 控股股东';
-    const profile = inferResearchProfile(query);
-    assert.ok(profile.flags.primary_source);
-    assert.ok(profile.requiredHosts.includes('hkexnews.hk'));
+    const inferred = inferResearchProfile(query);
+    assert.deepEqual(inferred.requiredHosts, []);
+    const profile = {
+      flags: { primary_source: true, numeric: true },
+      requiredHosts: ['hkexnews.hk'],
+      requiredSourceTypes: ['primary_filing'],
+      minIndependentSources: 2,
+    };
     const gate = evaluateReadinessGate({
       query,
       profile,
@@ -36,13 +41,18 @@ describe('deterministic readiness gate', () => {
     assert.ok(gate.failures.some((failure) => failure.code === 'required_host_missing' || failure.code === 'critical_gap_open'));
   });
 
-  it('fails when primary_filing is required but only reprints were read', () => {
+  it('fails when a committed primary_filing is required but only reprints were read', () => {
     const query = '某公司投资尽调 监管披露 年报';
-    const profile = inferResearchProfile(query);
-    assert.equal((profile.requiredHosts || []).length, 0);
-    assert.ok(profile.preferredHosts.includes('hkexnews.hk'));
-    assert.ok(profile.preferredHosts.includes('sse.com.cn'));
-    assert.ok(profile.requiredSourceTypes.includes('primary_filing'));
+    const inferred = inferResearchProfile(query);
+    assert.equal((inferred.requiredHosts || []).length, 0);
+    assert.ok(!inferred.preferredHosts.includes('hkexnews.hk'));
+    assert.ok(!inferred.requiredSourceTypes.includes('primary_filing'));
+    const profile = {
+      flags: { primary_source: true },
+      requiredHosts: [],
+      requiredSourceTypes: ['primary_filing'],
+      minIndependentSources: 1,
+    };
     const gate = evaluateReadinessGate({
       query,
       profile,
@@ -89,7 +99,12 @@ describe('deterministic readiness gate', () => {
   it('does not let an LLM evaluator flip a failed gate to pass', async () => {
     const state = new ResearchState({
       query: '智谱 港交所 招股书 营收',
-      maxSteps: 4,
+      profile: {
+        flags: { primary_source: true },
+        requiredHosts: ['hkexnews.hk'],
+        requiredSourceTypes: ['primary_filing'],
+        minIndependentSources: 2,
+      },
     });
     state.findings.push({
       gapId: 'gap-1',

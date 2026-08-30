@@ -17,16 +17,35 @@ function report() {
   return '# Research Report\n\n## Summary\n\nThe selected source provides enough evidence to answer the requested topic while keeping the agent source choice visible. [1.1]\n\n## Key Findings\n\nThe selected source provides evidence for the requested topic and preserves agent source choice. [1.1]';
 }
 
-function llmFor(decisions, { onEvaluation = () => report(), onDecompose = () => 'no json here' } = {}) {
+const HKEX_PROFILE = {
+  flags: { primary_source: true, numeric: true, decision_critical: true },
+  requiredHosts: ['hkexnews.hk'],
+  preferredHosts: [],
+  requiredSourceTypes: ['primary_filing'],
+  minIndependentSources: 2,
+};
+
+function llmFor(decisions, {
+  onEvaluation = () => report(),
+  onDecompose = () => 'no json here',
+  onProfile = () => '{}',
+} = {}) {
   return {
     async complete({ purpose }) {
       if (purpose === 'agent_decision') return JSON.stringify(decisions.shift());
       if (purpose === 'answer_evaluation') return onEvaluation();
       if (purpose === 'gap_decomposition') return onDecompose();
-      if (purpose === 'research_profile') return '{}';
+      if (purpose === 'research_profile') return onProfile();
       return report();
     },
   };
+}
+
+function hkexProfileLlm(decisions, extras = {}) {
+  return llmFor(decisions, {
+    ...extras,
+    onProfile: () => JSON.stringify(HKEX_PROFILE),
+  });
 }
 
 describe('exploratory Search-Read-Reason loop', () => {
@@ -94,7 +113,7 @@ describe('exploratory Search-Read-Reason loop', () => {
 
   it('keeps searching after a reprint when the gate fails and token budget remains', async () => {
     const query = '智谱 港交所 招股书 营收 控股股东';
-    const state = new ResearchState({ query, minLlmTokens: 0 });
+    const state = new ResearchState({ query, minLlmTokens: 0, profile: HKEX_PROFILE });
     state.addCandidates([{ url: 'https://finance.sina.com.cn/zhipu', title: 'Media' }], 'gap-1');
     state.readSourceIds.add('https://finance.sina.com.cn/zhipu');
     state.findings.push({
@@ -144,7 +163,7 @@ describe('exploratory Search-Read-Reason loop', () => {
           fetchStatus: 'ok',
         }];
       } },
-      llm: llmFor([
+      llm: hkexProfileLlm([
         { action: 'search', query: '智谱 招股书', gapId: 'gap-1', reasonCode: 'search' },
         { action: 'read', sourceIds: ['https://finance.sina.com.cn/zhipu'], gapId: 'gap-1', reasonCode: 'read_media' },
         { action: 'answer', reasonCode: 'evidence_sufficient' },
@@ -178,7 +197,7 @@ describe('exploratory Search-Read-Reason loop', () => {
           fetchStatus: 'ok',
         }];
       } },
-      llm: llmFor([
+      llm: hkexProfileLlm([
         { action: 'search', query: '智谱 招股书', gapId: 'gap-1', reasonCode: 'search' },
         { action: 'read', sourceIds: ['https://www1.hkexnews.hk/listedco/listconews/sehk/2026/zhipu.htm'], gapId: 'gap-1', reasonCode: 'read_waf' },
         { action: 'answer', reasonCode: 'done' },
@@ -213,7 +232,7 @@ describe('exploratory Search-Read-Reason loop', () => {
           fetchStatus: 'ok',
         }];
       } },
-      llm: llmFor([
+      llm: hkexProfileLlm([
         { action: 'search', query: '智谱 招股书', gapId: 'gap-1', reasonCode: 'search' },
         { action: 'read', sourceIds: ['https://finance.sina.com.cn/zhipu'], gapId: 'gap-1', reasonCode: 'read_media' },
         { action: 'answer', reasonCode: 'evidence_sufficient' },
@@ -226,10 +245,22 @@ describe('exploratory Search-Read-Reason loop', () => {
   });
 
   it('does not verify a primary_filing gap from reprints or a mismatched official PDF', () => {
-    const reprintState = new ResearchState({ query: '智谱 监管披露 年报 投资' });
+    const inferred = inferResearchProfile('智谱 监管披露 年报 投资');
+    assert.ok(!(inferred.requiredSourceTypes || []).includes('primary_filing'));
+    assert.equal((inferred.requiredHosts || []).length, 0);
+    assert.ok(!inferred.preferredHosts.includes('hkexnews.hk'));
+    const reprintState = new ResearchState({
+      query: '智谱 监管披露 年报 投资',
+      profile: {
+        flags: { primary_source: true },
+        requiredHosts: [],
+        preferredHosts: [],
+        requiredSourceTypes: ['primary_filing'],
+        minIndependentSources: 1,
+      },
+    });
     assert.ok((reprintState.profile.requiredSourceTypes || []).includes('primary_filing'));
     assert.equal((reprintState.profile.requiredHosts || []).length, 0);
-    assert.ok(reprintState.profile.preferredHosts.includes('hkexnews.hk'));
     reprintState.findings.push({
       gapId: 'gap-1',
       sources: [{
@@ -243,7 +274,10 @@ describe('exploratory Search-Read-Reason loop', () => {
     assert.notEqual(reprintState.gaps[0].status, 'verified');
     assert.equal(reprintState.gapHasRequiredHostBody('gap-1'), false);
 
-    const mismatch = new ResearchState({ query: '智谱 监管披露 年报 投资' });
+    const mismatch = new ResearchState({
+      query: '智谱 监管披露 年报 投资',
+      profile: reprintState.profile,
+    });
     mismatch.findings.push({
       gapId: 'gap-1',
       sources: [{
@@ -265,8 +299,14 @@ describe('exploratory Search-Read-Reason loop', () => {
       content: 'Published 2026-03-31 with enough official disclosure text.',
     }), true);
     const query = '截至 2026-08 智谱 最新 监管披露';
-    const profile = inferResearchProfile(query);
-    assert.equal(profile.flags.freshness, true);
+    const profile = {
+      flags: { freshness: true },
+      requiredHosts: [],
+      preferredHosts: [],
+      requiredSourceTypes: [],
+      minIndependentSources: 1,
+    };
+    assert.equal(inferResearchProfile(query).flags.freshness, false);
     const gate = evaluateReadinessGate({
       query,
       profile,
@@ -302,6 +342,40 @@ describe('exploratory Search-Read-Reason loop', () => {
     const unused = nextUnusedSiteQueries(gap, '智谱 02513', ['site:hkexnews.hk 智谱 02513']);
     assert.ok(unused.length);
     assert.ok(!unused.includes('site:hkexnews.hk 智谱 02513'));
+  });
+
+  it('can reach evidence_sufficient on official docs without inventing exchange hosts', async () => {
+    const query = 'What is the official positioning of llama.cpp?';
+    const inferred = inferResearchProfile(query);
+    assert.deepEqual(inferred.requiredHosts, []);
+    assert.deepEqual(inferred.preferredHosts, []);
+    assert.ok(!inferred.requiredSourceTypes.includes('primary_filing'));
+    const searches = [];
+    const result = await new ResearchRunner().run({
+      query,
+      settings: { llm: {}, search: {}, research: {
+        strategy: 'exploratory',
+        exploratory: { minLlmTokens: 0, maxLlmTokens: 0, maxSteps: 6, maxEvaluationRetries: 0, autoReadTopK: 0 },
+        focused: { fetchMode: 'disabled' },
+      } },
+      search: { async search(searchQuery) {
+        searches.push(searchQuery);
+        return [{
+          title: 'llama.cpp README',
+          url: 'https://github.com/ggml-org/llama.cpp',
+          content: 'llama.cpp is a C/C++ inference library. Official positioning and usage are documented in this repository README with enough body text.',
+          fetchStatus: 'ok',
+        }];
+      } },
+      llm: llmFor([
+        { action: 'search', query: 'llama.cpp official positioning', gapId: 'gap-1', reasonCode: 'search' },
+        { action: 'read', sourceIds: ['https://github.com/ggml-org/llama.cpp'], gapId: 'gap-1', reasonCode: 'read' },
+        { action: 'answer', reasonCode: 'evidence_sufficient' },
+      ]),
+    });
+    assert.equal(result.quality.stopReason, 'evidence_sufficient');
+    assert.ok(!searches.some((item) => /hkexnews|sec\.gov|sse\.com\.cn|szse\.cn/i.test(item)));
+    assert.ok(!(result.quality.limitations || []).some((line) => /hkexnews|sec\.gov|sse\.com\.cn|szse\.cn/i.test(line)));
   });
 
   it('records budget_exhausted and lists unresolved gaps', async () => {
@@ -376,8 +450,8 @@ describe('exploratory Search-Read-Reason loop', () => {
   it('rejects a paraphrased duplicate search query', async () => {
     const decisions = [
       { action: 'search', query: 'duplicate paraphrase topic', gapId: 'gap-1', reasonCode: 'search' },
-      { action: 'read', sourceIds: ['https://para.test'], gapId: 'gap-1', reasonCode: 'read' },
       { action: 'search', query: 'What is a duplicate paraphrase topic?', gapId: 'gap-1', reasonCode: 'search_paraphrase' },
+      { action: 'read', sourceIds: ['https://para.test'], gapId: 'gap-1', reasonCode: 'read' },
       { action: 'answer', reasonCode: 'done' },
     ];
     const result = await new ResearchRunner().run({

@@ -1,6 +1,6 @@
 import { hostnameOf } from './research-state.mjs';
 import { isOrthogonalGap } from './exploratory-sufficiency.mjs';
-import { nextUnusedSiteQueries, shortSearchTerms } from './source-policy.mjs';
+import { nextUnusedSearchAngles, nextUnusedSiteQueries, shortSearchTerms } from './source-policy.mjs';
 
 const ACTION_SCHEMA = '{"action":"search|read|reflect|draft|finalize","reasonCode":"short_code","gapId":"gap-1","query":"...","queries":["..."],"sourceIds":["..."],"gapQuestion":"..."}';
 
@@ -35,17 +35,17 @@ export async function decideAdaptiveAction({ llm, state, signal }) {
       'While budget.belowMin is true, keep exploring: search or read missing subjects and open gaps. Do not finalize yet.',
       'readiness.pass is the only evidence-sufficient signal. You cannot override a failed readiness gate.',
       'After a search, you must read a real body before draft/finalize. Snippets, WAF, and shell pages do not count.',
-      'Prefer required/primary hosts before media reprints. When a gap lists requiredHosts, search with site:host queries.',
+      'If a gap lists requiredHosts, those are commitments from the research profile. You may use site:host queries for them. Do not invent exchange, regulator, or annual-report hosts.',
       'Use read to pick unread sources for the current focus gap. Consecutive reads of different unread sources are allowed.',
       'Use reflect only when you have a genuinely new orthogonal gap that is not a paraphrase of an existing gap.',
       'Use draft for a candidate answer that will be checked; failed drafts become repair gaps.',
       'Use finalize only when readiness.pass is true and you are not below the token floor.',
-      'If budget.belowMin is false but readiness.pass is false, do not finalize. Keep searching or reading unread primary sources.',
+      'If budget.belowMin is false but readiness.pass is false, do not finalize. Keep searching or reading unread sources that address the failed gate.',
       'Never repeat or closely paraphrase a query listed in searchedQueries.',
       'A search action may include up to 3 distinct queries in "queries"; make them complementary, not paraphrases.',
       'A read action should include 2-4 sourceIds when several promising unread candidates exist.',
       belowMin ? 'You are still below the token floor. Do not finalize. Explore another unread source or uncovered subject.' : '',
-      !belowMin && !gatePass ? 'The token floor is already met but readiness.pass is false. Do not finalize. Target unread primary filings with short site: queries.' : '',
+      !belowMin && !gatePass ? 'The token floor is already met but readiness.pass is false. Do not finalize. Search or read for the missing commitment, not a default filing venue.' : '',
       gatePass ? 'The deterministic readiness gate currently passes.' : 'The deterministic readiness gate currently fails; keep searching or reading.',
       'Budget fields: usedLlmTokens, minLlmTokens, remainingVsMin, remainingVsHardCap, and actionCostEstimates.',
       `Return JSON only: ${ACTION_SCHEMA}`,
@@ -120,13 +120,16 @@ export function buildAngleChangeSearch(state, { reasonCode = 'fallback_angle_cha
   const focus = (typeof state.focusGap === 'function' ? state.focusGap() : null) || state.gaps?.[0];
   const searched = typeof state.searchedQueries === 'function' ? state.searchedQueries() : [];
   const siteQueries = nextUnusedSiteQueries(focus, state.query, searched, { limit: 3 });
+  const angles = siteQueries.length
+    ? siteQueries
+    : nextUnusedSearchAngles(state.query || focus?.question || '', searched, { limit: 3 });
   const short = shortSearchTerms(state.query || focus?.question || '');
   const step = Number(state.step) || 0;
-  const query = siteQueries[0] || `${short} primary source ${step + 1}`.trim();
+  const query = angles[0] || `${short} ${step + 1}`.trim();
   return {
     action: 'search',
     query,
-    queries: siteQueries.length ? siteQueries : undefined,
+    queries: angles.length ? angles : undefined,
     gapId: focus?.id || 'gap-1',
     reasonCode,
   };
@@ -160,10 +163,13 @@ export function fallbackAdaptiveAction(state, options = {}) {
   ));
   if (uncovered && state.lastAction !== 'search') {
     const siteQueries = nextUnusedSiteQueries(uncovered, state.query, state.searchedQueries(), { limit: 3 });
+    const angles = siteQueries.length
+      ? siteQueries
+      : nextUnusedSearchAngles(uncovered.question || state.query, state.searchedQueries(), { limit: 3 });
     return {
       action: 'search',
-      query: siteQueries[0] || shortSearchTerms(uncovered.question || state.query),
-      queries: siteQueries.length ? siteQueries : undefined,
+      query: angles[0] || shortSearchTerms(uncovered.question || state.query),
+      queries: angles.length ? angles : undefined,
       gapId: uncovered.id,
       reasonCode: belowMin ? 'fallback_explore_below_min' : 'fallback_search_open_gap',
     };
