@@ -5,9 +5,8 @@ import { decideAdaptiveAction, fallbackAdaptiveAction, evaluateAnswerReadiness, 
 import { ResearchState } from '../adaptive/research-state.mjs';
 import { classifyResearchQuery } from '../adaptive/exploratory-sufficiency.mjs';
 import { inferResearchProfile, planResearchProfile } from '../adaptive/research-profile.mjs';
-import { repairGapsFromGate } from '../adaptive/readiness-gate.mjs';
 import { classifyFetchedBody } from '../body-quality.mjs';
-import { gapHasPolicyHosts, nextUnusedSiteQueries, shortSearchTerms } from '../adaptive/source-policy.mjs';
+import { shortSearchTerms } from '../adaptive/source-policy.mjs';
 import {
   EXPLORATORY_STOP_REASONS,
   mapFinalizeStopReason,
@@ -182,7 +181,7 @@ export async function runExploratoryLoop(context) {
   const maxRetries = Math.max(0, Number(exploratory.maxEvaluationRetries) || 0);
   const maxOpenGaps = Number(exploratory.maxOpenGaps) || 8;
   const maxQueriesPerStep = Math.max(1, Number(exploratory.maxQueriesPerStep) || 3);
-  const autoReadTopK = Math.min(Math.max(0, Number(exploratory.autoReadTopK ?? 2)), maxReads);
+  const autoReadTopK = Math.min(Math.max(0, Number(exploratory.autoReadTopK ?? 0)), maxReads);
   const answerGateEnabled = exploratory.answerGate !== false;
   const gateMode = exploratory.gateMode || 'rules-then-llm';
   const embedding = researchProviders?.embedding || null;
@@ -307,10 +306,10 @@ export async function runExploratoryLoop(context) {
   state.profile = profile;
   state.gaps[0] = {
     ...state.gaps[0],
-    requiredHosts: profile.requiredHosts || state.gaps[0].requiredHosts,
-    preferredHosts: profile.preferredHosts || state.gaps[0].preferredHosts,
-    requiredSourceTypes: profile.requiredSourceTypes || state.gaps[0].requiredSourceTypes,
-    minIndependentSources: profile.minIndependentSources || state.gaps[0].minIndependentSources,
+    requiredHosts: profile.requiredHosts ?? [],
+    preferredHosts: profile.preferredHosts ?? [],
+    requiredSourceTypes: profile.requiredSourceTypes ?? [],
+    minIndependentSources: profile.minIndependentSources || 1,
   };
   state.actionCosts.record('reflect', (budget?.usage?.llmTokens || 0) - profileTokensBefore);
 
@@ -399,11 +398,6 @@ export async function runExploratoryLoop(context) {
       if (!invalid && action.action === 'search') {
         const gap = state.getGap(action.gapId || state.focusGap()?.id);
         const rawQueries = normalizeSearchQueries(action, maxQueriesPerStep);
-        if (gapHasPolicyHosts(gap)) {
-          for (const siteQuery of nextUnusedSiteQueries(gap, state.query, state.searchedQueries(), { limit: 2 }).reverse()) {
-            if (!rawQueries.includes(siteQuery)) rawQueries.unshift(siteQuery);
-          }
-        }
         searchQueries = await filterDuplicateQueries(rawQueries.slice(0, maxQueriesPerStep), {
           state,
           queryMemory,
@@ -429,7 +423,7 @@ export async function runExploratoryLoop(context) {
           if (!normalizeSearchQueries(action, maxQueriesPerStep).length) {
             action = {
               action: 'search',
-              query: `${shortSearchTerms(state.query)} primary source ${state.step + 1}`,
+              query: `${shortSearchTerms(state.query)} ${state.step + 1}`,
               gapId: state.focusGap()?.id || 'gap-1',
               reasonCode: 'fallback_angle_change',
             };
@@ -440,7 +434,7 @@ export async function runExploratoryLoop(context) {
           if (belowHardCap && canContinueLoop()) {
             action = {
               action: 'search',
-              query: `${shortSearchTerms(state.query)} filing ${state.step}-${state.evaluationRetries}`,
+              query: `${shortSearchTerms(state.query)} ${state.step}-${state.evaluationRetries}`,
               gapId: state.focusGap()?.id || 'gap-1',
               reasonCode: 'fallback_angle_change',
             };
@@ -600,7 +594,6 @@ export async function runExploratoryLoop(context) {
           continue;
         }
         if (!currentGate?.pass && pendingStopReason !== STOP_REASONS.budgetExhausted && pendingStopReason !== STOP_REASONS.safetyCap) {
-          const repairs = repairGapsFromGate(currentGate, { query, existingGaps: state.gaps });
           const shouldLlmGate = answerGateEnabled
             && (gateMode === 'llm' || gateMode === 'rules-then-llm')
             && state.evaluationRetries < maxRetries;
@@ -621,14 +614,6 @@ export async function runExploratoryLoop(context) {
             state.forbidFinalizeUntilExplore = true;
             if (evaluation?.missingAspect && state.gaps.length < maxOpenGaps) {
               const gap = state.addGap(evaluation.missingAspect, 'critical');
-              if (gap) emit({ stage: 'gap_opened', gapId: gap.id, question: gap.question });
-            }
-            for (const repair of repairs) {
-              if (repair.reuseId || state.gaps.length >= maxOpenGaps) continue;
-              const gap = state.addGap(repair.question, repair.priority, {
-                requiredHosts: repair.requiredHosts,
-                requiredSourceTypes: repair.requiredSourceTypes,
-              });
               if (gap) emit({ stage: 'gap_opened', gapId: gap.id, question: gap.question });
             }
             state.observations.push({

@@ -1,20 +1,9 @@
 import { classifyResearchQuery } from './exploratory-sufficiency.mjs';
 
-const FRESHNESS = /\b(latest|current|today|recent|newest|as of|up to date)\b|目前|当前|最新|最近|截至|时效/i;
-const COMPLETENESS = /\b(complete|comprehensive|full picture|due diligence)\b|尽调|全面|完整|清单/i;
-const PLURALITY = /\b(compare|versus|vs\.?|comparison|both|multiple)\b|各方|对比|比较/i;
-const ATTRIBUTION = /\b(who|author|source|according to|attribution)\b|来源|出处|谁/i;
-const PRIMARY_SOURCE = /\b(official|primary|filing|prospectus|10-k|10-q|annual report|regulatory|disclosure|sec|hkex)\b|招股|年报|监管|披露|一手|官方|港交所|上交所|深交所/i;
-const NUMERIC = /\b(revenue|profit|margin|market cap|valuation|shareholding)\b|营收|收入|利润|毛利|市值|持股|占比|数字|金额|%|％/i;
-const DECISION = /\b(invest|investment|should i|buy|sell|decision|due diligence)\b|投资|尽调|决策|能否|值不值得/i;
-const FILING = /\b(prospectus|annual report|10-k|10-q|filing)\b|招股|年报|半年报|监管披露/i;
-const HKEX = /\b(hkex|hkexnews|h-?share)\b|港交所|港股/i;
-const SEC = /\b(sec\.gov|edgar|10-k|10-q|s-1)\b/i;
-const SSE = /sse\.com\.cn|上交所|上海证券交易所/i;
-const SZSE = /szse\.cn|深交所|深圳证券交易所/i;
-
 const HOST_IN_QUERY = /\b(?:[a-z0-9-]+\.)+(?:com|org|net|edu|gov|io|hk|cn|uk|jp|ai|info)\b/gi;
 const FILE_EXT_HOSTS = /\.(cpp|js|ts|py|md|pdf|exe|zip|png|jpg)$/i;
+const HOSTNAME_SHAPE = /^(?:[a-z0-9-]+\.)+[a-z]{2,}$/;
+const KNOWN_SOURCE_TYPES = new Set(['primary_filing', 'numeric']);
 
 export const PROFILE_FLAGS = Object.freeze([
   'freshness',
@@ -30,81 +19,89 @@ function unique(values) {
   return [...new Set((values || []).map((value) => String(value || '').trim()).filter(Boolean))];
 }
 
-export function inferRequiredHosts(query = '') {
-  const text = String(query || '');
-  const hosts = [];
-  if (HKEX.test(text) || (FILING.test(text) && /港|hk|025\d{2}|股票代码/i.test(text))) {
-    hosts.push('hkexnews.hk', 'hkex.com.hk');
-  }
-  if (SEC.test(text)) hosts.push('sec.gov');
-  if (SSE.test(text)) hosts.push('sse.com.cn');
-  if (SZSE.test(text)) hosts.push('szse.cn');
-  const mentioned = text.match(HOST_IN_QUERY) || [];
-  for (const host of mentioned) {
-    const cleaned = host.toLowerCase().replace(/^www\./, '');
-    if (cleaned && !FILE_EXT_HOSTS.test(cleaned)) hosts.push(cleaned);
-  }
-  return unique(hosts);
+function emptyFlags() {
+  return Object.fromEntries(PROFILE_FLAGS.map((flag) => [flag, false]));
 }
 
-export function inferPreferredHosts(query = '', requiredHosts = []) {
-  const text = String(query || '');
-  const preferred = [...requiredHosts];
-  if (FILING.test(text) || DECISION.test(text) || PRIMARY_SOURCE.test(text)) {
-    preferred.push('hkexnews.hk', 'sec.gov', 'sse.com.cn', 'szse.cn');
-  }
-  return unique(preferred);
+export function looksLikeHostname(value) {
+  const host = String(value || '').trim().toLowerCase().replace(/^www\./, '');
+  if (!host || FILE_EXT_HOSTS.test(host)) return false;
+  return HOSTNAME_SHAPE.test(host);
+}
+
+export function sanitizeHosts(values) {
+  return unique((values || []).map((value) => String(value || '').trim().toLowerCase().replace(/^www\./, '')).filter(looksLikeHostname));
+}
+
+export function sanitizeSourceTypes(values) {
+  return unique((values || []).filter((item) => KNOWN_SOURCE_TYPES.has(String(item || '').trim())));
+}
+
+export function extractLiteralHosts(query = '') {
+  const mentioned = String(query || '').match(HOST_IN_QUERY) || [];
+  return sanitizeHosts(mentioned);
+}
+
+export function inferRequiredHosts(query = '') {
+  return extractLiteralHosts(query);
+}
+
+export function inferPreferredHosts() {
+  return [];
 }
 
 export function inferResearchProfile(query = {}) {
   const text = typeof query === 'string' ? query : String(query?.query || '');
   const shape = classifyResearchQuery(text);
-  const flags = {
-    freshness: FRESHNESS.test(text),
-    completeness: COMPLETENESS.test(text),
-    plurality: PLURALITY.test(text) || shape.kind === 'comparison',
-    attribution: ATTRIBUTION.test(text),
-    primary_source: PRIMARY_SOURCE.test(text) || FILING.test(text),
-    numeric: NUMERIC.test(text),
-    decision_critical: DECISION.test(text) || FILING.test(text),
-  };
-  const requiredHosts = inferRequiredHosts(text);
-  const preferredHosts = inferPreferredHosts(text, requiredHosts);
-  const requiredSourceTypes = [];
-  if (flags.primary_source || FILING.test(text)) requiredSourceTypes.push('primary_filing');
-  if (flags.numeric) requiredSourceTypes.push('numeric');
-  const minIndependentSources = flags.plurality || flags.decision_critical || flags.primary_source || shape.kind === 'open'
-    ? 2
-    : 1;
   return {
     query: text,
     queryKind: shape.kind,
     subjects: shape.subjects,
-    flags,
-    requiredHosts,
-    preferredHosts,
-    requiredSourceTypes,
-    minIndependentSources,
-    maxAgeDays: flags.freshness ? 365 : null,
+    flags: emptyFlags(),
+    requiredHosts: inferRequiredHosts(text),
+    preferredHosts: inferPreferredHosts(text),
+    requiredSourceTypes: [],
+    minIndependentSources: 1,
+    maxAgeDays: null,
     method: 'rules',
   };
+}
+
+function sanitizePlannedGaps(gaps) {
+  if (!Array.isArray(gaps)) return [];
+  return gaps.map((gap) => ({
+    ...gap,
+    requiredHosts: sanitizeHosts(gap?.requiredHosts),
+    preferredHosts: sanitizeHosts(gap?.preferredHosts),
+    requiredSourceTypes: sanitizeSourceTypes(gap?.requiredSourceTypes),
+  }));
 }
 
 export function mergeProfilePlan(base, plan = {}) {
   const next = {
     ...base,
-    requiredHosts: unique([...(base.requiredHosts || []), ...(plan.requiredHosts || [])]),
-    preferredHosts: unique([...(base.preferredHosts || []), ...(plan.preferredHosts || [])]),
-    requiredSourceTypes: unique([...(base.requiredSourceTypes || []), ...(plan.requiredSourceTypes || [])]),
+    flags: { ...emptyFlags(), ...(base.flags || {}) },
+    requiredHosts: unique([
+      ...sanitizeHosts(base.requiredHosts),
+      ...sanitizeHosts(plan.requiredHosts),
+    ]),
+    preferredHosts: unique([
+      ...sanitizeHosts(base.preferredHosts),
+      ...sanitizeHosts(plan.preferredHosts),
+    ]),
+    requiredSourceTypes: unique([
+      ...sanitizeSourceTypes(base.requiredSourceTypes),
+      ...sanitizeSourceTypes(plan.requiredSourceTypes),
+    ]),
     minIndependentSources: Math.max(
       Number(base.minIndependentSources) || 1,
       Number(plan.minIndependentSources) || 0,
     ),
-    plannedGaps: Array.isArray(plan.gaps) ? plan.gaps : [],
+    plannedGaps: sanitizePlannedGaps(plan.gaps),
     method: plan.method ? `${base.method}+${plan.method}` : base.method,
   };
   for (const flag of PROFILE_FLAGS) {
-    if (plan.flags && plan.flags[flag] === true) next.flags[flag] = true;
+    if (plan.flags && typeof plan.flags[flag] === 'boolean') next.flags[flag] = plan.flags[flag];
   }
   return next;
 }
@@ -128,9 +125,12 @@ export async function planResearchProfile({ llm, query, profile, signal } = {}) 
       messages: [{
         role: 'system',
         content: [
-          'Infer a research evidence profile. Do not invent a fixed industry questionnaire.',
+          'Infer a research evidence profile for THIS query only. Do not invent a fixed industry questionnaire.',
           'Return JSON only: {"flags":{"freshness":false,"completeness":false,"plurality":false,"attribution":false,"primary_source":false,"numeric":false,"decision_critical":false},"requiredHosts":[],"preferredHosts":[],"requiredSourceTypes":[],"minIndependentSources":1,"gaps":[{"question":"...","priority":"critical|normal","requiredHosts":[]}]}',
-          'requiredHosts must be real hostnames implied by the query (exchanges, regulators, official docs). Leave empty when unknown.',
+          'requiredHosts and preferredHosts must be real hostnames you decide this query needs. Leave them empty when unknown.',
+          '"官方" / "official" means first-party documents of the subject, not stock-exchange or SEC filings unless the query names that venue.',
+          'Do not default to hkexnews.hk, sec.gov, sse.com.cn, or szse.cn. Do not add primary_filing unless the query itself is about filings or disclosures.',
+          'requiredSourceTypes may include primary_filing or numeric only.',
         ].join('\n'),
       }, {
         role: 'user',
@@ -173,9 +173,9 @@ export function createGapRecord({
     status: 'open',
     priority,
     depth,
-    requiredSourceTypes: unique(requiredSourceTypes ?? profile.requiredSourceTypes),
-    requiredHosts: unique(requiredHosts ?? (priority === 'critical' ? profile.requiredHosts : [])),
-    preferredHosts: unique(preferredHosts ?? profile.preferredHosts),
+    requiredSourceTypes: sanitizeSourceTypes(requiredSourceTypes ?? profile.requiredSourceTypes),
+    requiredHosts: sanitizeHosts(requiredHosts ?? (priority === 'critical' ? profile.requiredHosts : [])),
+    preferredHosts: sanitizeHosts(preferredHosts ?? profile.preferredHosts),
     blockedHosts: [],
     maxAgeDays: maxAgeDays ?? profile.maxAgeDays ?? null,
     minIndependentSources: Number(minIndependentSources ?? profile.minIndependentSources) || 1,

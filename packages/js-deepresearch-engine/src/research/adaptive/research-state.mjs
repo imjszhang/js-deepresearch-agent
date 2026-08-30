@@ -295,7 +295,7 @@ export class ResearchState {
   }
 
   candidateScore(candidate) {
-    const tierBoost = candidate.tier === 'required_primary' ? 1 : (candidate.tier === 'other_primary' ? 0.4 : 0);
+    const tierBoost = candidate.tier === 'required_primary' ? 1 : 0;
     return (candidate.rerank?.score || candidate.rerankScore || 0) + (candidate.freq || 0) * 0.1 + hostnameWeight(candidate.url) + tierBoost;
   }
 
@@ -328,6 +328,8 @@ export class ResearchState {
       profile: {
         flags: this.profile?.flags || {},
         requiredHosts: this.profile?.requiredHosts || [],
+        preferredHosts: this.profile?.preferredHosts || [],
+        requiredSourceTypes: this.profile?.requiredSourceTypes || [],
         minIndependentSources: this.profile?.minIndependentSources || 1,
       },
       gaps,
@@ -476,10 +478,7 @@ export class ResearchState {
   unresolvedReportNotes() {
     const unresolved = this.gaps.filter((gap) => ['open', 'searched', 'missing', 'blocked'].includes(gap.status)
       || (gap.status === 'body_read' && this.gapNeedsPrimaryEvidence(gap) && !this.gapHasRequiredHostBody(gap.id)));
-    const blockedHosts = [...new Set(unresolved.flatMap((gap) => [
-      ...(gap.requiredHosts || []),
-      ...((gap.requiredSourceTypes || []).includes('primary_filing') ? (gap.preferredHosts || []) : []),
-    ]))];
+    const blockedHosts = [...new Set(unresolved.flatMap((gap) => gap.requiredHosts || []))];
     const secondaryOnly = this.findings.flatMap((finding) => (finding.sources || [])
       .filter(sourceHasBody)
       .filter((source) => ['mainstream', 'reprint', 'ugc', 'unknown'].includes(source.tier || classifySourceTier(source, this.getGap(finding.gapId))))

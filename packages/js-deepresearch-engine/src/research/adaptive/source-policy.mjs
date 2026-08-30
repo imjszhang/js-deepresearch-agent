@@ -172,7 +172,6 @@ const SUBJECT_STOPS = new Set([
 ]);
 
 const FILING_LIKE = /年报|半年报|招股|prospectus|10-k|10-q|年度报告|招股说明书|filing|公告/i;
-const SITE_ANGLE_EXTRAS = ['年报', '招股', '披露', 'prospectus', 'filing', '公告', '半年报', '招股说明书'];
 
 function uniqueTerms(values = []) {
   return [...new Set((values || []).map((value) => String(value || '').trim()).filter(Boolean))];
@@ -210,7 +209,7 @@ export function documentMatchesQuerySubject(source = {}, query = '') {
 }
 
 export function gapHasPolicyHosts(gap = {}) {
-  return Boolean((gap?.requiredHosts || []).length || (gap?.preferredHosts || []).length);
+  return Boolean((gap?.requiredHosts || []).length);
 }
 
 export function siteQueryTermVariants(query = '') {
@@ -223,8 +222,7 @@ export function siteQueryTermVariants(query = '') {
   const cjkTicker = [cjk[0], tickers[0]].filter(Boolean).join(' ');
   const slice8 = text.replace(/\s+/g, ' ').slice(0, 8);
   const slice12 = text.replace(/\s+/g, ' ').slice(0, 12);
-  const extras = SITE_ANGLE_EXTRAS.map((angle) => [cjk[0] || latin[0] || slice8, angle].filter(Boolean).join(' '));
-  return uniqueTerms([compact, cjkTicker, cjk[0], latin[0], tickers[0], slice8, slice12, ...extras]);
+  return uniqueTerms([compact, cjkTicker, cjk[0], latin[0], tickers[0], slice8, slice12]);
 }
 
 export function shortSearchTerms(query = '', { maxChars = 12 } = {}) {
@@ -233,8 +231,19 @@ export function shortSearchTerms(query = '', { maxChars = 12 } = {}) {
   return String(query || '').replace(/\s+/g, ' ').trim().slice(0, maxChars);
 }
 
+export function nextUnusedSearchAngles(query, searchedQueries = [], { limit = 2 } = {}) {
+  const searched = new Set((searchedQueries || []).map(String));
+  const out = [];
+  for (const terms of siteQueryTermVariants(query)) {
+    if (!terms || searched.has(terms)) continue;
+    out.push(terms);
+    if (out.length >= limit) return out;
+  }
+  return out;
+}
+
 export function nextUnusedSiteQueries(gap, query, searchedQueries = [], { limit = 2 } = {}) {
-  const hosts = uniqueTerms([...(gap?.requiredHosts || []), ...(gap?.preferredHosts || [])]);
+  const hosts = uniqueTerms(gap?.requiredHosts || []);
   if (!hosts.length) return [];
   const searched = new Set((searchedQueries || []).map(String));
   const variants = siteQueryTermVariants(query || gap?.question);
@@ -251,7 +260,7 @@ export function nextUnusedSiteQueries(gap, query, searchedQueries = [], { limit 
 }
 
 export function buildSiteHostQueries(gap, extraTerms = '', options = {}) {
-  const hosts = uniqueTerms([...(gap?.requiredHosts || []), ...(gap?.preferredHosts || [])]);
+  const hosts = uniqueTerms(gap?.requiredHosts || []);
   const terms = String(extraTerms || '').trim() || shortSearchTerms(options.query || gap?.question || '');
   return hosts.map((host) => `site:${host} ${terms}`.trim());
 }

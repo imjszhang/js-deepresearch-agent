@@ -627,7 +627,7 @@ Agent 选型建议：
 
 - 用户要**快速答案** → `--strategy quick`（默认单轮；`--iterations` 未指定时不会沿用专题调研的轮次）
 - 用户要**引用与深度** → `--strategy focused`（默认；轮次由 `iterationControl` 管，`--iterations` 仅在关闭早停时生效）
-- 用户要**开放探索** → `--strategy exploratory`；用 `--exploratory-min-llm-tokens` 设下限、`--exploratory-max-llm-tokens` 或 `--max-llm-tokens` 设上限。下限不是停点：未到下限前必须继续 Search-Read-Reason。gate 未通过且探索额度还在时，失败的 finalize 是再探索，不是收工。只有确定性 readiness gate 通过才能输出 `evidence_sufficient`；LLM / rerank / embedding 不能把失败门槛改成通过。额度或步数用尽时仍写长报告，但必须列出未关闭 gap、未读官方 host 和仅有二手证据的结论。次数和步数上限默认关闭；若要限制用 `--max-source-reads` / `--exploratory-max-steps`（用尽后立刻写报告）
+- 用户要**开放探索** → `--strategy exploratory`；用 `--exploratory-min-llm-tokens` 设下限、`--exploratory-max-llm-tokens` 或 `--max-llm-tokens` 设上限。下限不是停点：未到下限前必须继续 Search-Read-Reason。gate 未通过且探索额度还在时，失败的 finalize 是再探索，不是收工。只有确定性 readiness gate 通过才能输出 `evidence_sufficient`；LLM / rerank / embedding 不能把失败门槛改成通过。`requiredHosts` / `primary_filing` 只来自 LLM planner 对本题的承诺，或问句里字面出现的 hostname；规则层不会把「官方 / official」映射成港交所或 SEC 年报。额度或步数用尽时仍写长报告，但必须列出未关闭 gap、未兑现的 host 承诺和仅有二手证据的结论。次数和步数上限默认关闭；若要限制用 `--max-source-reads` / `--exploratory-max-steps`（用尽后立刻写报告）
 
 旧 ID（`rapid`、`parallel`、`source-based`、`adaptive`）不再注册。CLI 传入旧值会报迁移错误。历史 `work_dir` / Intel / SQLite 记录仍可读取。
 
