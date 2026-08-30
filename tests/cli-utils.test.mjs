@@ -265,4 +265,34 @@ describe('CLI utilities', () => {
     });
     assert.equal(settings.http.proxy, 'socks5://127.0.0.1:1080');
   });
+
+  it('maps --corpus-dirs into search.local.dirs and enables the local engine', () => {
+    const settings = applyResearchFlags({ search: { engine: 'searxng' } }, {
+      'corpus-dirs': '/tmp/notes,/tmp/reports,/tmp/notes',
+    });
+    assert.equal(settings.search.engine, 'local');
+    assert.deepEqual(settings.search.local.dirs, ['/tmp/notes', '/tmp/reports']);
+  });
+
+  it('keeps --search local and writes corpus directories', () => {
+    const settings = applyResearchFlags({ search: {} }, {
+      search: 'local',
+      'corpus-dirs': '/tmp/only',
+    });
+    assert.equal(settings.search.engine, 'local');
+    assert.deepEqual(settings.search.local.dirs, ['/tmp/only']);
+  });
+
+  it('rejects an empty --corpus-dirs list', () => {
+    assert.throws(
+      () => applyResearchFlags({ search: {} }, { 'corpus-dirs': ' , ; ' }),
+      /--corpus-dirs requires at least one directory/,
+    );
+  });
+
+  it('leaves --search searxng unchanged when corpus dirs are omitted', () => {
+    const settings = applyResearchFlags({ search: {} }, { search: 'searxng' });
+    assert.equal(settings.search.engine, 'searxng');
+    assert.deepEqual(settings.search.local?.dirs || [], []);
+  });
 });

@@ -5,6 +5,7 @@ import {
 } from 'js-deepresearch-engine';
 import { parseProviderSkills } from './search-providers/js-eyes/provider-skills.mjs';
 import { normalizeJsEyesSearchConfig } from './search-providers/js-eyes/normalize-js-eyes-search-config.mjs';
+import { normalizeLocalSearchConfig, parseCorpusDirList } from './search-providers/local/public.mjs';
 
 export function parseArgs(argv) {
   const args = [];
@@ -199,12 +200,31 @@ export function applyResearchFlags(settings, flags) {
   }
 
   applyProviderOverrides(settings, flags);
+  applyLocalCorpusOverrides(settings, flags);
 
   if (settings.search) {
-    settings.search = normalizeJsEyesSearchConfig(normalizeSearchConfig(settings.search));
+    settings.search = normalizeLocalSearchConfig(
+      normalizeJsEyesSearchConfig(normalizeSearchConfig(settings.search)),
+    );
   }
 
   return settings;
+}
+
+function applyLocalCorpusOverrides(settings, flags) {
+  if (flags['corpus-dirs'] === undefined) return;
+  const dirs = parseCorpusDirList(flags['corpus-dirs']);
+  if (dirs.length === 0) {
+    throw new Error('Flag --corpus-dirs requires at least one directory path.');
+  }
+  settings.search ||= {};
+  settings.search.local = {
+    ...(settings.search.local && typeof settings.search.local === 'object' ? settings.search.local : {}),
+    dirs,
+  };
+  // Single-mode: enable local so directories are not silently dropped.
+  // Combining local with searxng/js-eyes fan-out is issue #16.
+  settings.search.engine = 'local';
 }
 
 function coerceValue(value) {

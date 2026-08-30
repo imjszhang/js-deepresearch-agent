@@ -1,3 +1,5 @@
+import { sourceDiversityKey } from '../source-candidates.mjs';
+
 const MULTI_LABEL_PUBLIC_SUFFIXES = new Set([
   'com.cn', 'net.cn', 'org.cn', 'gov.cn',
   'com.hk', 'org.hk', 'gov.hk',
@@ -288,6 +290,7 @@ export function selectReadsByPolicy({
       return {
         ...candidate,
         hostname: candidate.hostname || hostnameOf(candidate.url || candidate.id),
+        diversityKey: candidate.diversityKey || sourceDiversityKey(candidate),
         registrableDomain: candidate.registrableDomain || registrableDomainFromUrl(candidate.url || candidate.id),
         tier,
         tierRank: sourceTierRank(tier),
@@ -307,10 +310,12 @@ export function selectReadsByPolicy({
 
   for (const candidate of ranked) {
     const host = candidate.hostname;
+    const channel = candidate.diversityKey || sourceDiversityKey(candidate);
     const domain = candidate.registrableDomain;
+    if (channel && alreadyReadHostnames.has(channel) && candidate.tier !== 'required_primary') continue;
     if (host && alreadyReadHostnames.has(host) && candidate.tier !== 'required_primary') continue;
-    if (host && seenHosts.has(host)) continue;
-    if (host && (hostCounts.get(host) || 0) >= maxPerHostname) continue;
+    if (channel && seenHosts.has(channel)) continue;
+    if (channel && (hostCounts.get(channel) || 0) >= maxPerHostname) continue;
     if (domain && seenDomains.has(domain) && picks.length >= minCount && candidate.tier !== 'required_primary') {
       continue;
     }
@@ -318,9 +323,9 @@ export function selectReadsByPolicy({
       ...candidate,
       selectReason: candidate.tier === 'required_primary' ? 'required_host' : `tier_${candidate.tier}`,
     });
-    if (host) {
-      seenHosts.add(host);
-      hostCounts.set(host, (hostCounts.get(host) || 0) + 1);
+    if (channel) {
+      seenHosts.add(channel);
+      hostCounts.set(channel, (hostCounts.get(channel) || 0) + 1);
     }
     if (domain) seenDomains.add(domain);
     if (picks.length >= maxCount) break;

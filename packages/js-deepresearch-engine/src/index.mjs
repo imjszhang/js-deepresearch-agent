@@ -51,7 +51,7 @@ export { normalizeSearchConfig } from './search/normalize-search-config.mjs';
 export { resolveSearchConcurrency } from './search/search-capabilities.mjs';
 export { BudgetManager, BudgetExceededError } from './research/budget-manager.mjs';
 export { QueryMemory, normalizeQuery, querySimilarity } from './research/query-memory.mjs';
-export { normalizeSourceUrl, selectDiverseSources, SourceCandidatePool, isPrimarySource } from './research/source-candidates.mjs';
+export { normalizeSourceUrl, selectDiverseSources, SourceCandidatePool, isPrimarySource, sourceDiversityKey, isFileSourceUrl } from './research/source-candidates.mjs';
 export {
   buildEvidenceArtifacts,
   extractClaims,

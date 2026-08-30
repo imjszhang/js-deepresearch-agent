@@ -40,6 +40,21 @@ EXISTING=from-file
     delete process.env.EXISTING;
   });
 
+  it('maps SEARCH_LOCAL_DIRS and JDR_CORPUS_DIRS onto search.local.dirs', () => {
+    const fromSearch = settingsFromEnv({
+      SEARCH_LOCAL_DIRS: '/tmp/notes,/tmp/reports,/tmp/notes',
+    });
+    assert.equal(fromSearch.search.engine, 'local');
+    assert.deepEqual(fromSearch.search.local.dirs, ['/tmp/notes', '/tmp/reports']);
+
+    const fromAlias = settingsFromEnv({
+      SEARCH_ENGINE: 'searxng',
+      JDR_CORPUS_DIRS: '/tmp/alias',
+    });
+    assert.equal(fromAlias.search.engine, 'searxng');
+    assert.deepEqual(fromAlias.search.local.dirs, ['/tmp/alias']);
+  });
+
   it('maps search env vars to settings overrides', () => {
     const overrides = settingsFromEnv({
       SEARCH_ENGINE: 'searxng',

@@ -48,6 +48,24 @@ describe('source policy before rerank', () => {
     assert.ok(!retry[0].includes('sse.com.cn'));
   });
 
+  it('does not drop file:// candidates when mixing them with web hosts', () => {
+    const picks = selectReadsByPolicy({
+      candidates: [
+        { id: 'web-1', url: 'https://example.com/a', title: 'Web A', rerank: { score: 0.2 } },
+        { id: 'local-1', url: 'file:///notes/a.md', title: 'Local A', corpusRoot: '/notes', engine: 'local:notes', rerank: { score: 0.9 } },
+        { id: 'local-2', url: 'file:///notes/b.md', title: 'Local B', corpusRoot: '/notes', engine: 'local:notes', rerank: { score: 0.8 } },
+        { id: 'local-3', url: 'file:///reports/c.md', title: 'Local C', corpusRoot: '/reports', engine: 'local:reports', rerank: { score: 0.1 } },
+      ],
+      maxPerHostname: 1,
+      minCount: 1,
+      maxCount: 4,
+    });
+    const ids = picks.map((item) => item.id);
+    assert.ok(ids.includes('local-1') || ids.includes('local-3'));
+    assert.ok(!ids.includes('local-1') || !ids.includes('local-2'));
+    assert.equal(classifySourceTier({ url: 'file:///notes/a.md', title: 'Local notes' }), 'unknown');
+  });
+
   it('does not inject filing angles into official-docs queries', () => {
     const variants = siteQueryTermVariants('Compare official docs of llama.cpp and Ollama');
     assert.ok(!variants.some((item) => /年报|招股|prospectus|filing|公告/i.test(item)));

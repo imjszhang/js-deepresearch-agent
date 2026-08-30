@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { BudgetExceededError, BudgetManager, QueryMemory, SourceCandidatePool, buildEvidenceArtifacts, normalizeSourceUrl, selectDiverseSources } from '../src/index.mjs';
+import { BudgetExceededError, BudgetManager, QueryMemory, SourceCandidatePool, buildEvidenceArtifacts, normalizeSourceUrl, selectDiverseSources, sourceDiversityKey, stableSourceId } from '../src/index.mjs';
 
 describe('research control infrastructure', () => {
   it('enforces search and source-read budgets', () => {
@@ -48,6 +48,23 @@ describe('research control infrastructure', () => {
       { title: 'C', url: 'https://other.test/c' },
     ], { enabled: true, maxPerHostname: 1 });
     assert.deepEqual(selected.map((item) => item.title), ['A', 'C']);
+  });
+
+  it('normalizes file:// identities and caps local sources by directory channel', () => {
+    const fileUrl = normalizeSourceUrl('file:///tmp/notes/a.md#frag');
+    assert.equal(fileUrl, normalizeSourceUrl('file:///tmp/notes/a.md'));
+    assert.equal(stableSourceId({ url: fileUrl }), stableSourceId({ url: 'file:///tmp/notes/a.md' }));
+    assert.equal(
+      sourceDiversityKey({ url: 'file:///tmp/notes/a.md', corpusRoot: '/tmp/notes' }),
+      sourceDiversityKey({ url: 'file:///tmp/notes/b.md', corpusRoot: '/tmp/notes' }),
+    );
+    const selected = selectDiverseSources([
+      { title: 'Web', url: 'https://example.com/a' },
+      { title: 'LocalA1', url: 'file:///tmp/notes/a.md', corpusRoot: '/tmp/notes', engine: 'local:notes' },
+      { title: 'LocalA2', url: 'file:///tmp/notes/b.md', corpusRoot: '/tmp/notes', engine: 'local:notes' },
+      { title: 'LocalB', url: 'file:///tmp/reports/c.md', corpusRoot: '/tmp/reports', engine: 'local:reports' },
+    ], { enabled: true, maxPerHostname: 1 });
+    assert.deepEqual(selected.map((item) => item.title), ['Web', 'LocalA1', 'LocalB']);
   });
 
   it('builds stable passage and claim evidence chains', () => {

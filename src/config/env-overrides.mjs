@@ -1,9 +1,10 @@
 import { normalizeSearchConfig } from 'js-deepresearch-engine';
 import { parseProviderSkills } from '../search-providers/js-eyes/provider-skills.mjs';
 import { normalizeJsEyesSearchConfig } from '../search-providers/js-eyes/normalize-js-eyes-search-config.mjs';
+import { normalizeLocalSearchConfig, parseCorpusDirList } from '../search-providers/local/public.mjs';
 
 function normalizeAppSearchConfig(search) {
-  return normalizeJsEyesSearchConfig(normalizeSearchConfig(search));
+  return normalizeLocalSearchConfig(normalizeJsEyesSearchConfig(normalizeSearchConfig(search)));
 }
 
 export function settingsFromEnv(env = process.env) {
@@ -88,6 +89,17 @@ export function settingsFromEnv(env = process.env) {
   const jsEyesTimeoutMs = readEnv('JS_EYES_TIMEOUT_MS');
   if (jsEyesTimeoutMs) {
     search.jsEyesTimeoutMs = Number(jsEyesTimeoutMs);
+  }
+
+  const localDirs = readEnv('SEARCH_LOCAL_DIRS') || readEnv('JDR_CORPUS_DIRS');
+  if (localDirs) {
+    search.local = {
+      ...(search.local && typeof search.local === 'object' ? search.local : {}),
+      dirs: parseCorpusDirList(localDirs),
+    };
+    if (!searchEngine) {
+      search.engine = 'local';
+    }
   }
 
   const research = {};

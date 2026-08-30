@@ -59,6 +59,10 @@ textarea {
   resize: vertical;
 }
 
+textarea.compact-textarea {
+  min-height: 72px;
+}
+
 button {
   border: 0;
   border-radius: 10px;

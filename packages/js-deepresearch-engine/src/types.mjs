@@ -18,6 +18,7 @@
  * @property {boolean} [safeSearch]
  * @property {Record<string, unknown>} [options]
  * @property {Record<string, unknown>} [provider]
+ * @property {{ dirs?: string[], ignore?: string[], extensions?: string[] }} [local]
  */
 
 /**
@@ -60,6 +61,8 @@
  * @property {string} url
  * @property {string} snippet
  * @property {string} [engine]
+ * @property {string} [corpusRoot]
+ * @property {string} [relativePath]
  * @property {string} [content]
  * @property {string} [summary]
  * @property {'skipped'|'ok'|'failed'} [fetchStatus]

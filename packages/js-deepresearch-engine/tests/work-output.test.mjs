@@ -56,7 +56,10 @@ describe('work output', () => {
 
   it('writes report and search artifacts into the session directory', () => {
     const cwd = makeTempRoot();
-    const settings = { research: { workDir: 'work_dir', iterations: 1, questionsPerIteration: 2 } };
+    const settings = {
+      research: { workDir: 'work_dir', iterations: 1, questionsPerIteration: 2 },
+      search: { engine: 'local', local: { dirs: ['/tmp/notes', '/tmp/notes'] }, apiKey: 'should-not-appear' },
+    };
     const date = new Date('2026-05-25T17:38:28.455Z');
     const result = {
       report: '# Report\n\nExample.',
@@ -88,6 +91,9 @@ describe('work output', () => {
     assert.equal(meta.researchId, 'research-123');
     assert.equal(meta.settings.iterations, 1);
     assert.equal(meta.settings.questionsPerIteration, 2);
+    assert.equal(meta.settings.searchEngine, 'local');
+    assert.deepEqual(meta.settings.corpusDirs, ['/tmp/notes']);
+    assert.equal(JSON.stringify(meta).includes('should-not-appear'), false);
     assert.equal(meta.artifactSchemaVersion, 3);
     assert.equal(meta.qualityMetricsVersion, 3);
     assert.equal(meta.claimExtractionVersion, 4);
