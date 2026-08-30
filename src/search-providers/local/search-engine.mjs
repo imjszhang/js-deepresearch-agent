@@ -216,7 +216,7 @@ export async function enumerateCorpusFiles({
       }
 
       if (lstat.isFile() && extSet.has(extensionOf(full))) {
-        let real = full;
+        let real;
         try {
           real = await fsImpl.promises.realpath(full);
         } catch {
@@ -255,7 +255,6 @@ async function scoreCorpusFile({ file, tokens, query, fsImpl }) {
   const relativePath = String(file.relativePath || '').replaceAll('\\', '/');
   const segments = relativePath.split('/').filter(Boolean);
   const hayName = fileName.toLowerCase();
-  const hayRel = relativePath.toLowerCase();
   let preview = '';
   const ext = extensionOf(file.path);
   if (TEXT_SEARCH_EXTENSIONS.includes(ext)) {

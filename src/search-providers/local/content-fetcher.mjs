@@ -41,7 +41,7 @@ export function createLocalFileContentFetchHandler(options = {}) {
     const { settings, signal, maxChars } = context;
     throwIfAborted(signal);
 
-    const local = normalizeLocalSearchConfig(settings?.search || {}).local;
+    const local = normalizeLocalSearchConfig(settings?.search || {}).local || {};
     const roots = local.dirs || [];
     if (roots.length === 0) {
       return { status: 'failed', error: 'No corpus directories configured' };

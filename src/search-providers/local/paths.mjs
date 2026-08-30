@@ -104,7 +104,7 @@ export async function resolveCorpusRoot(dir, fsImpl = fs) {
     stat = await fsImpl.promises.stat(resolved);
   } catch (error) {
     const detail = error?.code || error?.message || 'unreadable';
-    throw new Error(`Directory not found or unreadable: ${resolved} (${detail})`);
+    throw new Error(`Directory not found or unreadable: ${resolved} (${detail})`, { cause: error });
   }
   if (!stat.isDirectory()) {
     throw new Error(`Not a directory: ${resolved}`);
@@ -118,7 +118,7 @@ export async function resolveCorpusRoot(dir, fsImpl = fs) {
     return await fsImpl.promises.realpath(resolved);
   } catch (error) {
     const detail = error?.code || error?.message || 'unreadable';
-    throw new Error(`Directory not readable: ${resolved} (${detail})`);
+    throw new Error(`Directory not readable: ${resolved} (${detail})`, { cause: error });
   }
 }
 
