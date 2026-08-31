@@ -103,9 +103,12 @@ export class ResearchRunner {
     const secondaryLimitation = exploratoryLoop?.secondaryOnlyClaims?.length
       ? 'Some conclusions rest only on secondary or reprint sources and cannot be treated as primary-source verified.'
       : null;
+    const focusedFailures = focusedControl?.readiness?.failures || [];
     const unsupportedLimitation = exploratoryLoop?.unsupportedDecisions?.length
       ? `The report cannot support: ${exploratoryLoop.unsupportedDecisions.join('; ')}`
-      : null;
+      : (focusedFailures.length
+        ? `The report cannot support: ${focusedFailures.map((failure) => failure.message).join('; ')}`
+        : null);
     const degradedLimitation = findings.some((finding) => finding?.degraded)
       ? 'Evidence gathering was cut short before completion; treat the collected evidence as incomplete and state remaining uncertainty explicitly.'
       : null;
@@ -271,6 +274,7 @@ export class ResearchRunner {
       gate: finalGate,
       flags: [
         ...preReport.flags,
+        ...focusedFailures.map((failure) => failure.code).filter(Boolean),
         ...(budgetLimitation ? ['budget_exhausted'] : []),
         ...(noClaims ? ['no_claims'] : []),
         ...(unverifiedKeyClaims.length ? ['unverified_key_claims'] : []),

@@ -5,6 +5,7 @@ import { decideAdaptiveAction, fallbackAdaptiveAction, evaluateAnswerReadiness, 
 import { ResearchState } from '../adaptive/research-state.mjs';
 import { classifyResearchQuery } from '../adaptive/exploratory-sufficiency.mjs';
 import { inferResearchProfile, planResearchProfile } from '../adaptive/research-profile.mjs';
+import { mergeResearchBrief, researchBriefFromInput } from '../research-brief.mjs';
 import { classifyFetchedBody } from '../body-quality.mjs';
 import { inferEvidenceScope, listLocalCorpusChannels } from '../adaptive/source-policy.mjs';
 import {
@@ -115,7 +116,10 @@ async function filterDuplicateQueries(queries, { state, queryMemory, gapId, embe
   const accepted = [];
   for (const candidateQuery of queries) {
     const memoryHit = await queryMemory?.findDuplicate?.(candidateQuery, gapId);
-    if (memoryHit) continue;
+    if (memoryHit) {
+      state.noteDuplicateQuery?.();
+      continue;
+    }
     let duplicate = state.searchedQueries().some((seen) => similarQuestions(seen, candidateQuery, 0.86));
     if (!duplicate && embedding) {
       for (const seen of state.searchedQueries()) {
@@ -129,7 +133,11 @@ async function filterDuplicateQueries(queries, { state, queryMemory, gapId, embe
         }
       }
     }
-    if (!duplicate) accepted.push(candidateQuery);
+    if (duplicate) {
+      state.noteDuplicateQuery?.();
+      continue;
+    }
+    accepted.push(candidateQuery);
   }
   return accepted;
 }
@@ -183,7 +191,9 @@ export async function runExploratoryLoop(context) {
   applyExploratoryBudget(budget, exploratory);
   const maxSteps = effectiveExploratoryMaxSteps(exploratory, budget?.limits?.llmTokens);
   const evidenceScope = inferEvidenceScope(settings);
-  let profile = inferResearchProfile(context.brief || query, { settings, evidenceScope, depth: 'exploratory' });
+  const incomingBrief = context.brief || researchBriefFromInput(query, { depth: 'exploratory' });
+  let profile = inferResearchProfile({ ...incomingBrief, query }, { settings, evidenceScope, depth: 'exploratory' });
+  profile.brief = mergeResearchBrief(incomingBrief, profile.brief, { query, depth: 'exploratory' });
   const state = new ResearchState({
     query,
     maxSteps,
@@ -325,6 +335,7 @@ export async function runExploratoryLoop(context) {
 
   const profileTokensBefore = budget?.usage?.llmTokens || 0;
   profile = await planResearchProfile({ llm, query, profile, signal, settings, evidenceScope });
+  profile.brief = mergeResearchBrief(incomingBrief, profile.brief, { query, depth: 'exploratory' });
   state.profile = profile;
   state.brief = profile.brief;
   state.evidenceScope = profile.evidenceScope || evidenceScope;
@@ -573,10 +584,11 @@ export async function runExploratoryLoop(context) {
             registrableDomain: result.registrableDomain,
           })), { embedding, signal, traces: state.embeddingTraces });
           const clusterById = Object.fromEntries(clustered.map((item) => [item.id || item.url, item.clusterId]));
-          newUrls += state.addCandidates(clustered, gapId, { query: searchQuery, clusterById });
+          const addedThisQuery = state.addCandidates(clustered, gapId, { query: searchQuery, clusterById });
+          newUrls += addedThisQuery;
           state.noteSearchYield({
             duplicateResults: memoryEntry?.status === 'duplicate_results',
-            newUrls,
+            newUrls: addedThisQuery,
           });
           addSerpKnowledge(state, results, gapId);
           state.observations.push({
