@@ -220,7 +220,7 @@ export async function runFocusedPipeline(context) {
   });
 
   const challengeTargets = state.gaps.filter((gap) => (
-    gap.priority === 'critical'
+    (gap.priority === 'critical' && gap.answerSlot)
     || brief.consequentialClaims.some((claim) => (
       gap.question.includes(claim) || claim.includes(gap.answerSlot || gap.question)
     ))
@@ -235,7 +235,8 @@ export async function runFocusedPipeline(context) {
     });
   }
 
-  const spotCheckGap = challengeTargets[0] || state.gaps.find((gap) => gap.priority === 'critical');
+  const spotCheckGap = challengeTargets[0]
+    || state.gaps.find((gap) => gap.priority === 'critical' && gap.answerSlot);
   if (spotCheckGap) {
     const bodySource = findings
       .filter((finding) => finding.gapId === spotCheckGap.id)

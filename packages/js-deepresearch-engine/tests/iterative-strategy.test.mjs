@@ -47,10 +47,9 @@ describe('iterative strategy pipeline', () => {
       'deep topic',
       'first iteration question',
       'deep topic successful_body independent_sources primary source evidence',
-      'deep topic counterexample failure correction alternative explanation',
     ]);
     assert.equal(questionGenerationCalls, 2);
-    assert.deepEqual(findings.map((finding) => finding.wave), ['discovery', 'discovery', 'repair', 'challenge']);
+    assert.deepEqual(findings.map((finding) => finding.wave), ['discovery', 'discovery', 'repair']);
   });
 
   it('uses the shared iterative pipeline for multi-round quick research', async () => {

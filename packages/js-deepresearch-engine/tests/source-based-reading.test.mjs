@@ -528,9 +528,8 @@ describe('focused pipeline', () => {
       'deep topic',
       'first iteration question',
       'deep topic successful_body independent_sources primary source evidence',
-      'deep topic counterexample failure correction alternative explanation',
     ]);
-    assert.deepEqual(findings.map((finding) => finding.wave), ['discovery', 'discovery', 'repair', 'challenge']);
+    assert.deepEqual(findings.map((finding) => finding.wave), ['discovery', 'discovery', 'repair']);
   });
 
   it('emits enrichment and filter stages when enabled', async () => {
@@ -591,8 +590,8 @@ describe('focused pipeline', () => {
       emit: (event) => stages.push(event.stage),
       trace,
     });
-    assert.equal(searches.length, 4);
-    assert.equal(findings.length, 4);
+    assert.equal(searches.length, 3);
+    assert.equal(findings.length, 3);
     assert.ok(trace.some((entry) => entry.action === 'readiness_gate' && entry.reasonCode === 'repair_required'));
   });
 

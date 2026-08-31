@@ -112,9 +112,8 @@ describe('ResearchRunner', () => {
       'deep topic',
       'first iteration question',
       'deep topic successful_body independent_sources primary source evidence',
-      'deep topic counterexample failure correction alternative explanation',
     ]);
-    assert.deepEqual(result.findings.map((finding) => finding.wave), ['discovery', 'discovery', 'repair', 'challenge']);
+    assert.deepEqual(result.findings.map((finding) => finding.wave), ['discovery', 'discovery', 'repair']);
     assert.equal(result.gaps.length, 2);
     assert.equal(result.gaps[0].priority, 'critical');
     assert.ok(result.trace.some((entry) => entry.action === 'search_wave_started' && entry.wave === 'repair'));
