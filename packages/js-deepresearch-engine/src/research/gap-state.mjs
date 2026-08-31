@@ -1,5 +1,11 @@
 import { sourceHasBody } from './adaptive/exploratory-sufficiency.mjs';
-import { classifySourceTier, evidenceIndependenceKey, hostnamesMatch, hostnameOf } from './adaptive/source-policy.mjs';
+import {
+  classifySourceTier,
+  documentMatchesQuerySubject,
+  evidenceIndependenceKey,
+  hostnamesMatch,
+  hostnameOf,
+} from './adaptive/source-policy.mjs';
 
 export const GAP_SCHEMA_VERSION = 2;
 export const GAP_STATUSES = Object.freeze(['open', 'searched', 'body_read', 'verified', 'conflicting', 'limited']);
@@ -20,7 +26,8 @@ function satisfiesRequiredEvidence(source, gap) {
     return gap.requiredHosts.some((host) => hostnamesMatch(hostnameOf(source.url || source.id), host));
   }
   if ((gap.requiredSourceTypes || []).includes('primary_filing')) {
-    return ['required_primary', 'other_primary'].includes(source.tier || classifySourceTier(source, gap));
+    return ['required_primary', 'other_primary'].includes(source.tier || classifySourceTier(source, gap))
+      && documentMatchesQuerySubject(source, gap.question);
   }
   return true;
 }

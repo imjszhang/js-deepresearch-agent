@@ -30,6 +30,16 @@ export class QueryMemory {
     return [...new Set((results || []).map((item) => item?.url).filter(Boolean))].sort().join('\n');
   }
 
+  async queriesMatch(left, right) {
+    const normalizedLeft = normalizeQuery(left);
+    const normalizedRight = normalizeQuery(right);
+    let score = normalizedLeft === normalizedRight ? 1 : querySimilarity(normalizedLeft, normalizedRight);
+    if (score < this.similarityThreshold && this.similarityProvider?.similarity) {
+      try { score = await this.similarityProvider.similarity(left, right); } catch { /* deterministic fallback */ }
+    }
+    return { match: score >= this.similarityThreshold, score };
+  }
+
   async findDuplicate(query, gapId = null, options = {}) {
     if (!this.enabled) return null;
     const fingerprint = this.resultFingerprint(options.results);
@@ -42,11 +52,8 @@ export class QueryMemory {
     }
     const normalized = normalizeQuery(query);
     for (const entry of this.entries.filter((item) => item.status !== 'cancelled' && item.gapId === gapId)) {
-      let score = normalized === entry.normalized ? 1 : querySimilarity(normalized, entry.normalized);
-      if (score < this.similarityThreshold && this.similarityProvider?.similarity) {
-        try { score = await this.similarityProvider.similarity(query, entry.query); } catch { /* deterministic fallback */ }
-      }
-      if (score >= this.similarityThreshold) {
+      const { match, score } = await this.queriesMatch(normalized, entry.normalized);
+      if (match) {
         this.onSkip({ query, duplicateOf: entry.query, score });
         return { entry, score };
       }

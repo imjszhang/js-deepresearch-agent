@@ -70,7 +70,7 @@ describe('ResearchRunner', () => {
     assert.equal(strategyMetadata[0].supportsConcurrency, true);
   });
 
-  it('runs focused research across configured iterations', async () => {
+  it('runs focused discovery and targeted repair waves', async () => {
     const searchedQuestions = [];
     const runner = new ResearchRunner();
 
@@ -111,11 +111,13 @@ describe('ResearchRunner', () => {
     assert.deepEqual(searchedQuestions, [
       'deep topic',
       'first iteration question',
-      'second iteration question',
+      'deep topic successful_body independent_sources primary source evidence',
+      'deep topic counterexample failure correction alternative explanation',
     ]);
-    assert.deepEqual(result.findings.map((finding) => finding.iteration), [1, 1, 2]);
-    assert.equal(result.gaps.length, 3);
+    assert.deepEqual(result.findings.map((finding) => finding.wave), ['discovery', 'discovery', 'repair', 'challenge']);
+    assert.equal(result.gaps.length, 2);
     assert.equal(result.gaps[0].priority, 'critical');
+    assert.ok(result.trace.some((entry) => entry.action === 'search_wave_started' && entry.wave === 'repair'));
   });
 
   it('rejects unsupported research strategies', async () => {
@@ -223,7 +225,7 @@ describe('ResearchRunner', () => {
       } },
     });
     assert.equal(result.gaps[0].priority, 'critical');
-    assert.equal(result.gaps[0].status, 'open');
+    assert.equal(result.gaps[0].status, 'searched');
     assert.ok(result.quality.flags.includes('critical_gaps_open'));
     assert.ok(result.quality.flags.includes('primary_source_missing'));
     assert.ok(result.quality.flags.includes('no_direct_evidence'));

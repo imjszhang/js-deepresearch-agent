@@ -132,7 +132,6 @@ export async function runFocusedPipeline(context) {
     budget,
     queryMemory,
     trace = [],
-    researchProviders,
   } = context;
 
   const focused = resolveFocusedSettings(settings);

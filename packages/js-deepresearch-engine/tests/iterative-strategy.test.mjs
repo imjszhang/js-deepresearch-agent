@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 import { runStrategy } from '../src/research/strategies.mjs';
 
 describe('iterative strategy pipeline', () => {
-  it('includes the original query on the first focused iteration and uses context afterward', async () => {
+  it('uses focused discovery, repair, and bounded challenge waves', async () => {
     const searchedQuestions = [];
     let questionGenerationCalls = 0;
 
@@ -46,10 +46,11 @@ describe('iterative strategy pipeline', () => {
     assert.deepEqual(searchedQuestions, [
       'deep topic',
       'first iteration question',
-      'second iteration question',
+      'deep topic successful_body independent_sources primary source evidence',
+      'deep topic counterexample failure correction alternative explanation',
     ]);
     assert.equal(questionGenerationCalls, 2);
-    assert.deepEqual(findings.map((finding) => finding.iteration), [1, 1, 2]);
+    assert.deepEqual(findings.map((finding) => finding.wave), ['discovery', 'discovery', 'repair', 'challenge']);
   });
 
   it('uses the shared iterative pipeline for multi-round quick research', async () => {

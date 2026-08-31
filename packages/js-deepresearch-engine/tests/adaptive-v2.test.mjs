@@ -316,6 +316,7 @@ describe('exploratory agent loop', () => {
       'independent_sources_short',
       'answer_gate_failed',
       'readiness_gate_failed',
+      'critical_gap_open',
     ].includes(retry.reasonCode));
     assert.ok(result.trace.some((entry) => entry.action === 'read' && entry.reasonCode === 'improve_evidence'));
   });

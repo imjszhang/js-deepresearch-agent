@@ -47,6 +47,27 @@ const result = await runner.run({
 console.log(result.report);
 ```
 
+`query` may also be a versioned structured brief. Unspecified fields remain empty:
+
+```javascript
+const result = await runner.run({
+  query: {
+    schemaVersion: 1,
+    query: 'Compare alpha and beta for production use',
+    audience: 'platform engineers',
+    decision: 'select a runtime',
+    depth: 'focused',
+    requiredAnswerSlots: [
+      { answerSlot: 'reliability', question: 'What failure modes are documented?', priority: 'critical' },
+    ],
+    consequentialClaims: ['safe for production'],
+  },
+  settings,
+});
+```
+
+Focused runs use bounded discovery/merge/repair waves and the same deterministic base readiness checks as exploratory runs. Gap schema v2 is claim/answer-slot aware. Search snippets never verify deep-research gaps, and semantic providers cannot override readiness failures.
+
 ## Injecting Mock Adapters
 
 For tests or custom integrations, pass `llm` and `search` directly:
