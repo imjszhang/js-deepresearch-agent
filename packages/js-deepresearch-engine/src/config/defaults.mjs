@@ -72,6 +72,11 @@ export const defaultSettings = Object.freeze({
         timeoutMs: 30000,
       },
     },
+    read: {
+      fetchMode: 'summary',
+      maxContentChars: 8000,
+      enrichConcurrency: 2,
+    },
     focused: {
       fetchMode: 'summary',
       fetchBackend: 'auto',
@@ -114,6 +119,14 @@ export const defaultSettings = Object.freeze({
         mode: 'rules',
         blockUnsupportedClaims: false,
       },
+      challenge: {
+        enabled: true,
+        maxClaims: 2,
+      },
+      plateau: {
+        enabled: true,
+        maxLowYieldWaves: 1,
+      },
     },
     exploratory: {
       maxSteps: 0,
@@ -126,8 +139,6 @@ export const defaultSettings = Object.freeze({
       maxReadsPerStep: 4,
       maxSearchRequests: 0,
       maxSourceReads: 0,
-      plannerParallelism: 2,
-      enableCoding: false,
       gateMode: 'rules-then-llm',
       maxEvaluationRetries: 1,
       answerGate: true,
@@ -188,6 +199,10 @@ export function mergeSettings(overrides = {}) {
           ...(researchOverrides.providers?.rerank || {}),
         },
       },
+      read: {
+        ...defaultSettings.research.read,
+        ...(researchOverrides.read || {}),
+      },
       focused: {
         ...defaultSettings.research.focused,
         ...(researchOverrides.focused || {}),
@@ -210,6 +225,14 @@ export function mergeSettings(overrides = {}) {
         preReportGate: {
           ...defaultSettings.research.focused.preReportGate,
           ...(researchOverrides.focused?.preReportGate || {}),
+        },
+        challenge: {
+          ...defaultSettings.research.focused.challenge,
+          ...(researchOverrides.focused?.challenge || {}),
+        },
+        plateau: {
+          ...defaultSettings.research.focused.plateau,
+          ...(researchOverrides.focused?.plateau || {}),
         },
       },
       exploratory: {

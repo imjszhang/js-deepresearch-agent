@@ -194,6 +194,8 @@ export function archiveResearchResult({
     findingsPath: artifacts?.findingsPath ?? null,
     sourcesPath: artifacts?.sourcesPath ?? null,
     metaPath: artifacts?.metaPath ?? null,
+    briefPath: artifacts?.briefPath ?? null,
+    researchBrief: result?.brief ?? null,
     findingsCount: findings.length,
     sourcesCount: sources.length,
     gapsCount: gaps.length,

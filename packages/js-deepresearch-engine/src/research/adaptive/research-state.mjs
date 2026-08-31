@@ -9,7 +9,6 @@ import { evaluateReadinessGate } from './readiness-gate.mjs';
 import {
   classifySourceTier,
   documentMatchesQuerySubject,
-  evidenceIndependenceKey,
   hostnameOf as policyHostnameOf,
   hostnamesMatch,
   inferEvidenceScope,
@@ -18,6 +17,7 @@ import {
 } from './source-policy.mjs';
 import { sourceDiversityKey } from '../source-candidates.mjs';
 import { UrlPool } from './url-pool.mjs';
+import { evaluateGapEvidence } from '../gap-state.mjs';
 
 export { hostnameOf } from './source-policy.mjs';
 
@@ -73,6 +73,7 @@ export class ResearchState {
     profile = null,
     settings = null,
     evidenceScope = null,
+    brief = null,
   } = {}) {
     this.query = query;
     this.settings = settings || {};
@@ -91,6 +92,7 @@ export class ResearchState {
       settings: this.settings,
       evidenceScope: this.evidenceScope,
     });
+    this.brief = brief || this.profile?.brief || null;
     this.step = 0;
     this.lastAction = null;
     this.gaps = [createRootGap(query, this.profile)];
@@ -105,6 +107,15 @@ export class ResearchState {
     this.forbidFinalizeUntilExplore = false;
     this.forbidSearchUntilRead = false;
     this.embeddingTraces = [];
+    this.marginal = {
+      consecutiveLowNoveltyReads: 0,
+      duplicateQueryCount: 0,
+      duplicateResultCount: 0,
+      searchCount: 0,
+      recentNewIndependentSources: 0,
+      recentMaterialGapsClosed: 0,
+      plateau: false,
+    };
     this.cycle = {
       afterSearch: false,
       successfulBodyReads: 0,
@@ -135,6 +146,8 @@ export class ResearchState {
       preferredHosts: options.preferredHosts,
       requiredSourceTypes: options.requiredSourceTypes,
       minIndependentSources: options.minIndependentSources,
+      answerSlot: options.answerSlot,
+      claimFamily: options.claimFamily,
     });
     this.gaps.push(gap);
     return gap;
@@ -199,7 +212,28 @@ export class ResearchState {
     this.forbidSearchUntilRead = false;
   }
 
+  noteReadNovelty(novel) {
+    this.marginal.consecutiveLowNoveltyReads = novel
+      ? 0
+      : this.marginal.consecutiveLowNoveltyReads + 1;
+    this.marginal.plateau = this.marginal.consecutiveLowNoveltyReads >= 2
+      || (this.marginal.searchCount >= 2
+        && this.marginal.recentNewIndependentSources === 0
+        && this.marginal.recentMaterialGapsClosed === 0);
+  }
+
+  noteSearchYield({ duplicateResults = false, newUrls = 0 } = {}) {
+    this.marginal.searchCount += 1;
+    if (duplicateResults) this.marginal.duplicateResultCount += 1;
+    this.marginal.recentNewIndependentSources = Number(newUrls) || 0;
+    this.marginal.plateau = this.marginal.consecutiveLowNoveltyReads >= 2
+      || (this.marginal.searchCount >= 2
+        && this.marginal.recentNewIndependentSources === 0
+        && this.marginal.recentMaterialGapsClosed === 0);
+  }
+
   syncGapCoverage() {
+    const verifiedBefore = new Set(this.gaps.filter((gap) => gap.status === 'verified').map((gap) => gap.id));
     for (const gap of this.gaps) {
       const sources = this.findings
         .filter((finding) => finding.gapId === gap.id)
@@ -208,19 +242,17 @@ export class ResearchState {
         ...(gap.readSourceIds || []),
         ...sources.map((source) => source.id || source.url).filter(Boolean),
       ])];
-      const hasBody = sources.length > 0;
-      const requiredOk = this.gapHasRequiredHostBody(gap.id);
-      const keys = new Set(sources.map((source) => evidenceIndependenceKey(source)).filter(Boolean));
-      const independentOk = keys.size >= (Number(gap.minIndependentSources) || 1);
       if (gap.status === 'blocked' || gap.status === 'missing') continue;
-      if (hasBody && requiredOk && independentOk) {
-        gap.status = 'verified';
-        gap.resolvedAtStep = this.step;
-      } else if (hasBody) {
-        gap.status = 'body_read';
-        gap.resolvedAtStep = this.step;
-      }
+      Object.assign(gap, evaluateGapEvidence(gap, sources, {
+        passageIds: this.findings
+          .filter((finding) => finding.gapId === gap.id)
+          .flatMap((finding) => finding.passageIds || []),
+      }));
+      if (gap.status === 'verified') gap.resolvedAtStep = this.step;
     }
+    this.marginal.recentMaterialGapsClosed = this.gaps.filter((gap) => (
+      gap.status === 'verified' && !verifiedBefore.has(gap.id)
+    )).length;
   }
 
   markGapStatus(gapId, status, reason = null) {
@@ -345,6 +377,7 @@ export class ResearchState {
         minIndependentSources: this.profile?.minIndependentSources || 1,
         evidenceScope: this.evidenceScope || this.profile?.evidenceScope || 'web',
       },
+      brief: this.brief,
       gaps,
       focusGapId: this.focusGap()?.id || 'gap-1',
       findingsCount: this.findings.length,
@@ -381,6 +414,12 @@ export class ResearchState {
         decision: this.sufficiency.decision,
         method: this.sufficiency.method,
       } : null),
+      marginal: {
+        ...this.marginal,
+        duplicateResultRatio: this.marginal.searchCount
+          ? this.marginal.duplicateResultCount / this.marginal.searchCount
+          : 0,
+      },
     };
   }
 

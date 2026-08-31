@@ -1,5 +1,5 @@
 import { enrichFindings } from '../source-enricher.mjs';
-import { resolveFocusedSettings } from '../focused-settings.mjs';
+import { resolveReadSettings } from '../read-settings.mjs';
 import { applyExploratoryBudget, effectiveExploratoryMaxSteps, resolveExploratorySettings } from '../exploratory-settings.mjs';
 import { decideAdaptiveAction, fallbackAdaptiveAction, evaluateAnswerReadiness, decomposeQuery, pickUnreadCandidates, buildAngleChangeSearch, belowHardCapFrom } from '../adaptive/agent-policy.mjs';
 import { ResearchState } from '../adaptive/research-state.mjs';
@@ -178,12 +178,12 @@ async function observeRerank({ state, gap, providers, signal, trace, budget }) {
 export async function runExploratoryLoop(context) {
   const { query, llm, search, signal, emit, settings, budget, queryMemory, trace, researchProviders } = context;
   const exploratory = resolveExploratorySettings(settings);
-  const focused = resolveFocusedSettings(settings);
+  const readPolicy = resolveReadSettings(settings, { strategy: 'exploratory' });
   const queryShape = classifyResearchQuery(query);
   applyExploratoryBudget(budget, exploratory);
   const maxSteps = effectiveExploratoryMaxSteps(exploratory, budget?.limits?.llmTokens);
   const evidenceScope = inferEvidenceScope(settings);
-  let profile = inferResearchProfile(query, { settings, evidenceScope });
+  let profile = inferResearchProfile(context.brief || query, { settings, evidenceScope, depth: 'exploratory' });
   const state = new ResearchState({
     query,
     maxSteps,
@@ -194,6 +194,7 @@ export async function runExploratoryLoop(context) {
     profile,
     settings,
     evidenceScope,
+    brief: profile.brief,
   });
   const maxReads = Math.max(1, Number(exploratory.maxReadsPerStep) || 3);
   const maxRetries = Math.max(0, Number(exploratory.maxEvaluationRetries) || 0);
@@ -252,11 +253,11 @@ export async function runExploratoryLoop(context) {
     let finding = selectedFinding(state, sourceIds, gapId);
     finding = (await enrichFindings([finding], {
       query,
-      fetchMode: focused.fetchMode,
+      fetchMode: readPolicy.fetchMode,
       maxUrlsPerIteration: maxReads,
       maxUrlsTotal: maxReads,
-      maxContentChars: focused.maxContentChars,
-      enrichConcurrency: focused.enrichConcurrency,
+      maxContentChars: readPolicy.maxContentChars,
+      enrichConcurrency: readPolicy.enrichConcurrency,
       llm,
       signal,
       settings,
@@ -292,6 +293,7 @@ export async function runExploratoryLoop(context) {
           traces: state.embeddingTraces,
         });
         next.novelty = novelty.novel;
+        state.noteReadNovelty(novelty.novel);
       }
       const gap = state.getGap(finding.gapId);
       if (gap && !gap.readSourceIds.includes(id)) gap.readSourceIds.push(id);
@@ -324,6 +326,7 @@ export async function runExploratoryLoop(context) {
   const profileTokensBefore = budget?.usage?.llmTokens || 0;
   profile = await planResearchProfile({ llm, query, profile, signal, settings, evidenceScope });
   state.profile = profile;
+  state.brief = profile.brief;
   state.evidenceScope = profile.evidenceScope || evidenceScope;
   state.gaps[0] = {
     ...state.gaps[0],
@@ -332,6 +335,19 @@ export async function runExploratoryLoop(context) {
     requiredSourceTypes: profile.requiredSourceTypes ?? [],
     minIndependentSources: profile.minIndependentSources || 1,
   };
+  for (const slot of profile.brief?.requiredAnswerSlots || []) {
+    if (state.gaps.length >= maxOpenGaps) break;
+    state.addGap(slot.question || slot.answerSlot, slot.priority, {
+      answerSlot: slot.answerSlot,
+      claimFamily: slot.claimFamily,
+      requiredHosts: slot.requiredHosts,
+      requiredSourceTypes: slot.requiredSourceTypes,
+    });
+  }
+  addTrace(trace, state, 'research_brief_sanitized', {
+    reasonCode: 'planner_output_validated',
+    brief: state.brief,
+  }, budget);
   state.actionCosts.record('reflect', (budget?.usage?.llmTokens || 0) - profileTokensBefore);
 
   if (queryShape.kind === 'definitional') {
@@ -405,6 +421,18 @@ export async function runExploratoryLoop(context) {
             readiness: gate,
             sufficiency: state.sufficiency,
           });
+        }
+        if (state.marginal.plateau && action?.action === 'search') {
+          const redirected = buildAngleChangeSearch(state);
+          if (redirected) {
+            action = { ...redirected, reasonCode: 'plateau_change_angle' };
+            addTrace(trace, state, 'plateau', {
+              reasonCode: 'exploratory_action_redirected',
+              marginal: { ...state.marginal },
+              originalAction: 'search',
+              nextAction: action.action,
+            }, budget);
+          }
         }
         if (FINALIZE_ACTIONS.has(action?.action) && !gate?.pass && pendingStopReason !== STOP_REASONS.budgetExhausted) {
           action = {
@@ -546,6 +574,10 @@ export async function runExploratoryLoop(context) {
           })), { embedding, signal, traces: state.embeddingTraces });
           const clusterById = Object.fromEntries(clustered.map((item) => [item.id || item.url, item.clusterId]));
           newUrls += state.addCandidates(clustered, gapId, { query: searchQuery, clusterById });
+          state.noteSearchYield({
+            duplicateResults: memoryEntry?.status === 'duplicate_results',
+            newUrls,
+          });
           addSerpKnowledge(state, results, gapId);
           state.observations.push({
             type: 'search_result',
@@ -778,9 +810,11 @@ export async function runExploratoryLoop(context) {
   return attachLoopMeta(state.findings, {
     stopReason,
     profile: state.profile,
+    brief: state.brief,
     gaps: state.gaps,
     readiness: state.readiness,
     embeddingTraces: state.embeddingTraces,
+    marginal: state.snapshot().marginal,
     ...notes,
   });
 }

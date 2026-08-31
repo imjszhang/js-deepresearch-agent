@@ -34,6 +34,13 @@ export class SearxngSearchEngine {
         url: item.url || '',
         snippet: item.content || item.snippet || '',
         engine: 'searxng',
+        ...(item.publisher ? { publisher: item.publisher } : {}),
+        ...(item.author ? { author: item.author } : {}),
+        ...(item.publishedAt || item.publishedDate || item.date
+          ? { publishedAt: item.publishedAt || item.publishedDate || item.date }
+          : {}),
+        ...(item.updatedAt ? { updatedAt: item.updatedAt } : {}),
+        ...(item.sourceType ? { sourceType: item.sourceType } : {}),
       }))
       .filter((item) => item.url || item.snippet);
   }

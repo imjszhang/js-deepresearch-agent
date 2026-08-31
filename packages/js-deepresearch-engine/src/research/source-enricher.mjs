@@ -1,6 +1,7 @@
 import { resolveUrlContent } from './content-resolver.mjs';
 import { focusedSourceSelection } from './focused-settings.mjs';
 import { selectRelevantPassages } from './passage-selector.mjs';
+import { withSourceProvenance } from './source-provenance.mjs';
 
 function relatedLinksFromFetch(fetched, settings) {
   const selection = focusedSourceSelection(settings);
@@ -62,15 +63,17 @@ async function enrichOneSource(source, {
   });
   if (fetched.status !== 'ok') {
     return {
-      ...source,
+      ...withSourceProvenance(source, fetched),
       fetchStatus: 'failed',
       fetchError: fetched.error || 'Fetch failed',
+      accessStatus: fetched.accessStatus || 'failed',
+      accessNotes: fetched.accessNotes || fetched.error || 'Fetch failed',
     };
   }
 
   if (fetchMode === 'full') {
     return {
-      ...source,
+      ...withSourceProvenance(source, fetched),
       title: source.title || fetched.title,
       content: fetched.content,
       contentOrigin: 'fetched',
@@ -89,7 +92,7 @@ async function enrichOneSource(source, {
       signal,
     });
     return {
-      ...source,
+      ...withSourceProvenance(source, fetched),
       title: source.title || fetched.title,
       content: fetched.content,
       contentOrigin: 'fetched',
@@ -115,7 +118,7 @@ async function enrichOneSource(source, {
   });
 
   return {
-    ...source,
+    ...withSourceProvenance(source, fetched),
     title: source.title || fetched.title,
     content: fetched.content,
     contentOrigin: 'fetched',

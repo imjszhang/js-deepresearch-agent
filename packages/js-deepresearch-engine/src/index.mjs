@@ -51,6 +51,20 @@ export { normalizeSearchConfig } from './search/normalize-search-config.mjs';
 export { resolveSearchConcurrency } from './search/search-capabilities.mjs';
 export { BudgetManager, BudgetExceededError } from './research/budget-manager.mjs';
 export { QueryMemory, normalizeQuery, querySimilarity } from './research/query-memory.mjs';
+export {
+  RESEARCH_BRIEF_SCHEMA_VERSION,
+  sanitizeResearchBrief,
+  sanitizeAnswerSlots,
+  researchBriefFromInput,
+  mergeResearchBrief,
+} from './research/research-brief.mjs';
+export {
+  GAP_SCHEMA_VERSION,
+  GAP_STATUSES,
+  normalizeGapRecord,
+  evaluateGapEvidence,
+  isMaterialGap,
+} from './research/gap-state.mjs';
 export { normalizeSourceUrl, selectDiverseSources, SourceCandidatePool, isPrimarySource, sourceDiversityKey, isFileSourceUrl } from './research/source-candidates.mjs';
 export {
   buildEvidenceArtifacts,

@@ -1,5 +1,7 @@
 import { classifyResearchQuery } from './exploratory-sufficiency.mjs';
 import { inferEvidenceScope, listLocalCorpusChannels } from './source-policy.mjs';
+import { mergeResearchBrief, sanitizeResearchBrief } from '../research-brief.mjs';
+import { GAP_SCHEMA_VERSION } from '../gap-state.mjs';
 
 const HOST_IN_QUERY = /\b(?:[a-z0-9-]+\.)+(?:com|org|net|edu|gov|io|hk|cn|uk|jp|ai|info)\b/gi;
 const FILE_EXT_HOSTS = /\.(cpp|js|ts|py|md|pdf|exe|zip|png|jpg)$/i;
@@ -68,6 +70,10 @@ export function inferResearchProfile(query = {}, options = {}) {
     maxAgeDays: null,
     method: 'rules',
     evidenceScope,
+    brief: sanitizeResearchBrief(
+      typeof query === 'object' ? query : { query: text },
+      { query: text, depth: options.depth || 'exploratory' },
+    ),
   }, { evidenceScope, settings, query: text });
 }
 
@@ -86,6 +92,10 @@ export function sanitizeEvidenceProfile(profile = {}, {
     preferredHosts: sanitizeHosts(profile.preferredHosts),
     requiredSourceTypes: sanitizeSourceTypes(profile.requiredSourceTypes),
     plannedGaps: sanitizePlannedGaps(profile.plannedGaps),
+    brief: sanitizeResearchBrief(profile.brief || { query: text }, {
+      query: text,
+      depth: profile.brief?.depth || 'exploratory',
+    }),
     evidenceScope: scope,
   };
   if (scope === 'local') {
@@ -137,6 +147,10 @@ export function mergeProfilePlan(base, plan = {}) {
       Number(plan.minIndependentSources) || 0,
     ),
     plannedGaps: sanitizePlannedGaps(plan.gaps),
+    brief: mergeResearchBrief(base.brief || { query: base.query }, plan.brief || plan, {
+      query: base.query,
+      depth: base.brief?.depth || 'exploratory',
+    }),
     evidenceScope: plan.evidenceScope || base.evidenceScope,
     method: plan.method ? `${base.method}+${plan.method}` : base.method,
   };
@@ -172,7 +186,7 @@ export async function planResearchProfile({ llm, query, profile, signal, setting
         role: 'system',
         content: [
           'Infer a research evidence profile for THIS query only. Do not invent a fixed industry questionnaire.',
-          'Return JSON only: {"flags":{"freshness":false,"completeness":false,"plurality":false,"attribution":false,"primary_source":false,"numeric":false,"decision_critical":false},"requiredHosts":[],"preferredHosts":[],"requiredSourceTypes":[],"minIndependentSources":1,"gaps":[{"question":"...","priority":"critical|normal","requiredHosts":[]}]}',
+          'Return JSON only: {"audience":null,"decision":null,"assumedExpertise":null,"timeRange":null,"geography":[],"entities":[],"exclusions":[],"successCriteria":[],"requiredAnswerSlots":[{"answerSlot":"...","question":"...","claimFamily":null,"priority":"critical|normal"}],"consequentialClaims":[],"flags":{"freshness":false,"completeness":false,"plurality":false,"attribution":false,"primary_source":false,"numeric":false,"decision_critical":false},"requiredHosts":[],"preferredHosts":[],"requiredSourceTypes":[],"minIndependentSources":1,"gaps":[{"question":"...","priority":"critical|normal","requiredHosts":[]}]}',
           'requiredHosts and preferredHosts must be real hostnames you decide this query needs. Leave them empty when unknown.',
           '"官方" / "official" means first-party documents of the subject, not stock-exchange or SEC filings unless the query names that venue.',
           'Do not default to hkexnews.hk, sec.gov, sse.com.cn, or szse.cn. Do not add primary_filing unless the query itself is about filings or disclosures.',
@@ -219,10 +233,15 @@ export function createGapRecord({
   requiredSourceTypes,
   minIndependentSources,
   maxAgeDays,
+  answerSlot,
+  claimFamily,
 } = {}) {
   return {
+    schemaVersion: GAP_SCHEMA_VERSION,
     id,
     question: String(question || '').trim(),
+    answerSlot: answerSlot || null,
+    claimFamily: claimFamily || null,
     status: 'open',
     priority,
     depth,
@@ -236,6 +255,12 @@ export function createGapRecord({
     candidateUrls: [],
     readSourceIds: [],
     evidencePassageIds: [],
+    supportingPassageIds: [],
+    contradictingPassageIds: [],
+    confidence: null,
+    missingEvidence: ['successful_body'],
+    nextQueries: [],
+    resolutionReason: null,
     blockedReason: null,
   };
 }

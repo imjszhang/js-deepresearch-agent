@@ -51,8 +51,6 @@ export function resolveExploratorySettings(settings = {}) {
     maxReadsPerStep: Number(raw.maxReadsPerStep) || 4,
     maxSearchRequests: countBound(raw.maxSearchRequests, 0),
     maxSourceReads: countBound(raw.maxSourceReads, 0),
-    plannerParallelism: Number(raw.plannerParallelism) || 2,
-    enableCoding: raw.enableCoding === true,
     gateMode: raw.gateMode || 'rules-then-llm',
     maxEvaluationRetries: raw.maxEvaluationRetries === undefined ? 1 : Number(raw.maxEvaluationRetries),
     answerGate: raw.answerGate !== false,

@@ -27,6 +27,21 @@ function extractTitle(html = '') {
   return match ? stripHtml(match[1]) : '';
 }
 
+function extractMeta(html = '', names = []) {
+  for (const name of names) {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const patterns = [
+      new RegExp(`<meta\\b[^>]*(?:name|property)=["']${escaped}["'][^>]*content=["']([^"']+)["'][^>]*>`, 'i'),
+      new RegExp(`<meta\\b[^>]*content=["']([^"']+)["'][^>]*(?:name|property)=["']${escaped}["'][^>]*>`, 'i'),
+    ];
+    for (const pattern of patterns) {
+      const match = String(html).match(pattern);
+      if (match?.[1]) return stripHtml(match[1]);
+    }
+  }
+  return undefined;
+}
+
 function extractLinks(html = '', baseUrl = '') {
   const links = [];
   for (const match of String(html).matchAll(/<a\b[^>]*href=["']([^"']+)["'][^>]*>/gi)) {
@@ -77,6 +92,7 @@ export async function fetchUrlContent(url, {
   }
 
   try {
+    const accessedAt = new Date().toISOString();
     const response = await fetch(url, {
       signal: controller.signal,
       headers: {
@@ -97,6 +113,9 @@ export async function fetchUrlContent(url, {
       return {
         status: 'failed',
         error: `HTTP ${response.status}`,
+        accessedAt,
+        accessStatus: `http_${response.status}`,
+        accessNotes: `HTTP ${response.status}`,
       };
     }
 
@@ -134,6 +153,8 @@ export async function fetchUrlContent(url, {
         links: [],
         converter: 'anydoc',
         documentFormat: format,
+        accessedAt,
+        accessStatus: 'ok',
       };
     }
 
@@ -161,6 +182,14 @@ export async function fetchUrlContent(url, {
       title,
       content,
       links,
+      publisher: extractMeta(raw, ['og:site_name', 'publisher']),
+      author: extractMeta(raw, ['author', 'article:author']),
+      publishedAt: extractMeta(raw, ['article:published_time', 'datePublished', 'date']),
+      updatedAt: extractMeta(raw, ['article:modified_time', 'dateModified', 'last-modified'])
+        || response.headers.get('last-modified')
+        || undefined,
+      accessedAt,
+      accessStatus: 'ok',
     };
   } catch (error) {
     if (signal?.aborted) throw error;

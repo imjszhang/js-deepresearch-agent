@@ -17,6 +17,7 @@ export async function runIterativeStrategy(context) {
     search,
     signal,
     emit,
+    queryMemory,
   } = context;
   const resolvedConcurrency = resolveStrategyConcurrency(search, concurrency, questionCount + 1);
   const findings = [];
@@ -49,6 +50,8 @@ export async function runIterativeStrategy(context) {
       search,
       signal,
       concurrency: resolvedConcurrency,
+      queryMemory,
+      onSkip: ({ question }) => emit({ stage: 'query_skipped_duplicate', question, iteration, iterations }),
       onProgress: ({ completed, total }) => {
         emit({
           stage: 'search_progress',

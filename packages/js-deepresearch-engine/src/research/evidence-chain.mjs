@@ -11,6 +11,7 @@ import {
   tokenOverlapScore,
 } from './passage-utils.mjs';
 import { rankPassages } from './passage-selector.mjs';
+import { pickSourceProvenance } from './source-provenance.mjs';
 
 function hash(prefix, value) {
   return `${prefix}-${crypto.createHash('sha256').update(value).digest('hex').slice(0, 16)}`;
@@ -24,7 +25,11 @@ export function stableSourceId(source = {}) {
 function mergeSourceRecord(existing, incoming) {
   if (!existing) return { ...incoming };
   const merged = { ...existing };
-  for (const field of ['title', 'url', 'snippet', 'engine', 'platform', 'publishedAt', 'date', 'updatedAt']) {
+  for (const field of [
+    'title', 'url', 'snippet', 'engine', 'platform', 'publisher', 'author',
+    'publishedAt', 'date', 'updatedAt', 'accessedAt', 'sourceType',
+    'jurisdiction', 'productVersion', 'accessStatus', 'accessNotes',
+  ]) {
     if (!merged[field] && incoming[field]) merged[field] = incoming[field];
   }
   if (String(incoming.summary || '').length > String(merged.summary || '').length) merged.summary = incoming.summary;
@@ -53,6 +58,7 @@ function attachRankedPassages({
   sourceId,
   findingId,
   ranked = [],
+  source = {},
 }) {
   for (const passage of ranked) {
     const contentHash = crypto.createHash('sha256').update(passage.text).digest('hex');
@@ -71,6 +77,7 @@ function attachRankedPassages({
         evidenceOrigin: 'source_content',
         observedAt: new Date().toISOString(),
         contentHash,
+        provenance: pickSourceProvenance(source),
       });
     }
     passageIds.push(idValue);
@@ -256,6 +263,7 @@ export function buildPassageArtifacts({ query, findings = [], options = {} } = {
         sourceId: item.sourceId,
         findingId: job.id,
         ranked,
+        source: item.source,
       });
     }
     return toNormalizedFinding(job, passageIds);
@@ -289,6 +297,7 @@ export async function buildPassageArtifactsAsync({ query, findings = [], options
         sourceId: item.sourceId,
         findingId: job.id,
         ranked,
+        source: item.source,
       });
     }
     normalizedFindings.push(toNormalizedFinding(job, passageIds));
