@@ -1,6 +1,7 @@
 import { isSuccessfulBody, sourceHasObservableDate } from '../body-quality.mjs';
 import { classifyResearchQuery, subjectsMissingBodyEvidence } from './exploratory-sufficiency.mjs';
 import { classifySourceTier, hostnamesMatch, independentEvidenceKeysFromSources, hostnameOf } from './source-policy.mjs';
+import { isRequiredSlot } from '../gap-state.mjs';
 
 export const GAP_OPEN_STATUSES = new Set(['open', 'searched', 'missing', 'conflicting', 'limited']);
 export const GAP_CLOSED_STATUSES = new Set(['verified', 'body_read']);
@@ -65,7 +66,7 @@ export function evaluateReadinessGate({
     flags.push('no_direct_evidence');
   }
 
-  const criticalGaps = resolvedGaps.filter((gap) => gap.priority === 'critical');
+  const criticalGaps = resolvedGaps.filter((gap) => gap.priority === 'critical' && !gap.rollup);
   const unresolvedCritical = criticalGaps.filter((gap) => {
     if (GAP_CLOSED_STATUSES.has(gap.status) && gap.status !== 'body_read') return false;
     if (gap.status === 'verified') return false;
@@ -85,9 +86,21 @@ export function evaluateReadinessGate({
     flags.push('critical_gaps_open');
   }
 
+  const unresolvedRequiredSlots = resolvedGaps.filter((gap) => (
+    isRequiredSlot(gap) && (GAP_OPEN_STATUSES.has(gap.status) || gap.status === 'blocked')
+  ));
+  if (unresolvedRequiredSlots.length) {
+    failures.push({
+      code: 'required_slot_open',
+      message: `Required answer slots still open: ${unresolvedRequiredSlots.map((gap) => gap.id).join(', ')}`,
+      gapIds: unresolvedRequiredSlots.map((gap) => gap.id),
+    });
+    flags.push('required_slots_open');
+  }
+
   const missingRequired = [];
   for (const gap of resolvedGaps) {
-    if (!gapNeedsRequiredHost(gap)) continue;
+    if (gap.rollup || !gapNeedsRequiredHost(gap)) continue;
     const { missing, read } = requiredHostsRead(gap, resolvedFindings);
     if (missing.length && !read.length) {
       missingRequired.push({ gapId: gap.id, hosts: missing });
@@ -156,15 +169,18 @@ export function repairGapsFromGate(gate = {}, gaps = []) {
     ...(gate.unresolvedCriticalGapIds || []),
     ...(gate.failures || []).flatMap((failure) => failure.gapIds || []),
   ]);
-  return gaps.filter((gap) => (
-    targetIds.has(gap.id)
-    || ['conflicting', 'limited'].includes(gap.status)
-    || (gap.priority === 'critical' && GAP_OPEN_STATUSES.has(gap.status))
-  ));
+  return gaps.filter((gap) => {
+    if (gap.rollup) return false;
+    return targetIds.has(gap.id)
+      || ['conflicting', 'limited'].includes(gap.status)
+      || (gap.priority === 'critical' && GAP_OPEN_STATUSES.has(gap.status))
+      || (isRequiredSlot(gap) && GAP_OPEN_STATUSES.has(gap.status));
+  });
 }
 
 export function describeUnresolvedGaps(gaps = []) {
   return (gaps || [])
+    .filter((gap) => !gap.rollup)
     .filter((gap) => !GAP_CLOSED_STATUSES.has(gap.status) || (
       gap.status === 'body_read'
       && ((gap.requiredHosts || []).length || (gap.requiredSourceTypes || []).includes('primary_filing'))

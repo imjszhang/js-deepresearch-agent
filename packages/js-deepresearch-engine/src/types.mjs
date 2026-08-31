@@ -43,6 +43,7 @@
  * @property {number} [questionsPerIteration]
  * @property {number} [concurrency]
  * @property {string} [workDir]
+ * @property {{ fetchMode?: string, maxContentChars?: number, enrichConcurrency?: number }} [read]
  * @property {FocusedSettings} [focused]
  * @property {Record<string, number>} [budget]
  * @property {Record<string, unknown>} [exploratory]
@@ -129,6 +130,7 @@
 /**
  * @typedef {Object} StrategyContext
  * @property {string} query
+ * @property {Record<string, unknown>} [brief]
  * @property {number} iterations
  * @property {number} questionCount
  * @property {number|undefined} concurrency
@@ -141,11 +143,13 @@
  * @property {import('./research/budget-manager.mjs').BudgetManager} [budget]
  * @property {import('./research/query-memory.mjs').QueryMemory} [queryMemory]
  * @property {Array<Record<string, unknown>>} [trace]
+ * @property {Record<string, unknown>} [researchProviders]
  */
 
 /**
  * @typedef {Object} StrategyRunInput
  * @property {string} query
+ * @property {Record<string, unknown>} [brief]
  * @property {Settings} settings
  * @property {LlmClient} llm
  * @property {SearchEngine} search

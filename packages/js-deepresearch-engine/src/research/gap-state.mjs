@@ -20,6 +20,19 @@ function contradicts(source) {
     || source?.contradicts === true;
 }
 
+function sourceIdentity(source) {
+  return source?.id || source?.url || null;
+}
+
+function passagesForSource(source, passages = []) {
+  const sourceId = sourceIdentity(source);
+  const fromSource = unique(source?.passageIds);
+  const fromRecords = passages
+    .filter((passage) => passage?.id && (passage.sourceId === sourceId || fromSource.includes(passage.id)))
+    .map((passage) => passage.id);
+  return unique([...fromSource, ...fromRecords]);
+}
+
 function satisfiesRequiredEvidence(source, gap) {
   if (!sourceHasBody(source)) return false;
   if ((gap.requiredHosts || []).length) {
@@ -40,6 +53,9 @@ export function normalizeGapRecord(gap = {}, defaults = {}) {
     question: String(gap.question || defaults.question || '').trim(),
     answerSlot: gap.answerSlot || defaults.answerSlot || null,
     claimFamily: gap.claimFamily || defaults.claimFamily || null,
+    kind: gap.kind || defaults.kind || (gap.requiredSlot || defaults.requiredSlot ? 'slot' : 'followup'),
+    rollup: Boolean(gap.rollup ?? defaults.rollup),
+    requiredSlot: Boolean(gap.requiredSlot ?? defaults.requiredSlot),
     priority: gap.priority === 'critical' ? 'critical' : (defaults.priority || 'normal'),
     status: GAP_STATUSES.includes(gap.status) ? gap.status : 'open',
     supportingPassageIds: unique(gap.supportingPassageIds || gap.evidencePassageIds),
@@ -51,19 +67,19 @@ export function normalizeGapRecord(gap = {}, defaults = {}) {
   };
 }
 
-export function evaluateGapEvidence(gap, sources = [], { passageIds = [] } = {}) {
+export function evaluateGapEvidence(gap, sources = [], { passageIds = [], passages = [] } = {}) {
   const normalized = normalizeGapRecord(gap);
   const bodies = sources.filter(sourceHasBody);
   const supporting = bodies.filter((source) => !contradicts(source));
   const contradicting = bodies.filter(contradicts);
   const supportingPassageIds = unique([
     ...normalized.supportingPassageIds,
-    ...passageIds,
-    ...supporting.flatMap((source) => source.passageIds || []),
+    ...supporting.flatMap((source) => passagesForSource(source, passages)),
+    ...(contradicting.length ? [] : passageIds),
   ]);
   const contradictingPassageIds = unique([
     ...normalized.contradictingPassageIds,
-    ...contradicting.flatMap((source) => source.passageIds || []),
+    ...contradicting.flatMap((source) => passagesForSource(source, passages)),
   ]);
   const missingEvidence = [];
   const requiredSatisfied = !(normalized.requiredHosts || []).length
@@ -101,7 +117,41 @@ export function evaluateGapEvidence(gap, sources = [], { passageIds = [] } = {})
   };
 }
 
+export function isRequiredSlot(gap) {
+  return Boolean(gap?.requiredSlot) && !gap?.rollup;
+}
+
 export function isMaterialGap(gap) {
-  return gap?.priority === 'critical'
+  if (gap?.rollup) return false;
+  return isRequiredSlot(gap)
+    || gap?.priority === 'critical'
     || ['open', 'searched', 'conflicting', 'limited'].includes(gap?.status);
+}
+
+export function rollupRootGap(gaps = []) {
+  const slots = gaps.filter((gap) => isRequiredSlot(gap));
+  const root = gaps.find((gap) => gap.rollup || (gap.kind === 'root' && slots.length));
+  if (!root || !slots.length) return gaps;
+  if (slots.some((gap) => gap.status === 'conflicting')) {
+    root.status = 'conflicting';
+    root.resolutionReason = 'A required answer slot still has unresolved contradictory evidence.';
+    root.missingEvidence = unique(slots.flatMap((gap) => gap.missingEvidence || []));
+  } else if (slots.every((gap) => gap.status === 'verified')) {
+    root.status = 'verified';
+    root.resolutionReason = 'All required answer slots were verified.';
+    root.missingEvidence = [];
+  } else if (slots.some((gap) => ['limited', 'body_read'].includes(gap.status))) {
+    root.status = 'limited';
+    root.resolutionReason = 'Required answer slots still have incomplete body evidence.';
+    root.missingEvidence = unique(slots.flatMap((gap) => gap.missingEvidence || []));
+  } else if (slots.some((gap) => gap.status === 'searched')) {
+    root.status = 'searched';
+    root.resolutionReason = 'Required answer slots were searched but not yet verified.';
+    root.missingEvidence = unique(slots.flatMap((gap) => gap.missingEvidence || ['successful_body']));
+  } else {
+    root.status = 'open';
+    root.resolutionReason = 'Required answer slots remain open.';
+    root.missingEvidence = unique(slots.flatMap((gap) => gap.missingEvidence || ['successful_body']));
+  }
+  return gaps;
 }

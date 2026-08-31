@@ -32,7 +32,16 @@ function slotId(value, index) {
   return normalized || `slot-${index + 1}`;
 }
 
-export function sanitizeAnswerSlots(slots, { query = '', literalHosts = [] } = {}) {
+function hasUserValue(value) {
+  if (Array.isArray(value)) return value.length > 0;
+  return value != null && value !== '';
+}
+
+export function sanitizeAnswerSlots(slots, {
+  query = '',
+  literalHosts = [],
+  allowExplicitHosts = false,
+} = {}) {
   if (!Array.isArray(slots)) return [];
   const allowedHosts = new Set(literalHosts);
   const seen = new Set();
@@ -45,22 +54,28 @@ export function sanitizeAnswerSlots(slots, { query = '', literalHosts = [] } = {
     let id = slotId(source.id || answerSlot || question, index);
     if (seen.has(id)) id = `${id}-${index + 1}`;
     seen.add(id);
+    const hosts = sanitizeHosts(source.requiredHosts);
     result.push({
       id,
       answerSlot: answerSlot || question,
       question: question || query,
       claimFamily: text(source.claimFamily || source.claimType, 120) || null,
       priority: ANSWER_SLOT_PRIORITIES.includes(source.priority) ? source.priority : 'normal',
-      requiredHosts: sanitizeHosts(source.requiredHosts).filter((host) => allowedHosts.has(host)),
+      requiredHosts: allowExplicitHosts ? hosts : hosts.filter((host) => allowedHosts.has(host)),
       requiredSourceTypes: sanitizeSourceTypes(source.requiredSourceTypes),
       successCriteria: uniqueText(source.successCriteria, 8),
+      requiredSlot: source.requiredSlot !== false,
     });
     if (result.length >= 20) break;
   }
   return result;
 }
 
-export function sanitizeResearchBrief(input = {}, { query, depth = 'focused' } = {}) {
+export function sanitizeResearchBrief(input = {}, {
+  query,
+  depth = 'focused',
+  allowExplicitHosts = false,
+} = {}) {
   const source = typeof input === 'string' ? { query: input } : (input || {});
   const resolvedQuery = text(query || source.query);
   const resolvedDepth = RESEARCH_BRIEF_DEPTHS.includes(source.depth)
@@ -70,6 +85,7 @@ export function sanitizeResearchBrief(input = {}, { query, depth = 'focused' } =
   const requiredAnswerSlots = sanitizeAnswerSlots(source.requiredAnswerSlots, {
     query: resolvedQuery,
     literalHosts,
+    allowExplicitHosts,
   });
   return {
     schemaVersion: RESEARCH_BRIEF_SCHEMA_VERSION,
@@ -90,22 +106,46 @@ export function sanitizeResearchBrief(input = {}, { query, depth = 'focused' } =
 }
 
 export function researchBriefFromInput(input, { depth = 'focused' } = {}) {
-  if (typeof input === 'string') return sanitizeResearchBrief({ query: input }, { depth });
-  return sanitizeResearchBrief(input || {}, { depth });
+  if (typeof input === 'string') {
+    return sanitizeResearchBrief({ query: input }, { depth, allowExplicitHosts: true });
+  }
+  return sanitizeResearchBrief(input || {}, { depth, allowExplicitHosts: true });
 }
 
 export function mergeResearchBrief(base, plan = {}, options = {}) {
-  const sanitizedBase = sanitizeResearchBrief(base, options);
+  const sanitizedBase = sanitizeResearchBrief(base, {
+    ...options,
+    allowExplicitHosts: true,
+  });
+  const pickScalar = (key) => (
+    hasUserValue(sanitizedBase[key]) ? sanitizedBase[key] : (plan[key] ?? sanitizedBase[key])
+  );
+  const pickList = (key) => (
+    sanitizedBase[key]?.length ? sanitizedBase[key] : (Array.isArray(plan[key]) ? plan[key] : sanitizedBase[key])
+  );
+  const plannerSlots = sanitizeAnswerSlots(plan.requiredAnswerSlots, {
+    query: sanitizedBase.query,
+    literalHosts: extractLiteralHosts(sanitizedBase.query),
+    allowExplicitHosts: false,
+  });
   return sanitizeResearchBrief({
     ...sanitizedBase,
-    ...plan,
+    audience: pickScalar('audience'),
+    decision: pickScalar('decision'),
+    assumedExpertise: pickScalar('assumedExpertise'),
+    timeRange: pickScalar('timeRange'),
+    deadline: pickScalar('deadline'),
+    geography: pickList('geography'),
+    entities: pickList('entities'),
+    exclusions: pickList('exclusions'),
+    successCriteria: pickList('successCriteria'),
+    requiredAnswerSlots: sanitizedBase.requiredAnswerSlots.length
+      ? sanitizedBase.requiredAnswerSlots
+      : plannerSlots,
+    consequentialClaims: pickList('consequentialClaims'),
+  }, {
     query: sanitizedBase.query,
     depth: sanitizedBase.depth,
-    geography: plan.geography ?? sanitizedBase.geography,
-    entities: plan.entities ?? sanitizedBase.entities,
-    exclusions: plan.exclusions ?? sanitizedBase.exclusions,
-    successCriteria: plan.successCriteria ?? sanitizedBase.successCriteria,
-    requiredAnswerSlots: plan.requiredAnswerSlots ?? sanitizedBase.requiredAnswerSlots,
-    consequentialClaims: plan.consequentialClaims ?? sanitizedBase.consequentialClaims,
-  }, { query: sanitizedBase.query, depth: sanitizedBase.depth });
+    allowExplicitHosts: true,
+  });
 }

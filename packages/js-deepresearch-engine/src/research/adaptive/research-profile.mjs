@@ -72,7 +72,11 @@ export function inferResearchProfile(query = {}, options = {}) {
     evidenceScope,
     brief: sanitizeResearchBrief(
       typeof query === 'object' ? query : { query: text },
-      { query: text, depth: options.depth || 'exploratory' },
+      {
+        query: text,
+        depth: options.depth || 'exploratory',
+        allowExplicitHosts: typeof query === 'object',
+      },
     ),
   }, { evidenceScope, settings, query: text });
 }
@@ -95,6 +99,7 @@ export function sanitizeEvidenceProfile(profile = {}, {
     brief: sanitizeResearchBrief(profile.brief || { query: text }, {
       query: text,
       depth: profile.brief?.depth || 'exploratory',
+      allowExplicitHosts: true,
     }),
     evidenceScope: scope,
   };
@@ -219,6 +224,8 @@ export function createRootGap(query, profile = {}) {
     priority: 'critical',
     depth: 0,
     profile,
+    kind: 'root',
+    requiredSlot: false,
   });
 }
 
@@ -235,6 +242,9 @@ export function createGapRecord({
   maxAgeDays,
   answerSlot,
   claimFamily,
+  requiredSlot,
+  kind,
+  rollup,
 } = {}) {
   return {
     schemaVersion: GAP_SCHEMA_VERSION,
@@ -242,6 +252,9 @@ export function createGapRecord({
     question: String(question || '').trim(),
     answerSlot: answerSlot || null,
     claimFamily: claimFamily || null,
+    kind: kind || (requiredSlot ? 'slot' : 'followup'),
+    rollup: Boolean(rollup),
+    requiredSlot: Boolean(requiredSlot),
     status: 'open',
     priority,
     depth,

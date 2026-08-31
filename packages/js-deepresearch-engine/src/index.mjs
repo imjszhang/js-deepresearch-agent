@@ -34,6 +34,7 @@ export {
   researchSettingsNeedMigration,
 } from './research/strategy-aliases.mjs';
 export { getSourceEvidence, getSourceEvidenceClass, sourceHasFetchedBody, resolveFocusedSettings } from './research/focused-settings.mjs';
+export { resolveReadSettings } from './research/read-settings.mjs';
 export {
   resolveExploratorySettings,
   DEFAULT_EXPLORATORY_MIN_LLM_TOKENS,
@@ -64,6 +65,8 @@ export {
   normalizeGapRecord,
   evaluateGapEvidence,
   isMaterialGap,
+  isRequiredSlot,
+  rollupRootGap,
 } from './research/gap-state.mjs';
 export { normalizeSourceUrl, selectDiverseSources, SourceCandidatePool, isPrimarySource, sourceDiversityKey, isFileSourceUrl } from './research/source-candidates.mjs';
 export {

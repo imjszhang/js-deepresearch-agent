@@ -17,7 +17,7 @@ import {
 } from './source-policy.mjs';
 import { sourceDiversityKey } from '../source-candidates.mjs';
 import { UrlPool } from './url-pool.mjs';
-import { evaluateGapEvidence } from '../gap-state.mjs';
+import { evaluateGapEvidence, rollupRootGap } from '../gap-state.mjs';
 
 export { hostnameOf } from './source-policy.mjs';
 
@@ -148,6 +148,9 @@ export class ResearchState {
       minIndependentSources: options.minIndependentSources,
       answerSlot: options.answerSlot,
       claimFamily: options.claimFamily,
+      requiredSlot: options.requiredSlot,
+      kind: options.kind,
+      rollup: options.rollup,
     });
     this.gaps.push(gap);
     return gap;
@@ -224,12 +227,19 @@ export class ResearchState {
 
   noteSearchYield({ duplicateResults = false, newUrls = 0 } = {}) {
     this.marginal.searchCount += 1;
-    if (duplicateResults) this.marginal.duplicateResultCount += 1;
+    if (duplicateResults) {
+      this.marginal.duplicateResultCount += 1;
+      this.noteDuplicateQuery();
+    }
     this.marginal.recentNewIndependentSources = Number(newUrls) || 0;
     this.marginal.plateau = this.marginal.consecutiveLowNoveltyReads >= 2
       || (this.marginal.searchCount >= 2
         && this.marginal.recentNewIndependentSources === 0
         && this.marginal.recentMaterialGapsClosed === 0);
+  }
+
+  noteDuplicateQuery() {
+    this.marginal.duplicateQueryCount += 1;
   }
 
   syncGapCoverage() {
@@ -250,6 +260,7 @@ export class ResearchState {
       }));
       if (gap.status === 'verified') gap.resolvedAtStep = this.step;
     }
+    rollupRootGap(this.gaps);
     this.marginal.recentMaterialGapsClosed = this.gaps.filter((gap) => (
       gap.status === 'verified' && !verifiedBefore.has(gap.id)
     )).length;
