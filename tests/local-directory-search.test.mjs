@@ -2,11 +2,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, it } from 'node:test';
+import { after, describe, it } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import {
   ResearchRunner,
   createSearchEngine,
+  emptyBulletLines,
   normalizeSourceUrl,
   resolveUrlContent,
   selectDiverseSources,
@@ -24,7 +25,7 @@ import {
 
 const tempDirs = [];
 
-afterEach(() => {
+after(() => {
   for (const dir of tempDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -190,7 +191,7 @@ describe('local directory search engine', () => {
     const results = await engine.search('监管处罚');
     assert.equal(results.length, 1);
     assert.match(results[0].snippet, /监管处罚/);
-    assert.equal(results[0].url, toFileUrl(path.join(root, 'notes.md')));
+    assert.equal(results[0].url, toFileUrl(fs.realpathSync(path.join(root, 'notes.md'))));
   });
 
   it('rejects an empty directory list instead of returning a silent empty success', async () => {
@@ -384,6 +385,100 @@ describe('resolveUrlContent local handler', () => {
     });
     assert.equal(fetched.status, 'ok');
     assert.equal(fetched.backend, 'local-file');
+  });
+});
+
+describe('local exploratory integration', () => {
+  it('sanitizes invented web hosts and can finish on local bodies', async () => {
+    const dirA = makeTempDir('jdr-local-a-');
+    const dirB = makeTempDir('jdr-local-b-');
+    writeFile(dirA, 'guide.md', [
+      '房产操作攻略：先核对税费和限购，再安排首付、贷款和持有周期。',
+      '这份本地指南足够长，覆盖交易顺序、资金安排、过户材料与风险提示。',
+      '作者强调先算清交易成本，再决定杠杆和持有时间，不要把二手传闻当成制度依据。',
+    ].join(''));
+    writeFile(dirB, 'notes.md', [
+      '房产操作攻略补充材料：另一份本地材料说明过户流程、税费测算和持有成本。',
+      '它作为第二个独立语料通道，补充了首付结构、贷款审批和退出条件的具体例子。',
+      '这些内容足以构成可引用的正文证据，而不是搜索摘要。',
+    ].join(''));
+
+    const inner = createSearchEngine({
+      search: { engine: 'local', maxResults: 8, local: { dirs: [dirA, dirB] } },
+    });
+    const queries = [];
+    const search = {
+      async search(query, options) {
+        queries.push(query);
+        return inner.search(query, options);
+      },
+    };
+
+    const result = await new ResearchRunner().run({
+      query: '房产操作攻略',
+      settings: {
+        llm: {},
+        search: { engine: 'local', local: { dirs: [dirA, dirB] } },
+        research: {
+          strategy: 'exploratory',
+          exploratory: {
+            minLlmTokens: 0,
+            maxLlmTokens: 0,
+            maxSteps: 6,
+            maxEvaluationRetries: 0,
+            autoReadTopK: 2,
+          },
+          focused: { fetchMode: 'full' },
+          budget: { maxSearchRequests: 3, maxSourceReads: 4, maxLlmTokens: 0 },
+          quality: { entailment: 'rules' },
+        },
+      },
+      search,
+      llm: {
+        async complete({ purpose }) {
+          if (purpose === 'research_profile') {
+            return JSON.stringify({
+              flags: { primary_source: true },
+              requiredHosts: ['fang.com', 'sec.gov'],
+              preferredHosts: ['ke.com'],
+              requiredSourceTypes: ['primary_filing'],
+              minIndependentSources: 2,
+              gaps: [{ question: '哪个城市适合买', priority: 'normal', requiredHosts: ['fang.com'] }],
+            });
+          }
+          if (purpose === 'agent_decision') {
+            return JSON.stringify({ action: 'search', query: '房产操作攻略', gapId: 'gap-1' });
+          }
+          if (purpose === 'gap_decomposition') return '{"subQuestions":[]}';
+          return `# Research Report
+
+## Summary
+本地语料给出了房产交易前应核对税费、限购和持有周期的操作要点，并区分了已核实观察与仍待核对的限制条件。这份材料足够长，可以形成结构化结论，也避免把未读网页域名当成必须满足的证据门槛。 [1.1]
+
+## Key Findings
+- 交易前应先核对税费与限购条件，再安排资金、贷款杠杆和持有周期，避免把未读网页来源当成一手证据。 [1.1]
+`;
+        },
+      },
+    });
+
+    const rootGap = result.gaps.find((gap) => gap.id === 'gap-1') || result.gaps[0];
+    assert.ok(rootGap);
+    assert.ok(!(rootGap.requiredHosts || []).includes('fang.com'));
+    assert.ok(!(rootGap.requiredHosts || []).includes('sec.gov'));
+    assert.ok(!(rootGap.requiredSourceTypes || []).includes('primary_filing'));
+    assert.equal(result.quality.stopReason, 'evidence_sufficient');
+    assert.ok(result.trace.some((entry) => entry.profile?.evidenceScope === 'local' || entry.reasonCode === 'exploratory_loop'));
+    assert.ok(queries.every((query) => !/\s+\d+(-\d+)?$/.test(query)));
+    assert.ok(queries.every((query) => !/\bsite:/.test(query)));
+    assert.equal(emptyBulletLines(result.report).length, 0);
+    assert.match(result.report, /## Summary/);
+    assert.match(result.report, /## Key Findings/);
+    assert.equal([...result.report.matchAll(/Need \d+ independent domains/g)].length, 0);
+    assert.ok(!result.quality.limitations.some((item) => /Need \d+ independent domains/.test(item)));
+    const caveatBlock = result.report.split('## Caveats')[1] || '';
+    const insufficient = [...caveatBlock.matchAll(/Insufficient direct evidence for:/g)];
+    assert.ok(insufficient.length <= 1);
   });
 });
 

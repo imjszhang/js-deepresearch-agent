@@ -151,6 +151,12 @@ export async function enumerateCorpusFiles({
   const extSet = new Set(extensions.map((item) => String(item).toLowerCase().replace(/^\./, '')));
   const files = [];
   const visited = new Set();
+  let realRoot = root;
+  try {
+    realRoot = await fsImpl.promises.realpath(root);
+  } catch {
+    return [];
+  }
 
   async function walk(current) {
     throwIfAborted(signal);
@@ -161,7 +167,7 @@ export async function enumerateCorpusFiles({
       return;
     }
     if (visited.has(realCurrent)) return;
-    if (realCurrent !== root && !isPathInsideRoot(realCurrent, root)) return;
+    if (realCurrent !== realRoot && !isPathInsideRoot(realCurrent, realRoot)) return;
     visited.add(realCurrent);
     let entries;
     try {
@@ -188,7 +194,7 @@ export async function enumerateCorpusFiles({
         } catch {
           continue;
         }
-        if (!isPathInsideRoot(real, root) && real !== root) continue;
+        if (!isPathInsideRoot(real, realRoot) && real !== realRoot) continue;
         let realStat;
         try {
           realStat = await fsImpl.promises.stat(real);
@@ -196,7 +202,7 @@ export async function enumerateCorpusFiles({
           continue;
         }
         if (realStat.isDirectory()) {
-          if (real === root || isPathInsideRoot(real, root)) {
+          if (real === realRoot || isPathInsideRoot(real, realRoot)) {
             await walk(real);
           }
           continue;
@@ -204,7 +210,7 @@ export async function enumerateCorpusFiles({
         if (realStat.isFile() && extSet.has(extensionOf(real))) {
           files.push({
             path: real,
-            relativePath: path.relative(root, real),
+            relativePath: path.relative(realRoot, real),
           });
         }
         continue;
@@ -222,16 +228,16 @@ export async function enumerateCorpusFiles({
         } catch {
           continue;
         }
-        if (!isPathInsideRoot(real, root)) continue;
+        if (!isPathInsideRoot(real, realRoot)) continue;
         files.push({
           path: real,
-          relativePath: path.relative(root, real),
+          relativePath: path.relative(realRoot, real),
         });
       }
     }
   }
 
-  await walk(root);
+  await walk(realRoot);
   return files;
 }
 
