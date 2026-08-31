@@ -9,8 +9,10 @@ import { evaluateReadinessGate } from './readiness-gate.mjs';
 import {
   classifySourceTier,
   documentMatchesQuerySubject,
+  evidenceIndependenceKey,
   hostnameOf as policyHostnameOf,
   hostnamesMatch,
+  inferEvidenceScope,
   registrableDomainFromUrl,
   selectReadsByPolicy,
 } from './source-policy.mjs';
@@ -69,8 +71,12 @@ export class ResearchState {
     targetLlmTokens = 0,
     budget = null,
     profile = null,
+    settings = null,
+    evidenceScope = null,
   } = {}) {
     this.query = query;
+    this.settings = settings || {};
+    this.evidenceScope = evidenceScope || profile?.evidenceScope || inferEvidenceScope(this.settings);
     const parsedSteps = Number(maxSteps);
     this.maxSteps = Number.isFinite(parsedSteps) && parsedSteps > 0 ? Math.floor(parsedSteps) : 0;
     this.maxGapDepth = Math.max(0, Number(maxGapDepth) || 0);
@@ -81,7 +87,10 @@ export class ResearchState {
     this.budgetView = null;
     this.sufficiency = null;
     this.readiness = null;
-    this.profile = profile || inferResearchProfile(query);
+    this.profile = profile || inferResearchProfile(query, {
+      settings: this.settings,
+      evidenceScope: this.evidenceScope,
+    });
     this.step = 0;
     this.lastAction = null;
     this.gaps = [createRootGap(query, this.profile)];
@@ -94,6 +103,7 @@ export class ResearchState {
     this.diary = [];
     this.evaluationRetries = 0;
     this.forbidFinalizeUntilExplore = false;
+    this.forbidSearchUntilRead = false;
     this.embeddingTraces = [];
     this.cycle = {
       afterSearch: false,
@@ -186,6 +196,7 @@ export class ResearchState {
 
   noteSuccessfulBody() {
     this.cycle.successfulBodyReads += 1;
+    this.forbidSearchUntilRead = false;
   }
 
   syncGapCoverage() {
@@ -199,8 +210,8 @@ export class ResearchState {
       ])];
       const hasBody = sources.length > 0;
       const requiredOk = this.gapHasRequiredHostBody(gap.id);
-      const domains = new Set(sources.map((source) => registrableDomainFromUrl(source.url || source.id)).filter(Boolean));
-      const independentOk = domains.size >= (Number(gap.minIndependentSources) || 1);
+      const keys = new Set(sources.map((source) => evidenceIndependenceKey(source)).filter(Boolean));
+      const independentOk = keys.size >= (Number(gap.minIndependentSources) || 1);
       if (gap.status === 'blocked' || gap.status === 'missing') continue;
       if (hasBody && requiredOk && independentOk) {
         gap.status = 'verified';
@@ -332,6 +343,7 @@ export class ResearchState {
         preferredHosts: this.profile?.preferredHosts || [],
         requiredSourceTypes: this.profile?.requiredSourceTypes || [],
         minIndependentSources: this.profile?.minIndependentSources || 1,
+        evidenceScope: this.evidenceScope || this.profile?.evidenceScope || 'web',
       },
       gaps,
       focusGapId: this.focusGap()?.id || 'gap-1',

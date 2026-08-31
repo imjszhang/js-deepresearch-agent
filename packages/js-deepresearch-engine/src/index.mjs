@@ -54,10 +54,16 @@ export { QueryMemory, normalizeQuery, querySimilarity } from './research/query-m
 export { normalizeSourceUrl, selectDiverseSources, SourceCandidatePool, isPrimarySource, sourceDiversityKey, isFileSourceUrl } from './research/source-candidates.mjs';
 export {
   buildEvidenceArtifacts,
+  buildPassageArtifacts,
+  buildPassageArtifactsAsync,
+  alignReportClaims,
   extractClaims,
   stableSourceId,
   alignClaimToCitedPassages,
   listSnippetOnlyCitationKeys,
+  selectDisplayedEvidence,
+  boundEvidenceText,
+  DEFAULT_MAX_PASSAGE_CHARS,
 } from './research/evidence-chain.mjs';
 export {
   parseCitations,
@@ -77,15 +83,26 @@ export {
   detectDocumentFormat,
   convertDocumentToMarkdown,
 } from './research/document-converter.mjs';
-export { inferResearchProfile } from './research/adaptive/research-profile.mjs';
+export { inferResearchProfile, sanitizeEvidenceProfile } from './research/adaptive/research-profile.mjs';
 export { evaluateReadinessGate } from './research/adaptive/readiness-gate.mjs';
-export { classifySourceTier, hostnameOf, registrableDomainFromUrl, selectReadsByPolicy } from './research/adaptive/source-policy.mjs';
+export {
+  classifySourceTier,
+  collectSearchAngleCandidates,
+  evidenceIndependenceKey,
+  hostnameOf,
+  independentEvidenceKeysFromSources,
+  inferEvidenceScope,
+  registrableDomainFromUrl,
+  selectReadsByPolicy,
+} from './research/adaptive/source-policy.mjs';
 export { normalizeExploratoryStopReason, EXPLORATORY_STOP_REASONS } from './research/adaptive/stop-reasons.mjs';
 export {
   assembleReport,
   reviseUnsupportedKeyClaims,
+  shouldMoveWeakKeyClaim,
   keepNarrativeSections,
   containsSourceDump,
+  normalizeCaveatKey,
 } from './research/report-assembler.mjs';
 export { resolveReportSettings } from './research/report-settings.mjs';
 export {

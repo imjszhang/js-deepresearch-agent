@@ -96,7 +96,7 @@ describe('work output', () => {
     assert.equal(JSON.stringify(meta).includes('should-not-appear'), false);
     assert.equal(meta.artifactSchemaVersion, 3);
     assert.equal(meta.qualityMetricsVersion, 3);
-    assert.equal(meta.claimExtractionVersion, 4);
+    assert.equal(meta.claimExtractionVersion, 5);
     assert.equal(meta.claimEvaluationVersion, 4);
     for (const key of ['gapsPath', 'passagesPath', 'claimsPath', 'qualityPath', 'tracePath']) {
       assert.equal(fs.existsSync(artifacts[key]), true);

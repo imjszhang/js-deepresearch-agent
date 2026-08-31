@@ -2,13 +2,18 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   alignClaimToCitedPassages,
+  alignReportClaims,
   buildCitationMap,
   buildEvidenceArtifacts,
+  buildPassageArtifacts,
   calculateQualityMetrics,
   parseCitations,
   resolveCitedSourceIds,
+  selectDisplayedEvidence,
   stableSourceId,
+  buildPassageArtifactsAsync,
 } from '../src/index.mjs';
+import { compareRankedPassages, isMediaOnlyPassage } from '../src/research/passage-utils.mjs';
 
 const wikipedia = {
   title: 'Ollama',
@@ -217,5 +222,167 @@ describe('snippet-only and strategy policy', () => {
     assert.equal(metrics.rates.directEvidenceRate, 0);
     assert.ok(result.claims.length > 0);
     assert.notEqual(result.claims[0].evaluation.verdict, 'supported');
+  });
+});
+
+describe('passage artifacts and report claim alignment', () => {
+  function stripObservedAt(passages = []) {
+    return passages.map((passage) => {
+      const rest = { ...passage };
+      delete rest.observedAt;
+      return rest;
+    });
+  }
+
+  it('keeps wrapper results equivalent to the split helpers', () => {
+    const report = '# Summary\n\nOfficial documentation discusses sandboxing and trusted weights [1.2].';
+    const sources = [{ ...wikipedia }, { ...official }];
+    const options = { claimAlignment: true, strategy: 'exploratory', maxPassagesPerSource: 5, maxPassageChars: 1200 };
+    const findings = [{ question: 'What is Ollama?', sources }];
+    const wrapped = buildEvidenceArtifacts({ query: 'What is Ollama?', findings, report, options });
+    const split = buildPassageArtifacts({ query: 'What is Ollama?', findings, options });
+    const claims = alignReportClaims({
+      report,
+      passages: split.passages,
+      citationMap: split.citationMap,
+      options,
+    });
+    assert.deepEqual(split.sources.map((source) => source.id), wrapped.sources.map((source) => source.id));
+    assert.deepEqual(stripObservedAt(split.passages), stripObservedAt(wrapped.passages));
+    assert.deepEqual(claims.map((claim) => claim.id), wrapped.claims.map((claim) => claim.id));
+    assert.deepEqual(claims[0].citedSourceIds, wrapped.claims[0].citedSourceIds);
+  });
+
+  it('caps stored passages and displayed evidence independently', () => {
+    const paragraph = 'Local-first AI keeps user data on devices and synchronizes selectively. ';
+    const content = `${paragraph.repeat(8)}\n\n${'Offline access remains available after the first sync window closes. '.repeat(8)}`;
+    const source = {
+      title: 'Primary',
+      url: 'https://example.com/a',
+      content,
+      fetchStatus: 'ok',
+      contentOrigin: 'fetched',
+    };
+    const split = buildPassageArtifacts({
+      query: 'What is local-first AI?',
+      findings: [{ question: 'What is local-first AI?', sources: [source] }],
+      options: { maxPassagesPerSource: 2, maxPassageChars: 80 },
+    });
+    assert.ok(split.passages.length <= 2);
+    assert.ok(split.passages.every((passage) => passage.text.length <= 80));
+    const displayed = selectDisplayedEvidence(source, { passages: split.passages, maxChars: 80 });
+    assert.ok(displayed.length <= 80);
+    assert.equal(displayed, split.passages.slice().sort(compareRankedPassages)[0].text);
+    const reassembled = buildPassageArtifacts({
+      query: 'What is local-first AI?',
+      findings: split.findings,
+      options: { maxPassagesPerSource: 2, maxPassageChars: 80 },
+    });
+    assert.deepEqual(reassembled.sources.map((item) => item.id), split.sources.map((item) => item.id));
+    assert.equal(reassembled.passages.length, split.passages.length);
+  });
+
+  it('keeps bylines as candidates but displays the semantically preferred body', async () => {
+    const content = [
+      '# ​代持操作手册 #1610',
+      '原创： yevon_ou [水库论坛](javascript:void(0);) 2017-12-11',
+      '<img src="media/image1.png" style="width:5.76806in;height:3.81843in" />',
+      '代持操作的核心，是产证名字和真实出资人可以分开。出资人承担房价涨跌，挂名人只出名字。',
+      '国务院是不可以规定“公民不许买房子”的。但是他可以管自己的下属，可以管行政机构。',
+    ].join('\n\n');
+    const source = {
+      title: '1610-代持操作手册.md',
+      url: 'file:///corpus/1610.md',
+      content,
+      fetchStatus: 'ok',
+      contentOrigin: 'fetched',
+    };
+    const artifacts = await buildPassageArtifactsAsync({
+      query: '房产操作攻略',
+      findings: [{ question: '房产操作攻略', sources: [source] }],
+      options: {
+        maxPassagesPerSource: 5,
+        maxPassageChars: 1200,
+        embedding: {
+          async embedDocuments(texts) {
+            return texts.map((text) => {
+              const value = String(text);
+              if (value.includes('代持操作手册') || value.includes('代持操作的核心')) return [1, 0];
+              return [0, 1];
+            });
+          },
+        },
+      },
+    });
+    assert.ok(artifacts.passages.some((passage) => /yevon_ou/.test(passage.text)));
+    assert.ok(artifacts.passages.every((passage) => !isMediaOnlyPassage(passage.text)));
+    assert.ok(artifacts.passages.every((passage) => !/<img/i.test(passage.text)));
+    assert.ok(artifacts.passages.every((passage) => passage.rankingMethod === 'embedding'));
+    const displayed = selectDisplayedEvidence(source, { passages: artifacts.passages });
+    assert.match(displayed, /代持操作的核心/);
+    assert.doesNotMatch(displayed, /yevon_ou|2017-12-11/);
+  });
+
+  it('lets a relevant table beat an unrelated footnote when embeddings prefer it', async () => {
+    const content = [
+      '原创： yevon_ou 水库论坛 2017-12-11',
+      '| 租给中国人 | 8000 | 9000 | 10000 |',
+      '| 外国人 | 28000 | 28000 | 28000 |',
+      '[1] https://www.zhihu.com/question/52444153/answer/130645934',
+    ].join('\n\n');
+    const source = {
+      title: '0380-外国人购房手册.md',
+      url: 'file:///corpus/0380.md',
+      content,
+      fetchStatus: 'ok',
+      contentOrigin: 'fetched',
+    };
+    const embedding = {
+      async embedDocuments(texts) {
+        return texts.map((text) => {
+          const value = String(text);
+          if (value.includes('外国人购房') || value.includes('租给中国人')) return [1, 0];
+          if (value.includes('zhihu.com')) return [0, 1];
+          return [0.1, 0.1];
+        });
+      },
+    };
+    const artifacts = await buildPassageArtifactsAsync({
+      query: '外国人房租怎么比较',
+      findings: [{ question: '外国人购房手册里的租金差价是多少？', sources: [source] }],
+      options: { maxPassagesPerSource: 2, maxPassageChars: 1200, embedding },
+    });
+    assert.ok(artifacts.passages.every((passage) => passage.rankingMethod === 'embedding'));
+    const displayed = selectDisplayedEvidence(source, { passages: artifacts.passages });
+    assert.match(displayed, /租给中国人|28000/);
+    assert.doesNotMatch(displayed, /zhihu\.com|yevon_ou/);
+  });
+
+  it('falls back to overlap ranking when embedding throws', async () => {
+    const source = {
+      title: '1610-代持操作手册.md',
+      url: 'file:///corpus/1610.md',
+      content: [
+        '亚瑟王是Celts凯尔特人，5世纪古罗马帝国崩溃之后，日耳曼大移民。',
+        'The nominee holding arrangement separates the title from the true investor.',
+      ].join('\n\n'),
+      fetchStatus: 'ok',
+      contentOrigin: 'fetched',
+    };
+    const artifacts = await buildPassageArtifactsAsync({
+      query: 'nominee holding',
+      findings: [{ question: 'nominee holding', sources: [source] }],
+      options: {
+        maxPassagesPerSource: 1,
+        maxPassageChars: 1200,
+        embedding: {
+          async embedDocuments() {
+            throw new Error('gateway down');
+          },
+        },
+      },
+    });
+    assert.equal(artifacts.passages[0].rankingMethod, 'overlap');
+    assert.match(selectDisplayedEvidence(source, { passages: artifacts.passages }), /nominee holding/);
   });
 });

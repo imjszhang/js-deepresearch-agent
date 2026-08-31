@@ -1,6 +1,6 @@
 import { isSuccessfulBody, sourceHasObservableDate } from '../body-quality.mjs';
 import { classifyResearchQuery, subjectsMissingBodyEvidence } from './exploratory-sufficiency.mjs';
-import { classifySourceTier, hostnamesMatch, independentDomainsFromSources, hostnameOf } from './source-policy.mjs';
+import { classifySourceTier, hostnamesMatch, independentEvidenceKeysFromSources, hostnameOf } from './source-policy.mjs';
 
 export const GAP_OPEN_STATUSES = new Set(['open', 'searched', 'missing']);
 export const GAP_CLOSED_STATUSES = new Set(['verified', 'body_read']);
@@ -103,11 +103,13 @@ export function evaluateReadinessGate({
   }
 
   const minIndependent = Number(resolvedProfile.minIndependentSources) || (shape.kind === 'definitional' ? 1 : 2);
-  const domains = independentDomainsFromSources(bodies);
-  if (bodies.length && domains.size < minIndependent && minIndependent > 1) {
+  const evidenceKeys = independentEvidenceKeysFromSources(bodies);
+  const scope = resolvedProfile.evidenceScope || state?.evidenceScope || 'web';
+  if (bodies.length && evidenceKeys.size < minIndependent && minIndependent > 1) {
+    const label = scope === 'local' ? 'independent local corpora' : 'independent domains';
     failures.push({
       code: 'independent_sources_short',
-      message: `Need ${minIndependent} independent domains, found ${domains.size}.`,
+      message: `Need ${minIndependent} ${label}, found ${evidenceKeys.size}.`,
     });
     flags.push('reprint_concentration');
   }
@@ -138,7 +140,8 @@ export function evaluateReadinessGate({
     pass,
     failures,
     flags,
-    independentDomainCount: domains.size,
+    independentDomainCount: evidenceKeys.size,
+    independentEvidenceCount: evidenceKeys.size,
     successfulBodyCount: bodies.length,
     unresolvedCriticalGapIds: unresolvedCritical.map((gap) => gap.id),
     missingRequiredHosts: missingRequired.flatMap((item) => item.hosts),

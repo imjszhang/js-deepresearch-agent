@@ -3,19 +3,17 @@ import { normalizeSourceUrl } from './source-candidates.mjs';
 import { buildClaimEvaluation, extractQualityClaims } from './claim-quality.mjs';
 import { buildCitationMap, parseCitations, resolveCitedSourceIds } from './citations.mjs';
 import { sourceHasFetchedBody } from './focused-settings.mjs';
+import {
+  compareRankedPassages,
+  isMediaOnlyPassage,
+  rankingFocus,
+  splitContentForPassages,
+  tokenOverlapScore,
+} from './passage-utils.mjs';
+import { rankPassages } from './passage-selector.mjs';
 
 function hash(prefix, value) {
   return `${prefix}-${crypto.createHash('sha256').update(value).digest('hex').slice(0, 16)}`;
-}
-
-function words(text = '') {
-  return new Set(String(text).toLowerCase().match(/[\p{L}\p{N}]{2,}/gu) || []);
-}
-
-function overlap(left, right) {
-  const a = words(left); const b = words(right);
-  if (!a.size || !b.size) return 0;
-  return [...a].filter((word) => b.has(word)).length / Math.min(a.size, b.size);
 }
 
 export function stableSourceId(source = {}) {
@@ -37,24 +35,55 @@ function mergeSourceRecord(existing, incoming) {
   return merged;
 }
 
-function splitContent(content, maxChars) {
-  const chunks = [];
-  let section = '';
-  const paragraphs = String(content || '').split(/\n{2,}/);
-  let cursor = 0;
-  for (const paragraph of paragraphs) {
-    const text = paragraph.trim();
-    const start = String(content).indexOf(paragraph, cursor);
-    cursor = Math.max(cursor, start + paragraph.length);
-    if (!text || /^(cookie|privacy|navigation|menu)\b/i.test(text)) continue;
-    if (/^#{1,6}\s+/.test(text)) { section = text.replace(/^#{1,6}\s+/, ''); continue; }
-    for (let offset = 0; offset < text.length; offset += maxChars) {
-      const value = text.slice(offset, offset + maxChars).trim();
-      if (value.length < 40) continue;
-      chunks.push({ text: value, startChar: Math.max(0, start) + offset, endChar: Math.max(0, start) + offset + value.length, section });
+function rankSourceByOverlap(source, { query, finding, maxChars, maxPassages }) {
+  const focus = rankingFocus({ query, question: finding.question, title: source.title });
+  return splitContentForPassages(source.content, maxChars)
+    .map((passage) => ({
+      ...passage,
+      retrievalScore: tokenOverlapScore(rankingFocus({ query: focus, section: passage.section }), passage.text),
+      rankingMethod: 'overlap',
+    }))
+    .sort(compareRankedPassages)
+    .slice(0, maxPassages);
+}
+
+function attachRankedPassages({
+  passages,
+  passageIds,
+  sourceId,
+  findingId,
+  ranked = [],
+}) {
+  for (const passage of ranked) {
+    const contentHash = crypto.createHash('sha256').update(passage.text).digest('hex');
+    const idValue = hash('passage', `${sourceId}:${contentHash}`);
+    if (!passages.some((item) => item.id === idValue)) {
+      passages.push({
+        id: idValue,
+        sourceId,
+        findingIds: [findingId],
+        text: passage.text,
+        startChar: passage.startChar,
+        endChar: passage.endChar,
+        section: passage.section || '',
+        retrievalScore: passage.retrievalScore,
+        rankingMethod: passage.rankingMethod || 'overlap',
+        evidenceOrigin: 'source_content',
+        observedAt: new Date().toISOString(),
+        contentHash,
+      });
     }
+    passageIds.push(idValue);
   }
-  return chunks;
+}
+
+function finalizePassageArtifacts({ normalizedFindings, sourceMap, passages }) {
+  return {
+    findings: normalizedFindings,
+    sources: [...sourceMap.values()],
+    passages,
+    citationMap: buildCitationMap(normalizedFindings, { sourceIdFor: stableSourceId }),
+  };
 }
 
 export function listSnippetOnlyCitationKeys(findings = []) {
@@ -108,7 +137,7 @@ export function alignClaimToCitedPassages(claim, {
 
   const candidates = canUsePassages
     ? citedPassages
-      .map((passage) => ({ passage, score: overlap(claim.text, passage.text) }))
+      .map((passage) => ({ passage, score: tokenOverlapScore(claim.text, passage.text) }))
       .sort((a, b) => b.score - a.score)
       .slice(0, 3)
     : [];
@@ -137,16 +166,47 @@ export function alignClaimToCitedPassages(claim, {
   return aligned;
 }
 
-export function buildEvidenceArtifacts({ query, findings = [], report = '', options = {} }) {
+export const DEFAULT_MAX_PASSAGE_CHARS = 1200;
+
+export function resolvePassageCharLimit(maxChars) {
+  const value = Number(maxChars);
+  return Number.isFinite(value) && value > 0 ? value : DEFAULT_MAX_PASSAGE_CHARS;
+}
+
+export function boundEvidenceText(text = '', maxChars = DEFAULT_MAX_PASSAGE_CHARS) {
+  const value = String(text || '').trim();
+  const limit = resolvePassageCharLimit(maxChars);
+  if (value.length <= limit) return value;
+  return value.slice(0, limit).trim();
+}
+
+export function selectDisplayedEvidence(source = {}, {
+  passages = [],
+  maxChars = DEFAULT_MAX_PASSAGE_CHARS,
+} = {}) {
+  const sourceId = source.id || stableSourceId(source);
+  const top = [...passages]
+    .filter((passage) => passage.sourceId === sourceId && !isMediaOnlyPassage(passage.text))
+    .sort(compareRankedPassages)[0];
+  if (top?.text) return boundEvidenceText(top.text, maxChars);
+  const summary = String(source.summary || '').trim();
+  if (summary) return boundEvidenceText(summary, maxChars);
+  const snippet = String(source.snippet || '').trim();
+  if (snippet) return boundEvidenceText(snippet, maxChars);
+  const fallback = splitContentForPassages(source.content, maxChars).sort(compareRankedPassages)[0];
+  return boundEvidenceText(fallback?.text || '', maxChars);
+}
+
+function collectNormalizedFindings({ findings, options }) {
   const passageEnabled = options.enabled !== false;
   const maxPassages = Number(options.maxPassagesPerSource) || 5;
-  const maxChars = Number(options.maxPassageChars) || 1200;
+  const maxChars = resolvePassageCharLimit(options.maxPassageChars);
   const sourceMap = new Map();
   const passages = [];
-  const normalizedFindings = findings.map((finding, index) => {
+  const jobs = findings.map((finding, index) => {
     const id = finding.id || hash('finding', `${index}:${finding.question || ''}`);
     const sourceIds = [];
-    const passageIds = [];
+    const passageJobs = [];
     for (const source of finding.sources || []) {
       const sourceId = stableSourceId(source);
       source.id = sourceId;
@@ -154,22 +214,99 @@ export function buildEvidenceArtifacts({ query, findings = [], report = '', opti
       sourceMap.set(sourceId, mergeSourceRecord(sourceMap.get(sourceId), source));
       const hasFetchedContent = sourceHasFetchedBody(source);
       if (!passageEnabled || !hasFetchedContent) continue;
-      const ranked = splitContent(source.content, maxChars)
-        .map((passage) => ({ ...passage, retrievalScore: overlap(`${query} ${finding.question}`, passage.text) }))
-        .sort((a, b) => b.retrievalScore - a.retrievalScore)
-        .slice(0, maxPassages);
-      for (const passage of ranked) {
-        const contentHash = crypto.createHash('sha256').update(passage.text).digest('hex');
-        const idValue = hash('passage', `${sourceId}:${contentHash}`);
-        if (!passages.some((item) => item.id === idValue)) passages.push({ id: idValue, sourceId, findingIds: [id], ...passage, evidenceOrigin: 'source_content', observedAt: new Date().toISOString(), contentHash });
-        passageIds.push(idValue);
-      }
+      passageJobs.push({ source, sourceId, findingId: id });
     }
-    return { ...finding, id, gapId: finding.gapId || null, sourceIds, passageIds, evidenceStatus: passageIds.length ? 'direct_evidence' : ((finding.sources || []).length ? 'search_snippet' : 'missing') };
+    return { finding, id, sourceIds, passageJobs };
   });
+  return {
+    options,
+    maxPassages,
+    maxChars,
+    sourceMap,
+    passages,
+    jobs,
+  };
+}
 
-  const citationMap = buildCitationMap(normalizedFindings, { sourceIdFor: stableSourceId });
-  const claims = options.claimAlignment ? extractQualityClaims(report).map((claim, index) => {
+function toNormalizedFinding(job, passageIds) {
+  return {
+    ...job.finding,
+    id: job.id,
+    gapId: job.finding.gapId || null,
+    sourceIds: job.sourceIds,
+    passageIds,
+    evidenceStatus: passageIds.length ? 'direct_evidence' : ((job.finding.sources || []).length ? 'search_snippet' : 'missing'),
+  };
+}
+
+export function buildPassageArtifacts({ query, findings = [], options = {} } = {}) {
+  const state = collectNormalizedFindings({ findings, options });
+  const normalizedFindings = state.jobs.map((job) => {
+    const passageIds = [];
+    for (const item of job.passageJobs) {
+      const ranked = rankSourceByOverlap(item.source, {
+        query,
+        finding: job.finding,
+        maxChars: state.maxChars,
+        maxPassages: state.maxPassages,
+      });
+      attachRankedPassages({
+        passages: state.passages,
+        passageIds,
+        sourceId: item.sourceId,
+        findingId: job.id,
+        ranked,
+      });
+    }
+    return toNormalizedFinding(job, passageIds);
+  });
+  return finalizePassageArtifacts({
+    normalizedFindings,
+    sourceMap: state.sourceMap,
+    passages: state.passages,
+  });
+}
+
+export async function buildPassageArtifactsAsync({ query, findings = [], options = {} } = {}) {
+  const state = collectNormalizedFindings({ findings, options });
+  const normalizedFindings = [];
+  for (const job of state.jobs) {
+    const passageIds = [];
+    for (const item of job.passageJobs) {
+      const ranked = await rankPassages({
+        query,
+        question: job.finding.question,
+        title: item.source.title,
+        content: item.source.content,
+        embedding: options.embedding,
+        signal: options.signal,
+        topK: state.maxPassages,
+        chunkChars: state.maxChars,
+      });
+      attachRankedPassages({
+        passages: state.passages,
+        passageIds,
+        sourceId: item.sourceId,
+        findingId: job.id,
+        ranked,
+      });
+    }
+    normalizedFindings.push(toNormalizedFinding(job, passageIds));
+  }
+  return finalizePassageArtifacts({
+    normalizedFindings,
+    sourceMap: state.sourceMap,
+    passages: state.passages,
+  });
+}
+
+export function alignReportClaims({
+  report = '',
+  passages = [],
+  citationMap,
+  options = {},
+} = {}) {
+  return extractQualityClaims(report).map((claim, index) => {
     const aligned = alignClaimToCitedPassages(claim, {
       passages,
       citationMap,
@@ -181,9 +318,22 @@ export function buildEvidenceArtifacts({ query, findings = [], report = '', opti
       ...aligned,
       ...(aligned.parentClaimText ? { parentClaimId: hash('claim-parent', aligned.parentClaimText) } : {}),
     };
-  }) : [];
+  });
+}
 
-  return { findings: normalizedFindings, sources: [...sourceMap.values()], passages, claims, citationMap };
+export function buildEvidenceArtifacts({ query, findings = [], report = '', options = {} }) {
+  const passageArtifacts = buildPassageArtifacts({ query, findings, options });
+  return {
+    ...passageArtifacts,
+    claims: options.claimAlignment
+      ? alignReportClaims({
+        report,
+        passages: passageArtifacts.passages,
+        citationMap: passageArtifacts.citationMap,
+        options,
+      })
+      : [],
+  };
 }
 
 export function extractClaims(report = '') {

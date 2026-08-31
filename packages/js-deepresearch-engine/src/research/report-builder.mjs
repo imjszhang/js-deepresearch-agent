@@ -163,6 +163,8 @@ export async function buildReport({
   purpose = 'report',
   limitations = [],
   strategy = 'focused',
+  passages = [],
+  maxPassageChars,
   maxTokens,
   minChars = 200,
   maxAttempts = 2,
@@ -181,8 +183,8 @@ export async function buildReport({
     const startedAt = Date.now();
     const report = await llm.complete({
       messages: attempt === 1
-        ? reportPrompt({ query, findings, limitations, strategy })
-        : reportRetryPrompt({ query, findings, limitations, strategy }),
+        ? reportPrompt({ query, findings, limitations, strategy, passages, maxPassageChars })
+        : reportRetryPrompt({ query, findings, limitations, strategy, passages, maxPassageChars }),
       signal,
       temperature: attempt === 1 ? 0.2 : 0,
       purpose,

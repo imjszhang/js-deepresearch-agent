@@ -4,13 +4,17 @@ import {
   BudgetManager,
   ResearchRunner,
   assembleReport,
+  extractQualityClaims,
   keepNarrativeSections,
   looksTruncated,
+  normalizeCaveatKey,
   parseNarrativeResponse,
   reviseUnsupportedKeyClaims,
+  shouldMoveWeakKeyClaim,
   validateNarrativeObject,
   validateReportOutput,
 } from '../src/index.mjs';
+import { emptyBulletLines } from '../src/research/report-builder.mjs';
 
 const findings = [{
   question: 'What is Ollama?',
@@ -90,6 +94,31 @@ Ollama is a local model runner. [1.1]
     assert.equal(check.ok, true, check.flags.join(','));
   });
 
+  it('stops narrative extraction at the first generated section even when source H1s follow', () => {
+    const innerTitle = '可以做空房产么';
+    const assembled = `# Research Report
+
+## Summary
+Ollama is a local model runner. [1.1]
+
+## Key Findings
+- Ollama targets easy local inference. [1.1]
+
+## Evidence
+
+### What is Ollama?
+*   **[1.1] Ollama docs** (source body): excerpt only
+
+# ${innerTitle}
+Yesterday someone asked a question in the paid community.
+`;
+    const kept = keepNarrativeSections(assembled, { query: 'What is Ollama?' });
+    assert.match(kept, /Ollama targets easy local inference/);
+    assert.doesNotMatch(kept, /source body/);
+    assert.doesNotMatch(kept, new RegExp(innerTitle));
+    assert.doesNotMatch(kept, /paid community/);
+  });
+
   it('assembles Evidence, Caveats, and Sources from findings', () => {
     const report = assembleReport({
       narrative: `# Research Report
@@ -118,18 +147,119 @@ Ollama targets easy local inference. [1.1]
     const narrative = `# Research Report
 
 ## Summary
-This key sentence has no backing evidence at all.
+A complete summary of the researched topic remains after claim revision.
+
+## Key Findings
+- This key sentence has no backing evidence at all.
 `;
     const assembled = assembleReport({ narrative, findings, query: 'topic' });
-    const revised = reviseUnsupportedKeyClaims(assembled, [{
+    const revised = reviseUnsupportedKeyClaims(keepNarrativeSections(assembled, { query: 'topic' }), [{
       kind: 'key_claim',
       text: 'This key sentence has no backing evidence at all.',
       evaluation: { verdict: 'unverifiable' },
     }]);
     assert.ok(!revised.report.includes('Unverified:'));
-    assert.match(revised.report, /## Caveats/);
-    assert.match(revised.report, /This key sentence has no backing evidence at all/);
+    assert.ok(!revised.report.includes('This key sentence has no backing evidence at all'));
     assert.equal(revised.moved.length, 1);
+    const reassembled = assembleReport({
+      narrative: revised.report,
+      findings,
+      limitations: revised.moved.map((text) => `Insufficient direct evidence for: ${text}`),
+      query: 'topic',
+    });
+    assert.match(reassembled, /## Caveats/);
+    assert.match(reassembled, /This key sentence has no backing evidence at all/);
+    assert.equal(emptyBulletLines(reassembled).length, 0);
+  });
+
+  it('deletes whole claim bullets and keeps source-backed unverifiable claims', () => {
+    const narrative = `# Research Report
+
+## Summary
+A complete summary of the researched topic remains after claim revision.
+
+## Key Findings
+- Weak claim with no backing evidence.
+- Strong claim with a cited local body. [1.1]
+`;
+    const revised = reviseUnsupportedKeyClaims(narrative, [
+      {
+        kind: 'key_claim',
+        text: 'Weak claim with no backing evidence.',
+        evaluation: { verdict: 'unsupported' },
+      },
+      {
+        kind: 'key_claim',
+        text: 'Strong claim with a cited local body.',
+        evaluation: { verdict: 'unverifiable', flags: [] },
+        citedSourceIds: ['s1'],
+        evidence: [{ passageId: 'p1', sourceId: 's1', evidenceOrigin: 'source_content' }],
+      },
+      {
+        kind: 'key_claim',
+        text: 'Snippet only leftover.',
+        evaluation: { verdict: 'unverifiable', flags: ['snippet_only'] },
+      },
+    ]);
+    assert.ok(!revised.report.includes('Weak claim with no backing evidence.'));
+    assert.match(revised.report, /Strong claim with a cited local body/);
+    assert.equal(revised.moved.includes('Weak claim with no backing evidence.'), true);
+    assert.equal(revised.moved.includes('Strong claim with a cited local body.'), false);
+    assert.equal(shouldMoveWeakKeyClaim({
+      kind: 'key_claim',
+      evaluation: { verdict: 'unverifiable', flags: ['snippet_only'] },
+    }), true);
+    assert.equal(emptyBulletLines(revised.report).length, 0);
+  });
+
+  it('deduplicates caveat text after stripping evidence prefixes', () => {
+    const report = assembleReport({
+      narrative: `# Research Report
+
+## Summary
+Enough narrative remains after caveat normalization.
+
+## Key Findings
+- A supported finding stays in the narrative. [1.1]
+
+## Caveats
+- The same limitation appears twice.
+`,
+      findings,
+      limitations: ['Insufficient direct evidence for: The same limitation appears twice.'],
+      query: 'topic',
+    });
+    const caveats = report.split('## Caveats')[1].split('## Sources')[0];
+    assert.equal([...caveats.matchAll(/The same limitation appears twice/g)].length, 1);
+    assert.equal(
+      normalizeCaveatKey('Insufficient direct evidence for: The same limitation appears twice.'),
+      normalizeCaveatKey('The same limitation appears twice。'),
+    );
+  });
+
+  it('fails full validation when claim revision empties Key Findings', () => {
+    const narrative = `# Research Report
+
+## Summary
+Short.
+
+## Key Findings
+- Only this unsupported sentence.
+`;
+    const revised = reviseUnsupportedKeyClaims(narrative, [{
+      kind: 'key_claim',
+      text: 'Only this unsupported sentence.',
+      evaluation: { verdict: 'unsupported' },
+    }]);
+    const assembled = assembleReport({
+      narrative: revised.report,
+      findings,
+      limitations: revised.moved.map((text) => `Insufficient direct evidence for: ${text}`),
+      query: 'topic',
+    });
+    const check = validateReportOutput(assembled, { minChars: 80, mode: 'full', findings });
+    assert.equal(check.ok, false);
+    assert.ok(check.flags.includes('report_missing_key_claims') || check.flags.includes('report_empty_summary'));
   });
 
   it('writes a report after the exploration cap is exhausted', async () => {
@@ -265,6 +395,87 @@ Ollama is a local model runner for Apple Silicon and this fallback narrative is 
     assert.match(result.report, /Ollama on Apple Silicon/);
     assert.equal(result.report.match(/## Evidence/g)?.length, 1);
     assert.match(result.report, /## Sources/);
+  });
+
+  it('revises only the canonical narrative and bounds Evidence to one passage', async () => {
+    const innerTitle = '可以做空房产么';
+    const longBody = `# ${innerTitle}\n\n${'房产交易需要注意税费和流动性。 '.repeat(80)}`;
+    const result = await new ResearchRunner().run({
+      query: '房产操作',
+      settings: {
+        llm: {},
+        search: {},
+        research: {
+          strategy: 'focused',
+          iterations: 1,
+          questionsPerIteration: 0,
+          quality: { entailment: 'rules' },
+          focused: {
+            fetchMode: 'disabled',
+            iterationControl: { enabled: false },
+            evidencePassages: {
+              enabled: true,
+              claimAlignment: true,
+              maxPassageChars: 180,
+              maxPassagesPerSource: 5,
+            },
+          },
+        },
+      },
+      search: {
+        async search() {
+          return [{
+            title: '1480-可以做空房产么.md',
+            url: 'file:///corpus/1480.md',
+            content: longBody,
+            fetchStatus: 'ok',
+            contentOrigin: 'fetched',
+          }];
+        },
+      },
+      llm: {
+        async complete({ purpose }) {
+          if (purpose === 'question_generation') return '[]';
+          return JSON.stringify({
+            title: '房产操作',
+            summary: ['Local notes describe informal property tactics with enough detail to evaluate. [1.1]'],
+            keyFindings: [{
+              heading: '操作',
+              claims: [
+                'The source discusses informal holding arrangements in enough detail to evaluate. [1.1]',
+                'This key sentence has no backing evidence at all.',
+              ],
+            }],
+            caveats: [],
+          });
+        },
+      },
+    });
+
+    assert.equal(result.report.match(/## Evidence/g)?.length, 1);
+    assert.equal(result.report.match(/## Caveats/g)?.length, 1);
+    assert.equal(result.report.match(/## Sources/g)?.length, 1);
+    const narrative = result.report.split('## Evidence')[0];
+    assert.doesNotMatch(narrative, /source body/);
+    assert.doesNotMatch(narrative, new RegExp(innerTitle));
+    assert.doesNotMatch(narrative, /This key sentence has no backing evidence at all/);
+    assert.match(result.report, /Insufficient direct evidence for: This key sentence has no backing evidence at all/);
+    assert.equal([...result.report.matchAll(/This key sentence has no backing evidence at all/g)].length, 1);
+    const evidenceBlock = result.report.split('## Evidence')[1].split('## Caveats')[0];
+    assert.match(evidenceBlock, /source body/);
+    assert.doesNotMatch(evidenceBlock, new RegExp(longBody.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    const displayed = evidenceBlock.match(/\(source body\):\s*(.*)$/m)?.[1] || '';
+    assert.ok(displayed.length > 0 && displayed.length <= 180);
+    assert.ok(result.passages.length >= 1);
+    assert.ok(result.passages.every((passage) => passage.text.length <= 180));
+    const keyClaims = result.claims.filter((claim) => claim.kind === 'key_claim');
+    const evidenceLine = result.report.split('\n').findIndex((line) => /^## Evidence\b/.test(line)) + 1;
+    assert.ok(keyClaims.every((claim) => claim.lineStart < evidenceLine));
+    assert.deepEqual(
+      keyClaims.map((claim) => claim.text),
+      extractQualityClaims(narrative).filter((claim) => claim.kind === 'key_claim').map((claim) => claim.text),
+    );
+    assert.ok(result.claims.some((claim) => claim.kind === 'evidence_entry'));
   });
 });
 

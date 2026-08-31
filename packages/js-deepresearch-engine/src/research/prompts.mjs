@@ -1,4 +1,5 @@
-import { getSourceEvidence, getSourceEvidenceClass } from './focused-settings.mjs';
+import { getSourceEvidenceClass } from './focused-settings.mjs';
+import { DEFAULT_MAX_PASSAGE_CHARS, selectDisplayedEvidence } from './evidence-chain.mjs';
 
 export function questionPrompt({ query, count, mode = 'initial', context = '' }) {
   const modeInstructions = {
@@ -43,10 +44,17 @@ function sourceEvidenceClassLabel(source) {
 
 const NARRATIVE_SCHEMA = '{"title":"...","summary":["... [1.1]"],"keyFindings":[{"heading":"...","claims":["... [1.2]"]}],"caveats":["..."]}';
 
-export function reportPrompt({ query, findings, limitations = [], strategy = 'focused' }) {
+export function reportPrompt({
+  query,
+  findings,
+  limitations = [],
+  strategy = 'focused',
+  passages = [],
+  maxPassageChars = DEFAULT_MAX_PASSAGE_CHARS,
+} = {}) {
   const sourceBlock = findings.map((finding, index) => {
     const sources = finding.sources.map((source, sourceIndex) => (
-      `[${index + 1}.${sourceIndex + 1}] ${source.title}\n${source.url}\nEvidence class: ${sourceEvidenceClassLabel(source)}\nEvidence: ${getSourceEvidence(source)}`
+      `[${index + 1}.${sourceIndex + 1}] ${source.title}\n${source.url}\nEvidence class: ${sourceEvidenceClassLabel(source)}\nEvidence: ${selectDisplayedEvidence(source, { passages, maxChars: maxPassageChars })}`
     )).join('\n\n');
     return `Question: ${finding.question}\nSources:\n${sources}`;
   }).join('\n\n---\n\n');
@@ -109,8 +117,15 @@ export function claimEntailmentPrompt({ claim, passages = [] }) {
   ];
 }
 
-export function reportRetryPrompt({ query, findings, limitations = [], strategy = 'focused' }) {
-  const messages = reportPrompt({ query, findings, limitations, strategy });
+export function reportRetryPrompt({
+  query,
+  findings,
+  limitations = [],
+  strategy = 'focused',
+  passages = [],
+  maxPassageChars = DEFAULT_MAX_PASSAGE_CHARS,
+} = {}) {
+  const messages = reportPrompt({ query, findings, limitations, strategy, passages, maxPassageChars });
   return [
     ...messages,
     {

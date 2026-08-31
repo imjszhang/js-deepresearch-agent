@@ -26,8 +26,20 @@ export class QueryMemory {
     this.entries = [];
   }
 
-  async findDuplicate(query, gapId = null) {
+  resultFingerprint(results = []) {
+    return [...new Set((results || []).map((item) => item?.url).filter(Boolean))].sort().join('\n');
+  }
+
+  async findDuplicate(query, gapId = null, options = {}) {
     if (!this.enabled) return null;
+    const fingerprint = this.resultFingerprint(options.results);
+    if (fingerprint) {
+      const hit = this.entries.find((item) => item.status !== 'cancelled' && item.resultFingerprint === fingerprint);
+      if (hit) {
+        this.onSkip({ query, duplicateOf: hit.query, score: 1, reason: 'duplicate_results' });
+        return { entry: hit, score: 1, reason: 'duplicate_results' };
+      }
+    }
     const normalized = normalizeQuery(query);
     for (const entry of this.entries.filter((item) => item.status !== 'cancelled' && item.gapId === gapId)) {
       let score = normalized === entry.normalized ? 1 : querySimilarity(normalized, entry.normalized);
@@ -43,8 +55,7 @@ export class QueryMemory {
   }
 
   record({ query, gapId = null, provider = '', status, results = [] }) {
-    const urls = [...new Set(results.map((item) => item?.url).filter(Boolean))].sort();
-    const fingerprint = urls.join('\n');
+    const fingerprint = this.resultFingerprint(results);
     const duplicateResults = fingerprint && this.entries.some((item) => item.resultFingerprint === fingerprint);
     const entry = { query, normalized: normalizeQuery(query), gapId, provider, status: duplicateResults ? 'duplicate_results' : status, resultCount: results.length, resultFingerprint: fingerprint, createdAt: new Date().toISOString() };
     if (status !== 'cancelled') this.entries.push(entry);
