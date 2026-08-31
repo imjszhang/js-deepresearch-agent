@@ -1,4 +1,5 @@
-import { sourceDiversityKey } from '../source-candidates.mjs';
+import { isFileSourceUrl, sourceDiversityKey } from '../source-candidates.mjs';
+import { extractComparisonSubjects, questionTokens } from './exploratory-sufficiency.mjs';
 
 const MULTI_LABEL_PUBLIC_SUFFIXES = new Set([
   'com.cn', 'net.cn', 'org.cn', 'gov.cn',
@@ -273,6 +274,67 @@ export function independentDomainsFromSources(sources = []) {
       .map((source) => registrableDomainFromUrl(source.url || source.id))
       .filter(Boolean),
   );
+}
+
+export function listLocalCorpusChannels(settings = {}) {
+  const dirs = settings?.search?.local?.dirs;
+  if (!Array.isArray(dirs)) return [];
+  return [...new Set(dirs.map((dir) => String(dir || '').trim()).filter(Boolean))];
+}
+
+export function inferEvidenceScope(settings = {}) {
+  const engine = String(settings?.search?.engine || '').trim().toLowerCase();
+  const localChannels = listLocalCorpusChannels(settings);
+  const hasLocal = engine === 'local' || localChannels.length > 0;
+  const hasWeb = Boolean(engine) && engine !== 'local';
+  if (hasLocal && hasWeb) return 'mixed';
+  if (hasLocal) return 'local';
+  return 'web';
+}
+
+export function evidenceIndependenceKey(source = {}) {
+  const url = source.url || source.id || '';
+  if (isFileSourceUrl(url) || isFileSourceUrl(source.url)) {
+    return sourceDiversityKey(source);
+  }
+  return registrableDomainFromUrl(url);
+}
+
+export function independentEvidenceKeysFromSources(sources = []) {
+  return new Set(
+    (sources || [])
+      .map((source) => evidenceIndependenceKey(source))
+      .filter(Boolean),
+  );
+}
+
+export function collectSearchAngleCandidates(query, gaps = [], searchedQueries = [], { evidenceScope = 'web' } = {}) {
+  const searched = new Set((searchedQueries || []).map(String));
+  const out = [];
+  const push = (value) => {
+    const term = String(value || '').trim();
+    if (!term || searched.has(term) || out.includes(term)) return;
+    out.push(term);
+  };
+  if (evidenceScope !== 'local') {
+    for (const gap of gaps) {
+      for (const next of nextUnusedSiteQueries(gap, query, [...searched, ...out], { limit: 3 })) {
+        push(next);
+      }
+    }
+  }
+  for (const angle of nextUnusedSearchAngles(query, [...searched, ...out], { limit: 6 })) {
+    push(angle);
+  }
+  for (const subject of extractComparisonSubjects(query)) push(subject);
+  for (const token of questionTokens(query)) {
+    if (String(token).length >= 3) push(token);
+  }
+  for (const gap of gaps) {
+    if (['open', 'searched', 'missing'].includes(gap.status || 'open')) push(gap.question);
+  }
+  push(String(query || '').replace(/\s+/g, ' ').trim().slice(0, 16));
+  return out;
 }
 
 export function selectReadsByPolicy({

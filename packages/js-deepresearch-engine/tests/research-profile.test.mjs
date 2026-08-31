@@ -4,6 +4,7 @@ import {
   inferResearchProfile,
   mergeProfilePlan,
   planResearchProfile,
+  sanitizeEvidenceProfile,
 } from '../src/research/adaptive/research-profile.mjs';
 
 describe('research profile does not invent venue policy', () => {
@@ -75,5 +76,46 @@ describe('research profile does not invent venue policy', () => {
     assert.deepEqual(profile.requiredHosts, ['hkexnews.hk']);
     assert.deepEqual(profile.requiredSourceTypes, ['primary_filing']);
     assert.equal(profile.plannedGaps[0].requiredHosts[0], 'hkexnews.hk');
+  });
+
+  it('strips invented web hosts from local-only profiles', async () => {
+    const settings = { search: { engine: 'local', local: { dirs: ['/notes'] } } };
+    const query = '房产操作攻略';
+    const profile = await planResearchProfile({
+      query,
+      settings,
+      evidenceScope: 'local',
+      profile: inferResearchProfile(query, { settings, evidenceScope: 'local' }),
+      llm: {
+        async complete() {
+          return JSON.stringify({
+            flags: { primary_source: true },
+            requiredHosts: ['fang.com', 'sec.gov'],
+            preferredHosts: ['ke.com'],
+            requiredSourceTypes: ['primary_filing'],
+            minIndependentSources: 4,
+            gaps: [{ question: '哪个城市', requiredHosts: ['fang.com'] }],
+          });
+        },
+      },
+    });
+    assert.deepEqual(profile.requiredHosts, []);
+    assert.deepEqual(profile.preferredHosts, []);
+    assert.ok(!profile.requiredSourceTypes.includes('primary_filing'));
+    assert.equal(profile.minIndependentSources, 1);
+    assert.deepEqual(profile.plannedGaps[0].requiredHosts, []);
+    const kept = sanitizeEvidenceProfile({
+      query: 'Read fang.com listings',
+      requiredHosts: ['fang.com', 'sec.gov'],
+      preferredHosts: ['ke.com'],
+      requiredSourceTypes: ['primary_filing'],
+      minIndependentSources: 3,
+    }, {
+      evidenceScope: 'local',
+      settings: { search: { local: { dirs: ['/a', '/b'] } } },
+      query: 'Read fang.com listings',
+    });
+    assert.deepEqual(kept.requiredHosts, ['fang.com']);
+    assert.equal(kept.minIndependentSources, 2);
   });
 });

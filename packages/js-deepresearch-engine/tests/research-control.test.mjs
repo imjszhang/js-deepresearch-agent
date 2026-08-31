@@ -40,6 +40,21 @@ describe('research control infrastructure', () => {
     assert.equal(await memory.findDuplicate('different topic', 'g1'), null);
   });
 
+  it('treats different queries with the same result fingerprint as duplicates', async () => {
+    const memory = new QueryMemory({ enabled: true });
+    const results = [
+      { url: 'file:///notes/a.md' },
+      { url: 'file:///notes/b.md' },
+    ];
+    const first = memory.record({ query: '房产操作攻略', gapId: 'g1', status: 'useful', results });
+    assert.equal(first.status, 'useful');
+    const second = memory.record({ query: '房产攻略细节', gapId: 'g1', status: 'useful', results });
+    assert.equal(second.status, 'duplicate_results');
+    const hit = await memory.findDuplicate('第三个换皮查询', 'g1', { results });
+    assert.equal(hit.reason, 'duplicate_results');
+    assert.equal(hit.entry.query, '房产操作攻略');
+  });
+
   it('normalizes tracking URLs and enforces hostname diversity', () => {
     assert.equal(normalizeSourceUrl('https://example.com/a/?utm_source=x#part'), 'https://example.com/a');
     const selected = selectDiverseSources([

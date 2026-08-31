@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { ResearchRunner } from '../src/index.mjs';
 import { ResearchState } from '../src/research/adaptive/research-state.mjs';
-import { fallbackAdaptiveAction } from '../src/research/adaptive/agent-policy.mjs';
+import { buildAngleChangeSearch, fallbackAdaptiveAction } from '../src/research/adaptive/agent-policy.mjs';
 
 function report() {
   return '# Research Report\n\n## Summary\n\nThe selected source provides enough evidence to answer the requested topic while keeping the agent source choice visible. [1.1]\n\n## Key Findings\n\nThe selected source provides evidence for the requested topic and preserves agent source choice. [1.1]';
@@ -151,6 +151,38 @@ describe('exploratory agent loop', () => {
     assert.equal(action.action, 'search');
     assert.notEqual(action.action, 'reflect');
     assert.equal(action.reasonCode, 'fallback_angle_change');
+  });
+
+  it('does not append step numbers when search angles are exhausted', () => {
+    const state = new ResearchState({ query: 'topic', maxSteps: 10 });
+    state.addCandidates([{ url: 'https://done.test/page', title: 'Done' }], 'gap-1');
+    state.readSourceIds.add('https://done.test/page');
+    state.recordSearchedQuery('gap-1', 'topic');
+    state.lastAction = 'search';
+    const action = fallbackAdaptiveAction(state, { belowHardCap: true, readiness: { pass: false } });
+    assert.equal(action.action, 'answer');
+    assert.equal(action.reasonCode, 'budget_exhausted');
+    assert.equal(buildAngleChangeSearch(state), null);
+    assert.ok(!/\s+\d+(-\d+)?$/.test(action.query || ''));
+  });
+
+  it('skips site: fallbacks for local-only evidence scope', () => {
+    const state = new ResearchState({
+      query: '房产操作攻略',
+      evidenceScope: 'local',
+      profile: {
+        flags: {},
+        requiredHosts: ['fang.com'],
+        preferredHosts: [],
+        requiredSourceTypes: [],
+        minIndependentSources: 1,
+        evidenceScope: 'local',
+      },
+    });
+    const action = buildAngleChangeSearch(state);
+    assert.ok(action);
+    assert.ok(!String(action.query || '').includes('site:'));
+    assert.ok(!(action.queries || []).some((query) => query.includes('site:')));
   });
 
   it('falls back to answer when the gate already passed and unread sources are gone', () => {

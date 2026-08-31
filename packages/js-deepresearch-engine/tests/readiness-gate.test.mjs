@@ -128,4 +128,85 @@ describe('deterministic readiness gate', () => {
     assert.equal(evaluation.pass, false);
     assert.equal(state.readiness.pass, false);
   });
+
+  it('treats one local corpus as enough independent evidence', () => {
+    const query = '房产操作攻略';
+    const body = '本地材料详细说明税费、限购和持有周期，足以作为正文证据。';
+    const gate = evaluateReadinessGate({
+      query,
+      profile: { flags: {}, minIndependentSources: 1, evidenceScope: 'local', requiredHosts: [] },
+      gaps: [{ id: 'gap-1', question: query, status: 'body_read', priority: 'critical', requiredHosts: [] }],
+      findings: [{
+        gapId: 'gap-1',
+        sources: [
+          { url: 'file:///notes/a.md', corpusRoot: '/notes', content: body, fetchStatus: 'ok' },
+          { url: 'file:///notes/b.md', corpusRoot: '/notes', content: `${body} more`, fetchStatus: 'ok' },
+        ],
+      }],
+    });
+    assert.equal(gate.pass, true);
+    assert.ok(!gate.failures.some((failure) => failure.code === 'independent_sources_short'));
+  });
+
+  it('counts two local corpora as two independent evidence keys', () => {
+    const query = '房产操作攻略';
+    const body = '本地材料详细说明税费、限购和持有周期，足以作为正文证据。';
+    const short = evaluateReadinessGate({
+      query,
+      profile: { flags: {}, minIndependentSources: 2, evidenceScope: 'local' },
+      gaps: [{ id: 'gap-1', question: query, status: 'verified', priority: 'critical', requiredHosts: [] }],
+      findings: [{
+        gapId: 'gap-1',
+        sources: [
+          { url: 'file:///notes/a.md', corpusRoot: '/notes', content: body, fetchStatus: 'ok' },
+          { url: 'file:///notes/b.md', corpusRoot: '/notes', content: `${body} extra`, fetchStatus: 'ok' },
+        ],
+      }],
+    });
+    assert.equal(short.pass, false);
+    assert.ok(short.failures.some((failure) => failure.code === 'independent_sources_short'));
+    assert.match(short.failures.find((failure) => failure.code === 'independent_sources_short').message, /local corpora/);
+    const ready = evaluateReadinessGate({
+      query,
+      profile: { flags: {}, minIndependentSources: 2, evidenceScope: 'local' },
+      gaps: [{ id: 'gap-1', question: query, status: 'verified', priority: 'critical', requiredHosts: [] }],
+      findings: [{
+        gapId: 'gap-1',
+        sources: [
+          { url: 'file:///notes/a.md', corpusRoot: '/notes', content: body, fetchStatus: 'ok' },
+          { url: 'file:///reports/c.md', corpusRoot: '/reports', content: `${body} second channel`, fetchStatus: 'ok' },
+        ],
+      }],
+    });
+    assert.equal(ready.pass, true);
+  });
+
+  it('marks a local body as covering the root gap', () => {
+    const query = '房产操作攻略';
+    const state = new ResearchState({
+      query,
+      evidenceScope: 'local',
+      profile: {
+        flags: {},
+        requiredHosts: [],
+        requiredSourceTypes: [],
+        minIndependentSources: 1,
+        evidenceScope: 'local',
+      },
+    });
+    state.findings.push({
+      gapId: 'gap-1',
+      sources: [{
+        url: 'file:///notes/a.md',
+        corpusRoot: '/notes',
+        engine: 'local:notes',
+        content: '本地材料详细说明税费、限购和持有周期，足以作为正文证据。',
+        fetchStatus: 'ok',
+      }],
+    });
+    state.syncGapCoverage();
+    assert.equal(state.gaps[0].status, 'verified');
+    state.refreshBudgetView();
+    assert.equal(state.readiness.pass, true);
+  });
 });

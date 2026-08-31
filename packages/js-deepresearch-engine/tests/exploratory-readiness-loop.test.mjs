@@ -476,6 +476,44 @@ describe('exploratory Search-Read-Reason loop', () => {
     assert.ok(result.trace.some((entry) => entry.action === 'search' && entry.status === 'rejected' && entry.reasonCode === 'duplicate_query'));
   });
 
+  it('recovers from duplicate queries by reading or stopping instead of numeric suffixes', async () => {
+    const queries = [];
+    const decisions = [
+      { action: 'search', query: 'open topic space', gapId: 'gap-1', reasonCode: 'search' },
+      { action: 'search', query: 'open topic space', gapId: 'gap-1', reasonCode: 'repeat' },
+    ];
+    const result = await new ResearchRunner().run({
+      query: 'open topic space',
+      settings: {
+        llm: {},
+        search: {},
+        research: {
+          strategy: 'exploratory',
+          exploratory: { minLlmTokens: 0, maxLlmTokens: 0, maxSteps: 6, maxEvaluationRetries: 0, autoReadTopK: 0 },
+          focused: { fetchMode: 'full' },
+          budget: { maxSearchRequests: 4, maxSourceReads: 2, maxLlmTokens: 0 },
+        },
+      },
+      search: {
+        async search(query) {
+          queries.push(query);
+          return [{
+            title: 'Body',
+            url: 'https://topic.test/page',
+            content: 'Open topic space evidence from a selected source with enough body text.',
+            fetchStatus: 'ok',
+          }];
+        },
+      },
+      llm: llmFor(decisions),
+    });
+    assert.ok(queries.every((query) => !/\s+\d+(-\d+)?$/.test(query)));
+    assert.ok(result.trace.some((entry) => (
+      entry.status === 'rejected'
+      && ['duplicate_query', 'duplicate_results', 'repeat_action'].includes(entry.reasonCode)
+    )) || result.trace.some((entry) => entry.action === 'read'));
+  });
+
   it('rejects empty bullets during report validation', () => {
     const check = emptyBulletLines('# Research Report\n\n## Key Findings\n-\n- Real finding [1.1]\n');
     assert.equal(check.length, 1);

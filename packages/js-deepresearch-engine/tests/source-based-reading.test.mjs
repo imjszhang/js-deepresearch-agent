@@ -447,6 +447,29 @@ describe('report and research context', () => {
     assert.match(messages[1].content, /Evidence: title only snippet/);
   });
 
+  it('keeps fetched bodies bounded in the report prompt', () => {
+    const sentinel = 'UNIQUE_BODY_SENTINEL_SHOULD_NOT_APPEAR';
+    const content = `${'房产交易需要注意税费和流动性。 '.repeat(40)}${sentinel}`;
+    const messages = reportPrompt({
+      query: '房产操作',
+      maxPassageChars: 80,
+      findings: [{
+        question: '房产操作',
+        sources: [{
+          title: '手册',
+          url: 'file:///corpus/a.md',
+          content,
+          fetchStatus: 'ok',
+          contentOrigin: 'fetched',
+        }],
+      }],
+    });
+    assert.match(messages[1].content, /Evidence class: source body/);
+    assert.doesNotMatch(messages[1].content, /UNIQUE_BODY_SENTINEL_SHOULD_NOT_APPEAR/);
+    const evidence = messages[1].content.match(/Evidence:\s*(.*)$/m)?.[1] || '';
+    assert.ok(evidence.length <= 80);
+  });
+
   it('formats follow-up context from enriched evidence', () => {
     const context = formatSourcesForResearchContext([{
       question: 'q',

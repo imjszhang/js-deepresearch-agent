@@ -8,7 +8,7 @@ import { resolveReportSettings } from './report-settings.mjs';
 import { runStrategy } from './strategies.mjs';
 import { BudgetManager, BudgetExceededError, wrapProvidersWithBudget } from './budget-manager.mjs';
 import { QueryMemory } from './query-memory.mjs';
-import { buildEvidenceArtifacts, listSnippetOnlyCitationKeys } from './evidence-chain.mjs';
+import { alignReportClaims, buildPassageArtifactsAsync, listSnippetOnlyCitationKeys } from './evidence-chain.mjs';
 import { evaluatePreReport } from './quality-gates.mjs';
 import { resolveFocusedSettings } from './focused-settings.mjs';
 import { createResearchProviders } from './research-providers.mjs';
@@ -114,8 +114,28 @@ export class ResearchRunner {
     }
     emit({ stage: 'synthesizing_report' });
     const reportSettings = resolveReportSettings(settings);
-    const narrative = await buildReport({
+    const evidenceOptions = strategy === 'exploratory'
+      ? { ...focused.evidencePassages, enabled: true, claimAlignment: true }
+      : focused.evidencePassages;
+    if (evidenceOptions.enabled) emit({ stage: 'extracting_passages' });
+    const passageArtifacts = await buildPassageArtifactsAsync({
+      query,
+      findings,
+      options: {
+        ...evidenceOptions,
+        strategy,
+        embedding: researchProviders.embedding,
+        signal,
+      },
+    });
+    findings = passageArtifacts.findings;
+    if (!exploratoryLoop?.gaps?.length) {
+      gaps = tracksGaps ? buildGapsFromFindings(findings, query) : [];
+    }
+    let narrativeDraft = await buildReport({
       llm, query, findings, signal, purpose: 'report', limitations: reportLimitations, strategy,
+      passages: passageArtifacts.passages,
+      maxPassageChars: evidenceOptions.maxPassageChars,
       maxTokens: reportSettings.maxOutputTokens,
       minChars: reportSettings.minChars,
       maxAttempts: reportSettings.maxAttempts,
@@ -131,12 +151,15 @@ export class ResearchRunner {
         if (event.status === 'invalid') emit({ stage: 'report_retrying', ...event });
       },
     });
-    let report = assembleReport({
-      narrative,
+    const assembleCurrentReport = (limitations = reportLimitations) => assembleReport({
+      narrative: narrativeDraft,
       findings,
-      limitations: reportLimitations,
+      passages: passageArtifacts.passages,
+      maxPassageChars: evidenceOptions.maxPassageChars,
+      limitations,
       query,
     });
+    let report = assembleCurrentReport();
     const assembledCheck = validateReportOutput(report, {
       minChars: reportSettings.minChars,
       mode: 'full',
@@ -150,57 +173,62 @@ export class ResearchRunner {
         flags: assembledCheck.flags,
       });
     }
-    const evidenceOptions = strategy === 'exploratory'
-      ? { ...focused.evidencePassages, enabled: true, claimAlignment: true }
-      : focused.evidencePassages;
-    if (evidenceOptions.enabled) emit({ stage: 'extracting_passages' });
-    let evidence = buildEvidenceArtifacts({
-      query,
-      findings,
-      report,
-      options: { ...evidenceOptions, strategy },
-    });
-    findings = evidence.findings;
-    if (!exploratoryLoop?.gaps?.length) {
-      gaps = tracksGaps ? buildGapsFromFindings(findings, query) : [];
-    }
+    let claims = [];
+    let movedClaimTexts = [];
     if (evidenceOptions.claimAlignment) {
       emit({ stage: 'evaluating_report' });
       trace.push({ step: trace.length + 1, action: 'evaluate_report', reasonCode: 'claim_evidence_alignment', createdAt: new Date().toISOString() });
       const entailmentMode = settings?.research?.quality?.entailment || 'rules_then_llm';
-      const judgeClaims = async (current) => applyClaimEntailment(current.claims, {
+      const judgeClaims = async (currentClaims) => applyClaimEntailment(currentClaims, {
         llm,
-        passages: current.passages,
+        passages: passageArtifacts.passages,
         signal,
         mode: entailmentMode,
       });
-      evidence = { ...evidence, claims: await judgeClaims(evidence) };
-      const revision = reviseUnsupportedKeyClaims(report, evidence.claims);
+      const alignCurrentReport = () => alignReportClaims({
+        report,
+        passages: passageArtifacts.passages,
+        citationMap: passageArtifacts.citationMap,
+        options: { ...evidenceOptions, strategy },
+      });
+      claims = await judgeClaims(alignCurrentReport());
+      const revision = reviseUnsupportedKeyClaims(narrativeDraft, claims);
+      movedClaimTexts = revision.moved;
       if (revision.moved.length) {
-        report = assembleReport({
-          narrative: revision.report,
-          findings,
-          limitations: [
-            ...reportLimitations,
-            ...revision.moved.map((text) => `Insufficient direct evidence for: ${text}`),
-          ],
-          query,
+        narrativeDraft = revision.report;
+        report = assembleCurrentReport([
+          ...reportLimitations,
+          ...revision.moved.map((text) => `Insufficient direct evidence for: ${text}`),
+        ]);
+        claims = await judgeClaims(alignCurrentReport());
+      }
+      const revisedCheck = validateReportOutput(report, {
+        minChars: reportSettings.minChars,
+        mode: 'full',
+        findings,
+      });
+      if (!revisedCheck.ok && findings.length > 0) {
+        throw new ReportGenerationError({
+          attempts: reportSettings.maxAttempts,
+          minChars: reportSettings.minChars,
+          outputChars: revisedCheck.outputChars,
+          flags: revisedCheck.flags,
         });
-        evidence = buildEvidenceArtifacts({
-          query,
-          findings,
-          report,
-          options: { ...evidenceOptions, strategy },
-        });
-        findings = evidence.findings;
-        evidence = { ...evidence, claims: await judgeClaims(evidence) };
       }
     }
+    const evidence = {
+      findings,
+      sources: passageArtifacts.sources,
+      passages: passageArtifacts.passages,
+      claims,
+      citationMap: passageArtifacts.citationMap,
+    };
     const qualityMetrics = calculateQualityMetrics(evidence.claims);
     const claimGate = qualityGateFromClaims(evidence.claims);
     const unverifiedKeyClaims = evidence.claims.filter((claim) => (
       claim.kind === 'key_claim' && ['unsupported', 'unverifiable'].includes(claim.evaluation?.verdict)
     ));
+    const movedClaimSet = new Set(movedClaimTexts);
     const noClaims = evidenceOptions.claimAlignment && qualityMetrics.keyClaimCount === 0;
     const emptyExtraction = evidenceOptions.claimAlignment && qualityMetrics.claimCount === 0;
     const finalGate = preReport.gate === 'fail' || claimGate === 'fail' || emptyExtraction
@@ -228,7 +256,10 @@ export class ResearchRunner {
         ...(secondaryLimitation ? [secondaryLimitation] : []),
         ...(unsupportedLimitation ? [unsupportedLimitation] : []),
         ...(noClaims ? ['No evaluable claims could be extracted from the report.'] : []),
-        ...unverifiedKeyClaims.map((claim) => `Insufficient direct evidence for: ${claim.text}`),
+        ...(evidenceOptions.claimAlignment
+          ? unverifiedKeyClaims.filter((claim) => movedClaimSet.has(claim.text))
+          : unverifiedKeyClaims
+        ).map((claim) => `Insufficient direct evidence for: ${claim.text}`),
       ],
       metrics: {
         ...preReport.metrics,

@@ -1,6 +1,6 @@
 import { hostnameOf } from './research-state.mjs';
 import { isOrthogonalGap } from './exploratory-sufficiency.mjs';
-import { nextUnusedSearchAngles, nextUnusedSiteQueries, shortSearchTerms } from './source-policy.mjs';
+import { collectSearchAngleCandidates, inferEvidenceScope } from './source-policy.mjs';
 
 const ACTION_SCHEMA = '{"action":"search|read|reflect|draft|finalize","reasonCode":"short_code","gapId":"gap-1","query":"...","queries":["..."],"sourceIds":["..."],"gapQuestion":"..."}';
 
@@ -119,17 +119,18 @@ export function belowHardCapFrom(state, options = {}) {
 export function buildAngleChangeSearch(state, { reasonCode = 'fallback_angle_change' } = {}) {
   const focus = (typeof state.focusGap === 'function' ? state.focusGap() : null) || state.gaps?.[0];
   const searched = typeof state.searchedQueries === 'function' ? state.searchedQueries() : [];
-  const siteQueries = nextUnusedSiteQueries(focus, state.query, searched, { limit: 3 });
-  const angles = siteQueries.length
-    ? siteQueries
-    : nextUnusedSearchAngles(state.query || focus?.question || '', searched, { limit: 3 });
-  const short = shortSearchTerms(state.query || focus?.question || '');
-  const step = Number(state.step) || 0;
-  const query = angles[0] || `${short} ${step + 1}`.trim();
+  const evidenceScope = state.evidenceScope || inferEvidenceScope(state.settings);
+  const angles = collectSearchAngleCandidates(
+    state.query || focus?.question || '',
+    state.gaps || [],
+    searched,
+    { evidenceScope },
+  );
+  if (!angles.length) return null;
   return {
     action: 'search',
-    query,
-    queries: angles.length ? angles : undefined,
+    query: angles[0],
+    queries: angles.slice(0, 3),
     gapId: focus?.id || 'gap-1',
     reasonCode,
   };
@@ -161,25 +162,30 @@ export function fallbackAdaptiveAction(state, options = {}) {
   const uncovered = (state.gaps || []).find((gap) => (
     !state.gapCovered(gap.id) && !state.searchedQueries().includes(gap.question)
   ));
+  const evidenceScope = state.evidenceScope || inferEvidenceScope(state.settings);
   if (uncovered && state.lastAction !== 'search') {
-    const siteQueries = nextUnusedSiteQueries(uncovered, state.query, state.searchedQueries(), { limit: 3 });
-    const angles = siteQueries.length
-      ? siteQueries
-      : nextUnusedSearchAngles(uncovered.question || state.query, state.searchedQueries(), { limit: 3 });
-    return {
-      action: 'search',
-      query: angles[0] || shortSearchTerms(uncovered.question || state.query),
-      queries: angles.length ? angles : undefined,
-      gapId: uncovered.id,
-      reasonCode: belowMin ? 'fallback_explore_below_min' : 'fallback_search_open_gap',
-    };
+    const angles = collectSearchAngleCandidates(
+      uncovered.question || state.query,
+      [uncovered],
+      state.searchedQueries(),
+      { evidenceScope },
+    );
+    if (angles.length) {
+      return {
+        action: 'search',
+        query: angles[0],
+        queries: angles.slice(0, 3),
+        gapId: uncovered.id,
+        reasonCode: belowMin ? 'fallback_explore_below_min' : 'fallback_search_open_gap',
+      };
+    }
   }
   if (!gatePass && !belowHardCap) {
     return { action: 'answer', reasonCode: 'budget_exhausted' };
   }
   return buildAngleChangeSearch(state, {
     reasonCode: belowMin ? 'fallback_explore_below_min' : 'fallback_angle_change',
-  });
+  }) || { action: 'answer', reasonCode: 'budget_exhausted' };
 }
 
 export function canReflectNewGap(state, gapQuestion) {

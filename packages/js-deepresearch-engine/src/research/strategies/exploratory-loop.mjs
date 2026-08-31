@@ -6,7 +6,7 @@ import { ResearchState } from '../adaptive/research-state.mjs';
 import { classifyResearchQuery } from '../adaptive/exploratory-sufficiency.mjs';
 import { inferResearchProfile, planResearchProfile } from '../adaptive/research-profile.mjs';
 import { classifyFetchedBody } from '../body-quality.mjs';
-import { shortSearchTerms } from '../adaptive/source-policy.mjs';
+import { inferEvidenceScope, listLocalCorpusChannels } from '../adaptive/source-policy.mjs';
 import {
   EXPLORATORY_STOP_REASONS,
   mapFinalizeStopReason,
@@ -90,10 +90,25 @@ function addSerpKnowledge(state, results, gapId) {
   state.addKnowledge({ gapId, sourceId: null, learned: `SERP: ${top.join(' | ')}` });
 }
 
-function normalizeSearchQueries(action, maxQueries) {
+function normalizeSearchQueries(action, maxQueries, { evidenceScope } = {}) {
   const queries = Array.isArray(action.queries) ? action.queries : [];
   const merged = [String(action.query || '').trim(), ...queries.map((query) => String(query || '').trim())];
-  return [...new Set(merged.filter(Boolean))].slice(0, maxQueries);
+  const unique = [...new Set(merged.filter(Boolean))];
+  const scoped = evidenceScope === 'local'
+    ? unique.filter((query) => !/\bsite:\s*\S+/i.test(query))
+    : unique;
+  return scoped.slice(0, maxQueries);
+}
+
+function pickFallbackReadAction(state) {
+  const picks = pickUnreadCandidates(state, 2, state.focusGap()?.id);
+  if (!picks.length) return null;
+  return {
+    action: 'read',
+    sourceIds: picks.map((candidate) => candidate.id),
+    gapId: picks[0].gapId || state.focusGap()?.id || 'gap-1',
+    reasonCode: 'fallback_read_evidence',
+  };
 }
 
 async function filterDuplicateQueries(queries, { state, queryMemory, gapId, embedding, signal }) {
@@ -167,7 +182,8 @@ export async function runExploratoryLoop(context) {
   const queryShape = classifyResearchQuery(query);
   applyExploratoryBudget(budget, exploratory);
   const maxSteps = effectiveExploratoryMaxSteps(exploratory, budget?.limits?.llmTokens);
-  let profile = inferResearchProfile(query);
+  const evidenceScope = inferEvidenceScope(settings);
+  let profile = inferResearchProfile(query, { settings, evidenceScope });
   const state = new ResearchState({
     query,
     maxSteps,
@@ -176,6 +192,8 @@ export async function runExploratoryLoop(context) {
     targetLlmTokens: exploratory.minLlmTokens,
     budget,
     profile,
+    settings,
+    evidenceScope,
   });
   const maxReads = Math.max(1, Number(exploratory.maxReadsPerStep) || 3);
   const maxRetries = Math.max(0, Number(exploratory.maxEvaluationRetries) || 0);
@@ -202,6 +220,8 @@ export async function runExploratoryLoop(context) {
       flags: profile.flags,
       requiredHosts: profile.requiredHosts,
       method: profile.method,
+      evidenceScope,
+      corpusChannelCount: listLocalCorpusChannels(settings).length,
     },
   }, budget);
 
@@ -302,8 +322,9 @@ export async function runExploratoryLoop(context) {
   }
 
   const profileTokensBefore = budget?.usage?.llmTokens || 0;
-  profile = await planResearchProfile({ llm, query, profile, signal });
+  profile = await planResearchProfile({ llm, query, profile, signal, settings, evidenceScope });
   state.profile = profile;
+  state.evidenceScope = profile.evidenceScope || evidenceScope;
   state.gaps[0] = {
     ...state.gaps[0],
     requiredHosts: profile.requiredHosts ?? [],
@@ -393,11 +414,12 @@ export async function runExploratoryLoop(context) {
         }
       }
 
+      const queryScope = { evidenceScope: state.evidenceScope || evidenceScope };
       let invalid = pendingStopReason === STOP_REASONS.budgetExhausted ? null : state.validate(action);
       let searchQueries = [];
       if (!invalid && action.action === 'search') {
         const gap = state.getGap(action.gapId || state.focusGap()?.id);
-        const rawQueries = normalizeSearchQueries(action, maxQueriesPerStep);
+        const rawQueries = normalizeSearchQueries(action, maxQueriesPerStep, queryScope);
         searchQueries = await filterDuplicateQueries(rawQueries.slice(0, maxQueriesPerStep), {
           state,
           queryMemory,
@@ -420,37 +442,46 @@ export async function runExploratoryLoop(context) {
         invalid = state.validate(action);
         if (invalid && belowHardCap && canContinueLoop()) {
           action = buildAngleChangeSearch(state);
-          if (!normalizeSearchQueries(action, maxQueriesPerStep).length) {
-            action = {
-              action: 'search',
-              query: `${shortSearchTerms(state.query)} ${state.step + 1}`,
-              gapId: state.focusGap()?.id || 'gap-1',
-              reasonCode: 'fallback_angle_change',
-            };
-          }
-          invalid = state.validate(action);
+          invalid = action ? state.validate(action) : 'no_search_angle';
         }
-        if (invalid) {
-          if (belowHardCap && canContinueLoop()) {
-            action = {
-              action: 'search',
-              query: `${shortSearchTerms(state.query)} ${state.step}-${state.evaluationRetries}`,
-              gapId: state.focusGap()?.id || 'gap-1',
-              reasonCode: 'fallback_angle_change',
-            };
+        if (invalid && belowHardCap && canContinueLoop()) {
+          const readAction = pickFallbackReadAction(state);
+          if (readAction) {
+            action = readAction;
             invalid = state.validate(action);
           }
-          if (invalid) {
-            stopReason = resolveNewRunStopReason(pendingStopReason, {
-              step: state.step,
-              maxSteps: state.maxSteps,
-              budget,
-            });
-            addTrace(trace, state, 'stop', { reasonCode: stopReason }, budget);
-            break;
+        }
+        if (!invalid && action.action === 'search') {
+          const gap = state.getGap(action.gapId || state.focusGap()?.id);
+          searchQueries = await filterDuplicateQueries(
+            normalizeSearchQueries(action, maxQueriesPerStep, queryScope),
+            {
+              state,
+              queryMemory,
+              gapId: gap.id,
+              embedding,
+              signal,
+            },
+          );
+          if (!searchQueries.length) {
+            const readAction = pickFallbackReadAction(state);
+            if (readAction && belowHardCap && canContinueLoop()) {
+              action = readAction;
+              invalid = state.validate(action);
+            } else {
+              invalid = 'duplicate_query';
+            }
           }
         }
-        if (action.action === 'search') searchQueries = normalizeSearchQueries(action, maxQueriesPerStep);
+        if (invalid) {
+          stopReason = resolveNewRunStopReason(pendingStopReason, {
+            step: state.step,
+            maxSteps: state.maxSteps,
+            budget,
+          });
+          addTrace(trace, state, 'stop', { reasonCode: stopReason }, budget);
+          break;
+        }
       }
       const stepsRemaining = hasStepCap(state.maxSteps) ? state.maxSteps - state.step : null;
       if (stepsRemaining !== null && stepsRemaining <= 1 && !FINALIZE_ACTIONS.has(action.action)
@@ -491,7 +522,22 @@ export async function runExploratoryLoop(context) {
         let newUrls = 0;
         for (const { searchQuery, results } of searchResults) {
           totalResults += results.length;
-          queryMemory?.record?.({ query: searchQuery, gapId, status: results.length ? 'useful' : 'empty', results });
+          const memoryEntry = queryMemory?.record?.({
+            query: searchQuery,
+            gapId,
+            status: results.length ? 'useful' : 'empty',
+            results,
+          });
+          if (memoryEntry?.status === 'duplicate_results') {
+            state.forbidSearchUntilRead = true;
+            state.addDiary(`duplicate results for "${searchQuery}"; skip equivalent searches`);
+            addTrace(trace, state, 'search', {
+              reasonCode: 'duplicate_results',
+              query: searchQuery,
+              targetGapIds: [gapId],
+              resultCount: results.length,
+            }, budget, 'skipped');
+          }
           state.recordSearchedQuery(gapId, searchQuery);
           const clustered = await clusterUrlRecords(results.map((result) => ({
             ...result,

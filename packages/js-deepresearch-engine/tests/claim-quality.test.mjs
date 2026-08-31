@@ -67,7 +67,7 @@ Ollama is an independent company developing local LLM tools [1.2]. It also offer
     })));
     assert.equal(metrics.evaluatedClaimCount, claims.length);
     assert.equal(metrics.claimExtractionVersion, CLAIM_EXTRACTION_VERSION);
-    assert.equal(CLAIM_EXTRACTION_VERSION, 4);
+    assert.equal(CLAIM_EXTRACTION_VERSION, 5);
     assert.equal(CLAIM_EVALUATION_VERSION, 4);
   });
 
@@ -140,6 +140,19 @@ llama.cpp is a portable C++ inference engine [1.2].
     assert.ok(metrics.evidenceEntryCount >= 1);
     assert.equal(metrics.rates.supportedRate, 1);
     assert.equal(metrics.rates.supportedOrPartialRate, 1);
+  });
+
+  it('does not inherit key_claim across an unknown H1 document root', () => {
+    const claims = extractQualityClaims(`# Report
+
+## Key Findings
+- A primary finding is backed by direct source evidence.
+
+# 可以做空房产么
+Yesterday someone asked a question in the paid community.
+`);
+    assert.equal(claims.find((claim) => claim.text.includes('primary finding'))?.kind, 'key_claim');
+    assert.equal(claims.find((claim) => claim.text.includes('paid community'))?.kind, 'supporting_claim');
   });
 
   it('inherits trailing citations from the parent bullet after Chinese splits', () => {

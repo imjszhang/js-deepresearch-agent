@@ -1,4 +1,5 @@
 import { classifyResearchQuery } from './exploratory-sufficiency.mjs';
+import { inferEvidenceScope, listLocalCorpusChannels } from './source-policy.mjs';
 
 const HOST_IN_QUERY = /\b(?:[a-z0-9-]+\.)+(?:com|org|net|edu|gov|io|hk|cn|uk|jp|ai|info)\b/gi;
 const FILE_EXT_HOSTS = /\.(cpp|js|ts|py|md|pdf|exe|zip|png|jpg)$/i;
@@ -50,10 +51,12 @@ export function inferPreferredHosts() {
   return [];
 }
 
-export function inferResearchProfile(query = {}) {
+export function inferResearchProfile(query = {}, options = {}) {
   const text = typeof query === 'string' ? query : String(query?.query || '');
+  const settings = options.settings || (typeof query === 'object' && query ? query.settings : undefined);
+  const evidenceScope = options.evidenceScope || inferEvidenceScope(settings);
   const shape = classifyResearchQuery(text);
-  return {
+  return sanitizeEvidenceProfile({
     query: text,
     queryKind: shape.kind,
     subjects: shape.subjects,
@@ -64,7 +67,43 @@ export function inferResearchProfile(query = {}) {
     minIndependentSources: 1,
     maxAgeDays: null,
     method: 'rules',
+    evidenceScope,
+  }, { evidenceScope, settings, query: text });
+}
+
+export function sanitizeEvidenceProfile(profile = {}, {
+  evidenceScope,
+  settings = {},
+  query,
+} = {}) {
+  const text = String(query || profile.query || '');
+  const scope = evidenceScope || profile.evidenceScope || inferEvidenceScope(settings);
+  const literalHosts = new Set(extractLiteralHosts(text));
+  const next = {
+    ...profile,
+    flags: { ...emptyFlags(), ...(profile.flags || {}) },
+    requiredHosts: sanitizeHosts(profile.requiredHosts),
+    preferredHosts: sanitizeHosts(profile.preferredHosts),
+    requiredSourceTypes: sanitizeSourceTypes(profile.requiredSourceTypes),
+    plannedGaps: sanitizePlannedGaps(profile.plannedGaps),
+    evidenceScope: scope,
   };
+  if (scope === 'local') {
+    next.requiredHosts = next.requiredHosts.filter((host) => literalHosts.has(host));
+    next.preferredHosts = next.preferredHosts.filter((host) => literalHosts.has(host));
+    next.requiredSourceTypes = next.requiredSourceTypes.filter((type) => type !== 'primary_filing');
+    next.plannedGaps = (next.plannedGaps || []).map((gap) => ({
+      ...gap,
+      requiredHosts: sanitizeHosts(gap.requiredHosts).filter((host) => literalHosts.has(host)),
+      preferredHosts: sanitizeHosts(gap.preferredHosts).filter((host) => literalHosts.has(host)),
+      requiredSourceTypes: sanitizeSourceTypes(gap.requiredSourceTypes).filter((type) => type !== 'primary_filing'),
+    }));
+    const cap = Math.max(1, listLocalCorpusChannels(settings).length);
+    next.minIndependentSources = Math.min(Math.max(1, Number(next.minIndependentSources) || 1), cap);
+  } else {
+    next.minIndependentSources = Math.max(1, Number(next.minIndependentSources) || 1);
+  }
+  return next;
 }
 
 function sanitizePlannedGaps(gaps) {
@@ -98,6 +137,7 @@ export function mergeProfilePlan(base, plan = {}) {
       Number(plan.minIndependentSources) || 0,
     ),
     plannedGaps: sanitizePlannedGaps(plan.gaps),
+    evidenceScope: plan.evidenceScope || base.evidenceScope,
     method: plan.method ? `${base.method}+${plan.method}` : base.method,
   };
   for (const flag of PROFILE_FLAGS) {
@@ -114,8 +154,14 @@ function extractJson(text) {
   try { return JSON.parse(raw.slice(start, end + 1)); } catch { return null; }
 }
 
-export async function planResearchProfile({ llm, query, profile, signal } = {}) {
-  if (!llm?.complete) return profile;
+export async function planResearchProfile({ llm, query, profile, signal, settings, evidenceScope } = {}) {
+  const scope = evidenceScope || profile?.evidenceScope || inferEvidenceScope(settings);
+  const scoped = sanitizeEvidenceProfile(profile || inferResearchProfile(query, { settings, evidenceScope: scope }), {
+    evidenceScope: scope,
+    settings,
+    query,
+  });
+  if (!llm?.complete) return scoped;
   try {
     const response = await llm.complete({
       purpose: 'research_profile',
@@ -131,17 +177,24 @@ export async function planResearchProfile({ llm, query, profile, signal } = {}) 
           '"官方" / "official" means first-party documents of the subject, not stock-exchange or SEC filings unless the query names that venue.',
           'Do not default to hkexnews.hk, sec.gov, sse.com.cn, or szse.cn. Do not add primary_filing unless the query itself is about filings or disclosures.',
           'requiredSourceTypes may include primary_filing or numeric only.',
-        ].join('\n'),
+          scope === 'local'
+            ? 'This run can only read local files. Do not invent web hosts such as fang.com, ke.com, or sec.gov. Leave requiredHosts empty unless the query literally names a hostname. Do not require primary_filing.'
+            : '',
+        ].filter(Boolean).join('\n'),
       }, {
         role: 'user',
         content: query,
       }],
     });
     const parsed = extractJson(response);
-    if (!parsed) return profile;
-    return mergeProfilePlan(profile, { ...parsed, method: 'llm' });
+    if (!parsed) return scoped;
+    return sanitizeEvidenceProfile(mergeProfilePlan(scoped, { ...parsed, method: 'llm' }), {
+      evidenceScope: scope,
+      settings,
+      query,
+    });
   } catch {
-    return profile;
+    return scoped;
   }
 }
 

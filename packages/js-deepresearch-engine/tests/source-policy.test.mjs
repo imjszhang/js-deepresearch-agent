@@ -2,6 +2,10 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   classifySourceTier,
+  collectSearchAngleCandidates,
+  evidenceIndependenceKey,
+  independentEvidenceKeysFromSources,
+  inferEvidenceScope,
   selectReadsByPolicy,
   buildSiteHostQueries,
   nextUnusedSiteQueries,
@@ -72,5 +76,39 @@ describe('source policy before rerank', () => {
     const gap = { question: 'official docs', preferredHosts: ['hkexnews.hk', 'sec.gov'] };
     assert.deepEqual(nextUnusedSiteQueries(gap, 'official docs', []), []);
     assert.deepEqual(buildSiteHostQueries(gap), []);
+  });
+
+  it('counts local independence by corpus channel, not file count', () => {
+    const sameCorpus = independentEvidenceKeysFromSources([
+      { url: 'file:///notes/a.md', corpusRoot: '/notes', engine: 'local:notes' },
+      { url: 'file:///notes/b.md', corpusRoot: '/notes', engine: 'local:notes' },
+    ]);
+    const twoCorpus = independentEvidenceKeysFromSources([
+      { url: 'file:///notes/a.md', corpusRoot: '/notes', engine: 'local:notes' },
+      { url: 'file:///reports/c.md', corpusRoot: '/reports', engine: 'local:reports' },
+    ]);
+    const mixed = independentEvidenceKeysFromSources([
+      { url: 'file:///notes/a.md', corpusRoot: '/notes', engine: 'local:notes' },
+      { url: 'https://example.com/page' },
+    ]);
+    assert.equal(sameCorpus.size, 1);
+    assert.equal(twoCorpus.size, 2);
+    assert.equal(mixed.size, 2);
+    assert.notEqual(
+      evidenceIndependenceKey({ url: 'file:///notes/a.md', corpusRoot: '/notes' }),
+      evidenceIndependenceKey({ url: 'https://example.com/page' }),
+    );
+  });
+
+  it('infers evidence scope from engine and corpus dirs', () => {
+    assert.equal(inferEvidenceScope({ search: { engine: 'searxng' } }), 'web');
+    assert.equal(inferEvidenceScope({ search: { engine: 'local', local: { dirs: ['/notes'] } } }), 'local');
+    assert.equal(inferEvidenceScope({ search: { engine: 'searxng', local: { dirs: ['/notes'] } } }), 'mixed');
+  });
+
+  it('does not invent numeric suffix search angles', () => {
+    const angles = collectSearchAngleCandidates('房产操作攻略', [], ['房产操作攻略'], { evidenceScope: 'local' });
+    assert.ok(!angles.some((item) => /\s+\d+(-\d+)?$/.test(item)));
+    assert.ok(!angles.some((item) => item.includes('site:')));
   });
 });

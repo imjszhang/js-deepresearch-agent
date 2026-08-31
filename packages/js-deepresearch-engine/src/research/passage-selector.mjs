@@ -1,17 +1,79 @@
-import { splitContentForPassages, tokenOverlapScore } from './passage-utils.mjs';
+import {
+  compareRankedPassages,
+  rankingFocus,
+  splitContentForPassages,
+  tokenOverlapScore,
+} from './passage-utils.mjs';
 import { cosineSimilarity } from './providers/openai-embedding-provider.mjs';
+import { isAbortError } from './providers/semantic-provider-errors.mjs';
 
 function buildQueryText(query, question) {
   return [query, question].filter(Boolean).join(' ').trim();
 }
 
+function chunkEmbedText(chunk = {}) {
+  return String(chunk.text || '').trim();
+}
+
+function rankChunksByOverlap({ focus, chunks = [], topK }) {
+  return chunks
+    .map((chunk) => ({
+      ...chunk,
+      retrievalScore: tokenOverlapScore(
+        rankingFocus({ query: focus, section: chunk.section }),
+        chunk.text,
+      ),
+      rankingMethod: 'overlap',
+    }))
+    .sort(compareRankedPassages)
+    .slice(0, topK);
+}
+
+async function scoreChunksByEmbedding({ focus, chunks = [], embedding, signal }) {
+  const inputs = [focus, ...chunks.map((chunk) => chunkEmbedText(chunk))];
+  const vectors = await embedding.embedDocuments(inputs, { signal, purpose: 'evidence_passages' });
+  return chunks.map((chunk, index) => ({
+    ...chunk,
+    retrievalScore: cosineSimilarity(vectors[0], vectors[index + 1]),
+    rankingMethod: 'embedding',
+  }));
+}
+
+function shouldRethrowRankingError(error) {
+  return isAbortError(error) || error?.name === 'BudgetExceededError';
+}
+
+export async function rankPassages({
+  query = '',
+  question = '',
+  title = '',
+  content = '',
+  embedding = null,
+  signal,
+  topK = 5,
+  chunkChars = 1200,
+} = {}) {
+  const focus = rankingFocus({ query, question, title });
+  const chunks = splitContentForPassages(content, chunkChars);
+  if (!chunks.length) return [];
+  if (embedding?.embedDocuments) {
+    try {
+      const scored = await scoreChunksByEmbedding({ focus, chunks, embedding, signal });
+      return scored.sort(compareRankedPassages).slice(0, topK);
+    } catch (error) {
+      if (shouldRethrowRankingError(error)) throw error;
+    }
+  }
+  return rankChunksByOverlap({ focus, chunks, topK });
+}
+
 function selectByOverlap({ query, question, content, topK, chunkChars }) {
   const focus = buildQueryText(query, question);
-  return splitContentForPassages(content, chunkChars)
-    .map((passage) => ({ ...passage, score: tokenOverlapScore(focus, passage.text) }))
-    .sort((left, right) => right.score - left.score)
-    .slice(0, topK)
-    .map((passage) => passage.text);
+  return rankChunksByOverlap({
+    focus,
+    chunks: splitContentForPassages(content, chunkChars),
+    topK,
+  }).map((passage) => passage.text);
 }
 
 function rankWindowScores(chunkScores, windowChunks) {
@@ -20,7 +82,7 @@ function rankWindowScores(chunkScores, windowChunks) {
   for (let start = 0; start < chunkScores.length; start += 1) {
     const slice = chunkScores.slice(start, start + windowSize);
     if (!slice.length) continue;
-    const score = slice.reduce((sum, item) => sum + item.score, 0) / slice.length;
+    const score = slice.reduce((sum, item) => sum + (Number(item.score ?? item.retrievalScore) || 0), 0) / slice.length;
     windows.push({ start, end: start + slice.length - 1, score });
   }
   return windows.sort((left, right) => right.score - left.score);
@@ -66,18 +128,13 @@ export async function selectRelevantPassages({
   }
 
   try {
-    const inputs = [focus, ...chunks.map((chunk) => chunk.text)];
-    const vectors = await embedding.embedDocuments(inputs, { signal });
-    const queryVector = vectors[0];
-    const chunkScores = chunks.map((chunk, index) => ({
-      ...chunk,
-      score: cosineSimilarity(queryVector, vectors[index + 1]),
-    }));
+    const scored = await scoreChunksByEmbedding({ focus, chunks, embedding, signal });
+    const chunkScores = scored.map((chunk) => ({ ...chunk, score: chunk.retrievalScore }));
     const windows = rankWindowScores(chunkScores, windowChunks);
     const passages = passagesFromWindows(chunks, windows, topK);
     if (passages.length) return passages.map((passage, index) => `<snippet-${index + 1}>\n${passage}\n</snippet-${index + 1}>`).join('\n\n');
-  } catch {
-    // Fall back to deterministic overlap when embedding is unavailable.
+  } catch (error) {
+    if (shouldRethrowRankingError(error)) throw error;
   }
 
   const overlapPassages = selectByOverlap({ query, question, content: text, topK, chunkChars });

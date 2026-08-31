@@ -1,7 +1,7 @@
 import { parseCitations } from './citations.mjs';
 
 export const QUALITY_METRICS_VERSION = 3;
-export const CLAIM_EXTRACTION_VERSION = 4;
+export const CLAIM_EXTRACTION_VERSION = 5;
 export const CLAIM_EVALUATION_VERSION = 4;
 
 export const FACT_CLAIM_KINDS = new Set(['key_claim']);
@@ -58,7 +58,7 @@ export function resolveClaimKindFromHeadingStack(heading, {
   currentKind = 'supporting_claim',
 } = {}) {
   const explicit = explicitClaimSectionKind(heading);
-  if (Number(level) === 1 && !explicit) return currentKind;
+  if (Number(level) === 1 && !explicit) return 'supporting_claim';
   if (explicit) return explicit;
   return currentKind;
 }
