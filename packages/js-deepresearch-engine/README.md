@@ -47,6 +47,27 @@ const result = await runner.run({
 console.log(result.report);
 ```
 
+`query` may also be a versioned structured brief. Unspecified fields remain empty:
+
+```javascript
+const result = await runner.run({
+  query: {
+    schemaVersion: 1,
+    query: 'Compare alpha and beta for production use',
+    audience: 'platform engineers',
+    decision: 'select a runtime',
+    depth: 'focused',
+    requiredAnswerSlots: [
+      { answerSlot: 'reliability', question: 'What failure modes are documented?', priority: 'critical' },
+    ],
+    consequentialClaims: ['safe for production'],
+  },
+  settings,
+});
+```
+
+Focused runs use bounded discovery/merge/repair waves and the same deterministic base readiness checks as exploratory runs. Gap schema v2 is claim/answer-slot aware. Search snippets never verify deep-research gaps, and semantic providers cannot override readiness failures.
+
 ## Injecting Mock Adapters
 
 For tests or custom integrations, pass `llm` and `search` directly:
@@ -129,16 +150,16 @@ The engine does not read `.env` files or persist settings. Callers are responsib
 ## Built-in Strategies
 
 - `quick` — snippet-only scan. One iteration is original query plus a few follow-ups; more than one iteration uses the shared iterative loop. It does not enrich URL bodies.
-- `focused` — default topic research: source-informed follow-ups, optional URL enrichment, source selection, evidence chain, and iteration/evidence early-stop
+- `focused` — default topic research: discovery plus repair waves under `iterations` / `iterationControl`, shared `research.read` policy (with `research.focused.*` fallback), source selection, evidence chain, plateau-limited extra repairs, and challenge only for `consequentialClaims`
 - `exploratory` — budget-driven agent loop that chooses structured `search`, `read`, `reflect`, `answer`, or `stop` actions. Spend at least `research.exploratory.minLlmTokens` (default 600000) exploring before evidence sufficiency may stop the loop. `research.exploratory.maxLlmTokens` (default 1000000) is the exploration ceiling and does not include the final report; a tighter `research.budget.maxLlmTokens` still wins for exploration. `research.report.maxOutputTokens` defaults to `0` (no app-layer report cap). Search/read count caps and `maxSteps` default to `0` (unlimited) and do not inherit `research.budget` counts. A 64-step safety valve applies only when both the exploratory and global token ceilings are off.
 
 Custom strategies can still be added with `registerStrategy()`. Historical IDs (`rapid`, `parallel`, `source-based`, `adaptive`) are not registered.
 
 ## Research Controls and Schema v3
 
-`focused` defaults to a quality-oriented preset: `fetchMode: summary`, enabled `queryMemory`, `sourceSelection`, `evidencePassages` (with `claimAlignment`), and `iterationControl`, plus soft budgets (`maxSearchRequests: 18`, `maxSourceReads: 16`). Those global count budgets apply to `focused` / `quick` only. Set `fetchMode: disabled` or turn individual controls off when embedding the engine in latency-sensitive paths. `preReportGate` and LLM relevance filtering stay disabled by default.
+`focused` defaults to a quality-oriented preset: `fetchMode: summary`, enabled `queryMemory`, `sourceSelection`, `evidencePassages` (with `claimAlignment`), and `iterationControl`, plus soft budgets (`maxSearchRequests: 18`, `maxSourceReads: 16`). Those global count budgets apply to `focused` / `quick` only. Discovery is the first wave; additional repair waves follow `iterations` when `iterationControl` is off, or `minIterations` / `maxIterations` when it is on. After `minIterations`, early-stop happens only when readiness passes and `earlyStop` is on. `continueOnCriticalGaps` keeps the previous meaning: if it is false and critical gaps remain, focused does not schedule more waves. Plateau can stop extra repair waves but cannot mint `evidence_sufficient`. Set `fetchMode: disabled` or turn individual controls off when embedding the engine in latency-sensitive paths. `preReportGate` and LLM relevance filtering stay disabled by default.
 
-Schema v3 results retain `report`, `findings`, and `sources` and add `gaps`, `passages`, `claims`, `quality`, and a structured `trace`. Passage and claim generation run when `evidencePassages` is enabled (default for `focused`). Semantic helpers use pluggable research providers and deterministic local fallbacks. `supportedRate` scores only Summary / Key Findings atoms; `supportedOrPartialRate` also counts partial support. Evidence dumps are not part of that denominator. Cited key claims with source bodies that rules cannot clearly support or reject are judged by `research.quality.entailment` (`rules_then_llm` by default; set `rules` to disable).
+`ResearchRunner.run()` accepts a string query or a structured brief. User values win over planner output. User-provided slot hosts survive sanitization; planner-added slot hosts still need a hostname that appears literally in the query. Schema v3 results retain `report`, `findings`, and `sources` and add `brief`, `gaps`, `passages`, `claims`, `quality`, and a structured `trace`. Passage and claim generation run when `evidencePassages` is enabled (default for `focused`). Semantic helpers use pluggable research providers and deterministic local fallbacks. `supportedRate` scores only Summary / Key Findings atoms; `supportedOrPartialRate` also counts partial support. Evidence dumps are not part of that denominator. Cited key claims with source bodies that rules cannot clearly support or reject are judged by `research.quality.entailment` (`rules_then_llm` by default; set `rules` to disable).
 
 Reranking is optional. `research.providers.rerank.provider` defaults to `rules`, which performs deterministic Unicode token-overlap scoring without network access. Set it to `jina` and provide an API key to opt into Jina reranking; failures degrade to rules, while cancellation and budget exhaustion continue to propagate. Embeddings are not required and no remote embedding provider is enabled by default.
 

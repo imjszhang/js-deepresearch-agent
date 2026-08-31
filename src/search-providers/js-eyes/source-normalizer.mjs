@@ -16,6 +16,21 @@ function engineLabel(platform, skillId) {
   return `js-eyes:${platform || skillId || 'unknown'}`;
 }
 
+function provenance(item = {}, author) {
+  return Object.fromEntries(Object.entries({
+    publisher: item.publisher,
+    author: author || (typeof item.author === 'string' ? item.author : undefined),
+    publishedAt: item.publishedAt || item.createdAt || item.date,
+    updatedAt: item.updatedAt,
+    accessedAt: item.accessedAt,
+    sourceType: item.sourceType,
+    jurisdiction: item.jurisdiction,
+    productVersion: item.productVersion,
+    accessStatus: item.accessStatus,
+    accessNotes: item.accessNotes,
+  }).filter(([, value]) => value !== undefined && value !== null && value !== ''));
+}
+
 function isUnifiedItem(item) {
   return item
     && typeof item === 'object'
@@ -48,6 +63,7 @@ function normalizeRawItem(item, skillId) {
     snippet: [body, ...extras].filter(Boolean).join('\n'),
     platform,
     engine: engineLabel(platform, skillId),
+    ...provenance(item, author),
   };
 }
 
@@ -86,6 +102,7 @@ export function normalizeUnifiedItems(payload, config = {}, skillId) {
         url: firstString(item.url, item.link, item.href),
         snippet: firstString(item.snippet, item.excerpt, item.desc, item.description, item.content),
         engine: firstString(item.engine, item.platform ? `js-eyes:${item.platform}` : 'js-eyes'),
+        ...provenance(item),
       }));
 
   const maxResults = Number(config.maxResults) > 0 ? Math.floor(Number(config.maxResults)) : 8;
@@ -96,6 +113,7 @@ export function normalizeUnifiedItems(payload, config = {}, skillId) {
       url: item.url,
       snippet: item.snippet || '',
       engine: item.engine || 'js-eyes',
+      ...provenance(item),
     }))
     .filter((item) => item.url || item.snippet)
     .slice(0, maxResults);
@@ -108,6 +126,7 @@ export function normalizeItemsToSources(items, maxResults) {
       url: firstString(item.url, item.link, item.href),
       snippet: firstString(item.snippet, item.excerpt, item.desc, item.description, item.content),
       engine: firstString(item.engine, item.platform ? `js-eyes:${item.platform}` : 'js-eyes'),
+      ...provenance(item),
     }))
     .filter((item) => item.url || item.snippet)
     .slice(0, maxResults);

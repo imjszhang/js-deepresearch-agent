@@ -22,7 +22,7 @@ export async function searchQuestions({
   queryMemory,
   gapId = null,
 }) {
-  const uniqueQuestions = uniqueNonEmptyStrings(questions);
+  const uniqueQuestions = await uniqueQueriesForBatch(questions, queryMemory, onSkip);
   if (uniqueQuestions.length === 0) return [];
 
   const maxConcurrency = normalizeConcurrency(concurrency, uniqueQuestions.length);
@@ -53,6 +53,29 @@ export async function searchQuestions({
 
   await Promise.all(Array.from({ length: maxConcurrency }, () => worker()));
   return results;
+}
+
+async function uniqueQueriesForBatch(values, queryMemory, onSkip) {
+  const exact = uniqueNonEmptyStrings(values);
+  if (!queryMemory?.enabled) return exact;
+  const accepted = [];
+  for (const query of exact) {
+    let duplicate = null;
+    for (const seen of accepted) {
+      const pair = await queryMemory.queriesMatch(query, seen);
+      if (pair.match) {
+        duplicate = { query: seen, score: pair.score };
+        break;
+      }
+    }
+    if (duplicate) {
+      queryMemory.onSkip?.({ query, duplicateOf: duplicate.query, score: duplicate.score, reason: 'duplicate_batch_query' });
+      onSkip({ question: query, duplicateOf: duplicate.query, score: duplicate.score });
+    } else {
+      accepted.push(query);
+    }
+  }
+  return accepted;
 }
 
 function isAbortError(error) {

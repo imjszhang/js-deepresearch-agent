@@ -3,7 +3,7 @@ import path from 'node:path';
 import { loadArtifactsByResearchId as loadFromIntelStore } from '../../src/storage/intel-store.mjs';
 
 const REQUIRED_FILES = ['report.md', 'findings.json', 'sources.json', 'meta.json'];
-const OPTIONAL_JSON = ['gaps', 'passages', 'claims', 'quality', 'trace'];
+const OPTIONAL_JSON = ['brief', 'gaps', 'passages', 'claims', 'quality', 'trace'];
 
 /**
  * Load benchmark artifacts by archived researchId (js-intel-store).
@@ -43,7 +43,8 @@ export function loadArtifacts(workDir) {
   const report = fs.readFileSync(path.join(resolvedDir, 'report.md'), 'utf8');
   const optional = Object.fromEntries(OPTIONAL_JSON.map((name) => {
     const file = path.join(resolvedDir, `${name}.json`);
-    return [name, fs.existsSync(file) ? readJsonFile(file) : (name === 'quality' ? null : [])];
+    const fallback = name === 'quality' || name === 'brief' ? null : [];
+    return [name, fs.existsSync(file) ? readJsonFile(file) : fallback];
   }));
 
   return {

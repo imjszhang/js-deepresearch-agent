@@ -1,0 +1,30 @@
+[
+  {
+    "question": "alpha safety",
+    "gapId": "gap-2",
+    "wave": "discovery",
+    "sources": [
+      {
+        "title": "Alpha docs",
+        "url": "https://docs.example.com/alpha",
+        "snippet": "alpha",
+        "content": "Alpha safety is documented in the official primary guide with enough body text.",
+        "fetchStatus": "ok"
+      }
+    ]
+  },
+  {
+    "question": "beta safety",
+    "gapId": "gap-3",
+    "wave": "repair",
+    "sources": [
+      {
+        "title": "Beta docs",
+        "url": "https://docs.example.com/beta",
+        "snippet": "beta",
+        "content": "Beta safety is documented after the repair wave with enough body text.",
+        "fetchStatus": "ok"
+      }
+    ]
+  }
+]

@@ -29,6 +29,8 @@ const DEFAULT_FOCUSED = Object.freeze({
   }),
   evidencePassages: Object.freeze({ enabled: true, maxPassagesPerSource: 5, maxPassageChars: 1200, claimAlignment: true }),
   preReportGate: Object.freeze({ enabled: false, mode: 'rules', blockUnsupportedClaims: false }),
+  challenge: Object.freeze({ enabled: true, maxClaims: 2 }),
+  plateau: Object.freeze({ enabled: true, maxLowYieldWaves: 1 }),
 });
 
 const VALID_FETCH_MODES = new Set(['disabled', 'full', 'summary', 'extract']);
@@ -97,6 +99,18 @@ export function resolveFocusedSettings(settings = {}) {
       ...(raw.preReportGate || {}),
       enabled: resolveBooleanFlag(raw.preReportGate?.enabled, DEFAULT_FOCUSED.preReportGate.enabled),
       blockUnsupportedClaims: resolveBooleanFlag(raw.preReportGate?.blockUnsupportedClaims, DEFAULT_FOCUSED.preReportGate.blockUnsupportedClaims),
+    },
+    challenge: {
+      ...DEFAULT_FOCUSED.challenge,
+      ...(raw.challenge || {}),
+      enabled: resolveBooleanFlag(raw.challenge?.enabled, DEFAULT_FOCUSED.challenge.enabled),
+      maxClaims: positiveInteger(raw.challenge?.maxClaims, DEFAULT_FOCUSED.challenge.maxClaims),
+    },
+    plateau: {
+      ...DEFAULT_FOCUSED.plateau,
+      ...(raw.plateau || {}),
+      enabled: resolveBooleanFlag(raw.plateau?.enabled, DEFAULT_FOCUSED.plateau.enabled),
+      maxLowYieldWaves: positiveInteger(raw.plateau?.maxLowYieldWaves, DEFAULT_FOCUSED.plateau.maxLowYieldWaves),
     },
   };
 }

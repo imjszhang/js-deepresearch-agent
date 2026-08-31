@@ -14,6 +14,8 @@ import { resolveFocusedSettings } from './focused-settings.mjs';
 import { createResearchProviders } from './research-providers.mjs';
 import { calculateQualityMetrics, qualityGateFromClaims } from './claim-quality.mjs';
 import { applyClaimEntailment } from './claim-entailment.mjs';
+import { researchBriefFromInput } from './research-brief.mjs';
+import { evaluateGapEvidence } from './gap-state.mjs';
 
 export class ResearchRunner {
   async run({ query, settings, signal, onProgress = () => {}, llm: providedLlm, search: providedSearch }) {
@@ -21,8 +23,18 @@ export class ResearchRunner {
     const rawLlm = providedLlm || createLlmProvider(settings);
     const rawSearch = providedSearch || createSearchEngine(settings);
     const strategy = settings.research.strategy || 'focused';
+    const queryWasStructured = typeof query === 'object' && query !== null;
+    const brief = researchBriefFromInput(query, { depth: strategy });
+    query = brief.query;
     const emit = createProgressEmitter(onProgress);
     const trace = [];
+    trace.push({
+      step: 1,
+      action: 'research_brief',
+      reasonCode: queryWasStructured ? 'structured_input' : 'query_compatibility_input',
+      brief,
+      createdAt: new Date().toISOString(),
+    });
     const budget = new BudgetManager(settings, emit);
     const { llm, search } = wrapProvidersWithBudget({
       llm: rawLlm,
@@ -61,7 +73,7 @@ export class ResearchRunner {
     emit({ stage: 'research_started' });
     let findings;
     try {
-      findings = await runStrategy({ strategy, query, settings, llm, search, signal, emit, budget, queryMemory, trace, researchProviders });
+      findings = await runStrategy({ strategy, query, brief, settings, llm, search, signal, emit, budget, queryMemory, trace, researchProviders });
     } catch (error) {
       if (!(error instanceof BudgetExceededError)) throw error;
       findings = [];
@@ -70,9 +82,13 @@ export class ResearchRunner {
 
     const tracksGaps = strategy === 'exploratory' || strategy === 'focused';
     const exploratoryLoop = findings?.exploratoryLoop || null;
+    const focusedControl = findings?.researchControl || null;
+    const resolvedBrief = findings?.researchBrief || exploratoryLoop?.brief || brief;
     let gaps = exploratoryLoop?.gaps?.length
       ? exploratoryLoop.gaps
-      : (tracksGaps ? buildGapsFromFindings(findings, query) : []);
+      : (focusedControl?.gaps?.length
+        ? focusedControl.gaps
+        : (tracksGaps ? buildGapsFromFindings(findings, query) : []));
     const preReport = evaluatePreReport({ findings, gaps, query });
     const budgetBeforeReport = budget.snapshot();
     const budgetLimitation = budgetBeforeReport.stopReason
@@ -87,9 +103,12 @@ export class ResearchRunner {
     const secondaryLimitation = exploratoryLoop?.secondaryOnlyClaims?.length
       ? 'Some conclusions rest only on secondary or reprint sources and cannot be treated as primary-source verified.'
       : null;
+    const focusedFailures = focusedControl?.readiness?.failures || [];
     const unsupportedLimitation = exploratoryLoop?.unsupportedDecisions?.length
       ? `The report cannot support: ${exploratoryLoop.unsupportedDecisions.join('; ')}`
-      : null;
+      : (focusedFailures.length
+        ? `The report cannot support: ${focusedFailures.map((failure) => failure.message).join('; ')}`
+        : null);
     const degradedLimitation = findings.some((finding) => finding?.degraded)
       ? 'Evidence gathering was cut short before completion; treat the collected evidence as incomplete and state remaining uncertainty explicitly.'
       : null;
@@ -129,8 +148,19 @@ export class ResearchRunner {
       },
     });
     findings = passageArtifacts.findings;
-    if (!exploratoryLoop?.gaps?.length) {
+    if (!exploratoryLoop?.gaps?.length && !focusedControl?.gaps?.length) {
       gaps = tracksGaps ? buildGapsFromFindings(findings, query) : [];
+    }
+    if (tracksGaps) {
+      gaps = gaps.map((gap) => evaluateGapEvidence(
+        gap,
+        findings.filter((finding) => finding.gapId === gap.id).flatMap((finding) => finding.sources || []),
+        {
+          passageIds: findings
+            .filter((finding) => finding.gapId === gap.id)
+            .flatMap((finding) => finding.passageIds || []),
+        },
+      ));
     }
     let narrativeDraft = await buildReport({
       llm, query, findings, signal, purpose: 'report', limitations: reportLimitations, strategy,
@@ -244,6 +274,7 @@ export class ResearchRunner {
       gate: finalGate,
       flags: [
         ...preReport.flags,
+        ...focusedFailures.map((failure) => failure.code).filter(Boolean),
         ...(budgetLimitation ? ['budget_exhausted'] : []),
         ...(noClaims ? ['no_claims'] : []),
         ...(unverifiedKeyClaims.length ? ['unverified_key_claims'] : []),
@@ -264,6 +295,7 @@ export class ResearchRunner {
       metrics: {
         ...preReport.metrics,
         ...qualityMetrics,
+        marginal: focusedControl?.marginal || exploratoryLoop?.marginal || null,
       },
       budget: budget.snapshot(),
     };
@@ -271,6 +303,7 @@ export class ResearchRunner {
 
     return {
       report,
+      brief: resolvedBrief,
       findings,
       sources: evidence.sources,
       gaps,

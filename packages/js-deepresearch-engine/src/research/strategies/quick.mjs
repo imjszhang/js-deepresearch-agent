@@ -42,6 +42,7 @@ async function runQuickSingleRound(context) {
     search,
     signal,
     emit,
+    queryMemory,
   } = context;
   const followUpCount = Math.min(questionCount, 3);
   const resolvedConcurrency = resolveStrategyConcurrency(search, concurrency, followUpCount + 1);
@@ -63,6 +64,8 @@ async function runQuickSingleRound(context) {
     search,
     signal,
     concurrency: resolvedConcurrency,
+    queryMemory,
+    onSkip: ({ question }) => emit({ stage: 'query_skipped_duplicate', question }),
     onProgress: ({ completed, total, question }) => {
       emit({
         stage: 'search_item_complete',

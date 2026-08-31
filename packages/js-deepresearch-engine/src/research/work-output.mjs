@@ -58,6 +58,7 @@ export function saveResearchArtifacts({
     findingsPath: path.join(sessionDir, 'findings.json'),
     sourcesPath: path.join(sessionDir, 'sources.json'),
     metaPath: path.join(sessionDir, 'meta.json'),
+    briefPath: path.join(sessionDir, 'brief.json'),
     gapsPath: path.join(sessionDir, 'gaps.json'),
     passagesPath: path.join(sessionDir, 'passages.json'),
     claimsPath: path.join(sessionDir, 'claims.json'),
@@ -68,6 +69,11 @@ export function saveResearchArtifacts({
   fs.writeFileSync(artifacts.reportPath, result.report, 'utf8');
   fs.writeFileSync(artifacts.findingsPath, JSON.stringify(result.findings, null, 2), 'utf8');
   fs.writeFileSync(artifacts.sourcesPath, JSON.stringify(result.sources, null, 2), 'utf8');
+  fs.writeFileSync(artifacts.briefPath, JSON.stringify(result.brief || {
+    schemaVersion: 1,
+    query,
+    depth: strategy,
+  }, null, 2), 'utf8');
   fs.writeFileSync(artifacts.gapsPath, JSON.stringify(result.gaps || [], null, 2), 'utf8');
   fs.writeFileSync(artifacts.passagesPath, JSON.stringify(result.passages || [], null, 2), 'utf8');
   fs.writeFileSync(artifacts.claimsPath, JSON.stringify(result.claims || [], null, 2), 'utf8');
@@ -81,12 +87,14 @@ export function saveResearchArtifacts({
         strategy,
         researchId,
         artifactSchemaVersion: 3,
+        researchBrief: result.brief || null,
         qualityMetricsVersion: result.quality?.qualityMetricsVersion || QUALITY_METRICS_VERSION,
         claimExtractionVersion: result.quality?.claimExtractionVersion || CLAIM_EXTRACTION_VERSION,
         claimEvaluationVersion: result.quality?.claimEvaluationVersion || CLAIM_EVALUATION_VERSION,
         createdAt: new Date().toISOString(),
         artifacts: {
           gapsPath: artifacts.gapsPath,
+          briefPath: artifacts.briefPath,
           passagesPath: artifacts.passagesPath,
           claimsPath: artifacts.claimsPath,
           qualityPath: artifacts.qualityPath,

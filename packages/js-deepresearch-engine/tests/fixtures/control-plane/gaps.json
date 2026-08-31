@@ -1,0 +1,46 @@
+[
+  {
+    "schemaVersion": 2,
+    "id": "gap-1",
+    "question": "compare alpha and beta safety",
+    "kind": "root",
+    "rollup": true,
+    "requiredSlot": false,
+    "priority": "critical",
+    "status": "verified",
+    "supportingPassageIds": [],
+    "contradictingPassageIds": [],
+    "missingEvidence": [],
+    "resolutionReason": "All required answer slots were verified."
+  },
+  {
+    "schemaVersion": 2,
+    "id": "gap-2",
+    "question": "alpha safety",
+    "answerSlot": "alpha safety",
+    "kind": "slot",
+    "rollup": false,
+    "requiredSlot": true,
+    "priority": "critical",
+    "status": "verified",
+    "supportingPassageIds": ["passage-1"],
+    "contradictingPassageIds": [],
+    "missingEvidence": [],
+    "resolutionReason": "Deterministic body, source-policy, and independence requirements passed."
+  },
+  {
+    "schemaVersion": 2,
+    "id": "gap-3",
+    "question": "beta safety",
+    "answerSlot": "beta safety",
+    "kind": "slot",
+    "rollup": false,
+    "requiredSlot": true,
+    "priority": "normal",
+    "status": "verified",
+    "supportingPassageIds": ["passage-2"],
+    "contradictingPassageIds": [],
+    "missingEvidence": [],
+    "resolutionReason": "Deterministic body, source-policy, and independence requirements passed."
+  }
+]

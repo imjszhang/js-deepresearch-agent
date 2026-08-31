@@ -104,7 +104,18 @@ export function renderSourcesSection(findings = []) {
   const lines = [];
   findings.forEach((finding, findingIndex) => {
     (finding.sources || []).forEach((source, sourceIndex) => {
-      lines.push(`- [${citationKey(findingIndex, sourceIndex)}] ${source.title || 'Untitled'} | ${source.url || ''}`);
+      const provenance = [
+        source.publisher && `publisher: ${source.publisher}`,
+        source.author && `author: ${source.author}`,
+        source.publishedAt && `published: ${source.publishedAt}`,
+        source.updatedAt && `updated: ${source.updatedAt}`,
+        source.accessedAt && `accessed: ${source.accessedAt}`,
+        source.sourceType && `type: ${source.sourceType}`,
+        source.jurisdiction && `jurisdiction: ${source.jurisdiction}`,
+        source.productVersion && `version: ${source.productVersion}`,
+        source.accessStatus && `access: ${source.accessStatus}`,
+      ].filter(Boolean);
+      lines.push(`- [${citationKey(findingIndex, sourceIndex)}] ${source.title || 'Untitled'} | ${source.url || ''}${provenance.length ? ` | ${provenance.join('; ')}` : ''}`);
     });
   });
   return `## Sources\n\n${lines.join('\n') || '- No sources.'}`;

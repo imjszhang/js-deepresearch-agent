@@ -288,7 +288,8 @@ describe('exploratory Search-Read-Reason loop', () => {
       }],
     });
     mismatch.syncGapCoverage();
-    assert.equal(mismatch.gaps[0].status, 'body_read');
+    assert.equal(mismatch.gaps[0].status, 'limited');
+    assert.ok(mismatch.gaps[0].missingEvidence.includes('primary_filing'));
     assert.equal(mismatch.gapHasRequiredHostBody('gap-1'), false);
   });
 

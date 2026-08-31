@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "query": "compare alpha and beta safety",
+  "audience": "engineering leads",
+  "decision": null,
+  "assumedExpertise": null,
+  "timeRange": null,
+  "geography": [],
+  "entities": ["alpha", "beta"],
+  "exclusions": ["forums"],
+  "depth": "focused",
+  "deadline": null,
+  "successCriteria": ["cite primary docs"],
+  "requiredAnswerSlots": [
+    {
+      "id": "alpha-safety",
+      "answerSlot": "alpha safety",
+      "question": "alpha safety",
+      "claimFamily": "safety",
+      "priority": "critical",
+      "requiredHosts": ["docs.example.com"],
+      "requiredSourceTypes": [],
+      "successCriteria": [],
+      "requiredSlot": true
+    },
+    {
+      "id": "beta-safety",
+      "answerSlot": "beta safety",
+      "question": "beta safety",
+      "claimFamily": "safety",
+      "priority": "normal",
+      "requiredHosts": [],
+      "requiredSourceTypes": [],
+      "successCriteria": [],
+      "requiredSlot": true
+    }
+  ],
+  "consequentialClaims": ["alpha safety"]
+}

@@ -1,0 +1,17 @@
+{
+  "query": "compare alpha and beta safety",
+  "strategy": "focused",
+  "researchId": "control-plane-fixture",
+  "artifactSchemaVersion": 3,
+  "researchBrief": {
+    "schemaVersion": 1,
+    "query": "compare alpha and beta safety",
+    "depth": "focused"
+  },
+  "createdAt": "2026-08-31T12:00:00.000Z",
+  "settings": {
+    "iterations": 2,
+    "questionsPerIteration": 2,
+    "concurrency": 1
+  }
+}

@@ -487,7 +487,7 @@ describe('report and research context', () => {
 });
 
 describe('focused pipeline', () => {
-  it('matches disabled enrichment behavior with iterative flow', async () => {
+  it('keeps disabled enrichment snippet-only while using focused waves', async () => {
     const searchedQuestions = [];
 
     const findings = await runStrategy({
@@ -527,9 +527,9 @@ describe('focused pipeline', () => {
     assert.deepEqual(searchedQuestions, [
       'deep topic',
       'first iteration question',
-      'second iteration question',
+      'deep topic successful_body independent_sources primary source evidence',
     ]);
-    assert.deepEqual(findings.map((finding) => finding.iteration), [1, 1, 2]);
+    assert.deepEqual(findings.map((finding) => finding.wave), ['discovery', 'discovery', 'repair']);
   });
 
   it('emits enrichment and filter stages when enabled', async () => {
@@ -578,22 +578,24 @@ describe('focused pipeline', () => {
     assert.ok(stages.includes('filtering_sources'));
   });
 
-  it('stops focused research early when the runtime evidence gate passes', async () => {
+  it('does not let snippet-only discovery pass the focused readiness gate', async () => {
     const searches = [];
     const stages = [];
+    const trace = [];
     const findings = await runFocusedPipeline({
       query: 'well covered topic', iterations: 2, questionCount: 1, concurrency: 1,
       settings: { research: { focused: { fetchMode: 'disabled', iterationControl: { enabled: true, minIterations: 1, maxIterations: 4, earlyStop: true } } } },
       search: { async search(question) { searches.push(question); return [{ title: question, url: `https://source-${searches.length}.test`, snippet: 'usable evidence' }]; } },
       llm: { async complete() { return JSON.stringify(['independent angle']); } },
       emit: (event) => stages.push(event.stage),
+      trace,
     });
-    assert.equal(searches.length, 2);
-    assert.equal(findings.length, 2);
-    assert.ok(stages.includes('evaluating_evidence'));
+    assert.equal(searches.length, 3);
+    assert.equal(findings.length, 3);
+    assert.ok(trace.some((entry) => entry.action === 'readiness_gate' && entry.reasonCode === 'repair_required'));
   });
 
-  it('focuses the next iteration on primary sources when only secondary coverage exists', async () => {
+  it('targets the open material gap rather than repeating broad discovery', async () => {
     const searches = [];
     const trace = [];
     const findings = await runFocusedPipeline({
@@ -604,17 +606,16 @@ describe('focused pipeline', () => {
       settings: { research: { focused: { fetchMode: 'disabled', iterationControl: { enabled: true, minIterations: 1, maxIterations: 2, earlyStop: true } } } },
       search: { async search(question) {
         searches.push(question);
-        return question.includes('site:github.com')
-          ? [{ title: 'Official repository', url: 'https://github.com/example/research-agent', snippet: 'primary implementation' }]
-          : [{ title: 'Secondary overview', url: `https://blog.csdn.net/${searches.length}`, snippet: 'secondary summary' }];
+        return [{ title: 'Secondary overview', url: `https://blog.csdn.net/${searches.length}`, snippet: 'secondary summary' }];
       } },
       llm: { async complete() { return JSON.stringify(['general comparison']); } },
       emit: () => {},
       trace,
     });
-    assert.ok(searches.some((question) => question.includes('site:github.com')));
-    assert.ok(findings.some((finding) => finding.sources.some((source) => source.url.includes('github.com'))));
-    assert.ok(trace.some((entry) => entry.flags?.includes('primary_source_missing')));
+    assert.ok(searches.some((question) => question.includes('successful_body')));
+    assert.ok(findings.some((finding) => finding.wave === 'repair'));
+    assert.ok(trace.some((entry) => entry.action === 'search_wave_started' && entry.wave === 'repair'));
+    assert.ok(!trace.some((entry) => entry.wave === 'repair' && entry.queries?.includes('general comparison')));
   });
 });
 
