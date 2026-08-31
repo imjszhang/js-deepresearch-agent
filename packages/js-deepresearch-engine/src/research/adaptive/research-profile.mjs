@@ -50,10 +50,74 @@ export function inferPreferredHosts() {
   return [];
 }
 
-export function inferResearchProfile(query = {}) {
-  const text = typeof query === 'string' ? query : String(query?.query || '');
-  const shape = classifyResearchQuery(text);
+export function inferEvidenceScope(settings = {}) {
+  return String(settings?.search?.engine || '').trim().toLowerCase() === 'local'
+    ? 'local'
+    : 'web';
+}
+
+function filterHostsForScope(values, query, evidenceScope) {
+  const hosts = sanitizeHosts(values);
+  if (evidenceScope !== 'local') return hosts;
+  const allowed = new Set(extractLiteralHosts(query));
+  return hosts.filter((host) => allowed.has(host));
+}
+
+function filterSourceTypesForScope(values, evidenceScope) {
+  const types = sanitizeSourceTypes(values);
+  if (evidenceScope !== 'local') return types;
+  return types.filter((type) => type !== 'primary_filing');
+}
+
+function minIndependentSourcesForScope(value, evidenceScope, fallback = 1) {
+  const resolved = Number(value);
+  const next = Number.isFinite(resolved) && resolved > 0 ? resolved : fallback;
+  return evidenceScope === 'local' ? 1 : next;
+}
+
+function sanitizePlannedGaps(gaps, query, evidenceScope) {
+  if (!Array.isArray(gaps)) return [];
+  return gaps.flatMap((gap) => {
+    const originalHosts = sanitizeHosts(gap?.requiredHosts);
+    const requiredHosts = filterHostsForScope(gap?.requiredHosts, query, evidenceScope);
+    if (evidenceScope === 'local' && originalHosts.length && !requiredHosts.length) {
+      return [];
+    }
+    return [{
+      ...gap,
+      requiredHosts,
+      preferredHosts: filterHostsForScope(gap?.preferredHosts, query, evidenceScope),
+      requiredSourceTypes: filterSourceTypesForScope(gap?.requiredSourceTypes, evidenceScope),
+      minIndependentSources: minIndependentSourcesForScope(gap?.minIndependentSources, evidenceScope, 1),
+    }];
+  });
+}
+
+export function applyEvidenceScope(profile = {}, { query, settings, evidenceScope } = {}) {
+  const text = String(query || profile.query || '');
+  const scope = evidenceScope || profile.evidenceScope || inferEvidenceScope(settings);
+  const next = {
+    ...profile,
+    query: profile.query || text,
+    evidenceScope: scope,
+  };
+  if (scope !== 'local') return next;
   return {
+    ...next,
+    requiredHosts: filterHostsForScope(next.requiredHosts, text, scope),
+    preferredHosts: filterHostsForScope(next.preferredHosts, text, scope),
+    requiredSourceTypes: filterSourceTypesForScope(next.requiredSourceTypes, scope),
+    minIndependentSources: 1,
+    plannedGaps: sanitizePlannedGaps(next.plannedGaps, text, scope),
+  };
+}
+
+export function inferResearchProfile(query = {}, settings) {
+  const text = typeof query === 'string' ? query : String(query?.query || '');
+  const resolvedSettings = settings ?? (typeof query === 'object' && query ? query.settings : undefined);
+  const evidenceScope = inferEvidenceScope(resolvedSettings);
+  const shape = classifyResearchQuery(text);
+  return applyEvidenceScope({
     query: text,
     queryKind: shape.kind,
     subjects: shape.subjects,
@@ -64,21 +128,14 @@ export function inferResearchProfile(query = {}) {
     minIndependentSources: 1,
     maxAgeDays: null,
     method: 'rules',
-  };
+    evidenceScope,
+  }, { query: text, evidenceScope });
 }
 
-function sanitizePlannedGaps(gaps) {
-  if (!Array.isArray(gaps)) return [];
-  return gaps.map((gap) => ({
-    ...gap,
-    requiredHosts: sanitizeHosts(gap?.requiredHosts),
-    preferredHosts: sanitizeHosts(gap?.preferredHosts),
-    requiredSourceTypes: sanitizeSourceTypes(gap?.requiredSourceTypes),
-  }));
-}
-
-export function mergeProfilePlan(base, plan = {}) {
-  const next = {
+export function mergeProfilePlan(base, plan = {}, options = {}) {
+  const query = options.query || base.query || '';
+  const evidenceScope = options.evidenceScope || base.evidenceScope || inferEvidenceScope(options.settings);
+  const next = applyEvidenceScope({
     ...base,
     flags: { ...emptyFlags(), ...(base.flags || {}) },
     requiredHosts: unique([
@@ -97,9 +154,10 @@ export function mergeProfilePlan(base, plan = {}) {
       Number(base.minIndependentSources) || 1,
       Number(plan.minIndependentSources) || 0,
     ),
-    plannedGaps: sanitizePlannedGaps(plan.gaps),
+    plannedGaps: sanitizePlannedGaps(plan.gaps, query, evidenceScope),
     method: plan.method ? `${base.method}+${plan.method}` : base.method,
-  };
+    evidenceScope,
+  }, { query, evidenceScope });
   for (const flag of PROFILE_FLAGS) {
     if (plan.flags && typeof plan.flags[flag] === 'boolean') next.flags[flag] = plan.flags[flag];
   }
@@ -114,9 +172,12 @@ function extractJson(text) {
   try { return JSON.parse(raw.slice(start, end + 1)); } catch { return null; }
 }
 
-export async function planResearchProfile({ llm, query, profile, signal } = {}) {
-  if (!llm?.complete) return profile;
+export async function planResearchProfile({ llm, query, profile, signal, settings } = {}) {
+  const evidenceScope = profile?.evidenceScope || inferEvidenceScope(settings);
+  const scoped = applyEvidenceScope(profile, { query, settings, evidenceScope });
+  if (!llm?.complete) return scoped;
   try {
+    const localOnly = evidenceScope === 'local';
     const response = await llm.complete({
       purpose: 'research_profile',
       signal,
@@ -131,17 +192,20 @@ export async function planResearchProfile({ llm, query, profile, signal } = {}) 
           '"官方" / "official" means first-party documents of the subject, not stock-exchange or SEC filings unless the query names that venue.',
           'Do not default to hkexnews.hk, sec.gov, sse.com.cn, or szse.cn. Do not add primary_filing unless the query itself is about filings or disclosures.',
           'requiredSourceTypes may include primary_filing or numeric only.',
-        ].join('\n'),
+          localOnly
+            ? 'This run searches local directories only. Do not require public-web hosts, exchange filings, or site: queries. Leave requiredHosts, preferredHosts, and requiredSourceTypes empty unless the query itself names a hostname. Do not remap local folders to official hosts.'
+            : '',
+        ].filter(Boolean).join('\n'),
       }, {
         role: 'user',
         content: query,
       }],
     });
     const parsed = extractJson(response);
-    if (!parsed) return profile;
-    return mergeProfilePlan(profile, { ...parsed, method: 'llm' });
+    if (!parsed) return scoped;
+    return mergeProfilePlan(scoped, { ...parsed, method: 'llm' }, { query, evidenceScope, settings });
   } catch {
-    return profile;
+    return scoped;
   }
 }
 
@@ -173,12 +237,26 @@ export function createGapRecord({
     status: 'open',
     priority,
     depth,
-    requiredSourceTypes: sanitizeSourceTypes(requiredSourceTypes ?? profile.requiredSourceTypes),
-    requiredHosts: sanitizeHosts(requiredHosts ?? (priority === 'critical' ? profile.requiredHosts : [])),
-    preferredHosts: sanitizeHosts(preferredHosts ?? profile.preferredHosts),
+    requiredSourceTypes: filterSourceTypesForScope(
+      requiredSourceTypes ?? profile.requiredSourceTypes,
+      profile.evidenceScope,
+    ),
+    requiredHosts: filterHostsForScope(
+      requiredHosts ?? (priority === 'critical' ? profile.requiredHosts : []),
+      profile.query || question,
+      profile.evidenceScope,
+    ),
+    preferredHosts: filterHostsForScope(
+      preferredHosts ?? profile.preferredHosts,
+      profile.query || question,
+      profile.evidenceScope,
+    ),
     blockedHosts: [],
     maxAgeDays: maxAgeDays ?? profile.maxAgeDays ?? null,
-    minIndependentSources: Number(minIndependentSources ?? profile.minIndependentSources) || 1,
+    minIndependentSources: minIndependentSourcesForScope(
+      minIndependentSources ?? profile.minIndependentSources,
+      profile.evidenceScope,
+    ),
     searchedQueries: [],
     candidateUrls: [],
     readSourceIds: [],

@@ -9,7 +9,15 @@ function hash(prefix, value) {
 }
 
 function words(text = '') {
-  return new Set(String(text).toLowerCase().match(/[\p{L}\p{N}]{2,}/gu) || []);
+  const tokens = String(text).toLowerCase().match(/[\p{L}\p{N}]{2,}/gu) || [];
+  const extra = [];
+  for (const token of tokens) {
+    if (!/\p{Script=Han}/u.test(token)) continue;
+    for (let index = 0; index < token.length - 1; index += 1) {
+      extra.push(token.slice(index, index + 2));
+    }
+  }
+  return new Set([...tokens, ...extra]);
 }
 
 function overlap(left, right) {

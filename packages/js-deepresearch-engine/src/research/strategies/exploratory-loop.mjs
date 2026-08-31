@@ -167,7 +167,7 @@ export async function runExploratoryLoop(context) {
   const queryShape = classifyResearchQuery(query);
   applyExploratoryBudget(budget, exploratory);
   const maxSteps = effectiveExploratoryMaxSteps(exploratory, budget?.limits?.llmTokens);
-  let profile = inferResearchProfile(query);
+  let profile = inferResearchProfile(query, settings);
   const state = new ResearchState({
     query,
     maxSteps,
@@ -202,6 +202,7 @@ export async function runExploratoryLoop(context) {
       flags: profile.flags,
       requiredHosts: profile.requiredHosts,
       method: profile.method,
+      evidenceScope: profile.evidenceScope,
     },
   }, budget);
 
@@ -302,7 +303,7 @@ export async function runExploratoryLoop(context) {
   }
 
   const profileTokensBefore = budget?.usage?.llmTokens || 0;
-  profile = await planResearchProfile({ llm, query, profile, signal });
+  profile = await planResearchProfile({ llm, query, profile, signal, settings });
   state.profile = profile;
   state.gaps[0] = {
     ...state.gaps[0],

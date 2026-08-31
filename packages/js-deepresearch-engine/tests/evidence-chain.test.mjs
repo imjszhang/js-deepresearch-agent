@@ -219,3 +219,25 @@ describe('snippet-only and strategy policy', () => {
     assert.notEqual(result.claims[0].evaluation.verdict, 'supported');
   });
 });
+
+describe('CJK overlap against local file bodies', () => {
+  it('can support a paraphrased Chinese key claim from a cited file:// body', () => {
+    const localGuide = {
+      title: 'guide.md',
+      url: 'file:///tmp/notes/guide.md',
+      snippet: '房产操作攻略目录',
+      content: '房产操作攻略：先核对税费和限购，再安排首付、贷款和持有周期。这份本地指南足够长，覆盖交易顺序、资金安排、过户材料与风险提示。',
+      fetchStatus: 'ok',
+      contentOrigin: 'fetched',
+    };
+    const result = artifacts(
+      '# Key Findings\n\n- 交易前应先核对税费与限购条件，再安排资金、贷款杠杆和持有周期。 [1.1]',
+      [localGuide],
+    );
+    const claim = result.claims.find((item) => /核对税费/.test(item.text));
+    assert.ok(claim);
+    assert.deepEqual(claim.citationKeys, ['1.1']);
+    assert.ok(claim.evidence.length > 0);
+    assert.ok(['supported', 'partially_supported'].includes(claim.evaluation.verdict));
+  });
+});

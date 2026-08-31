@@ -332,6 +332,7 @@ export class ResearchState {
         preferredHosts: this.profile?.preferredHosts || [],
         requiredSourceTypes: this.profile?.requiredSourceTypes || [],
         minIndependentSources: this.profile?.minIndependentSources || 1,
+        evidenceScope: this.profile?.evidenceScope || 'web',
       },
       gaps,
       focusGapId: this.focusGap()?.id || 'gap-1',
@@ -484,10 +485,12 @@ export class ResearchState {
     const unresolved = this.gaps.filter((gap) => ['open', 'searched', 'missing', 'blocked'].includes(gap.status)
       || (gap.status === 'body_read' && this.gapNeedsPrimaryEvidence(gap) && !this.gapHasRequiredHostBody(gap.id)));
     const blockedHosts = [...new Set(unresolved.flatMap((gap) => gap.requiredHosts || []))];
-    const secondaryOnly = this.findings.flatMap((finding) => (finding.sources || [])
-      .filter(sourceHasBody)
-      .filter((source) => ['mainstream', 'reprint', 'ugc', 'unknown'].includes(source.tier || classifySourceTier(source, this.getGap(finding.gapId))))
-      .map((source) => source.url || source.id));
+    const secondaryOnly = this.profile?.evidenceScope === 'local'
+      ? []
+      : this.findings.flatMap((finding) => (finding.sources || [])
+        .filter(sourceHasBody)
+        .filter((source) => ['mainstream', 'reprint', 'ugc', 'unknown'].includes(source.tier || classifySourceTier(source, this.getGap(finding.gapId))))
+        .map((source) => source.url || source.id));
     return {
       unresolvedGaps: unresolved.map((gap) => ({
         id: gap.id,
