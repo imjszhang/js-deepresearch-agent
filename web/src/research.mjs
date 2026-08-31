@@ -65,6 +65,11 @@ async function main() {
             <select id="strategy">${options(strategies, settings.research.strategy)}</select>
           </div>
         </div>
+        <div id="corpusDirsFields">
+          <label for="corpusDirs">Local corpus directories</label>
+          <textarea id="corpusDirs" class="compact-textarea" placeholder="/abs/notes, /abs/reports">${escapeAttr(formatCorpusDirs(settings.search.local?.dirs))}</textarea>
+          <p class="muted">Each directory is an independent local search channel (same idea as a JS Eyes skill). Select the Local directories engine, or leave directories set so this run can use them. Combining local with SearXNG/js-eyes in one run needs issue #16 fan-out.</p>
+        </div>
         <p id="strategyHelp" class="muted strategy-help"></p>
 
         <div id="searchFields" class="grid strategy-panel">
@@ -187,6 +192,10 @@ function collectSettings() {
       ...(loadedSettings?.search || {}),
       engine: value('#searchEngine'),
       baseUrl: value('#searchBaseUrl'),
+      local: {
+        ...(loadedSettings?.search?.local || {}),
+        dirs: parseCorpusDirsInput(value('#corpusDirs')),
+      },
     },
     research: {
       ...(loadedSettings?.research || {}),
@@ -256,6 +265,17 @@ function togglePanel(selector, visible) {
 
 function currentResearchBudget() {
   return { maxLlmTokens: 0, maxEstimatedCost: 0, maxTotalLlmTokens: 0 };
+}
+
+function formatCorpusDirs(dirs) {
+  return Array.isArray(dirs) ? dirs.filter(Boolean).join('\n') : '';
+}
+
+function parseCorpusDirsInput(text) {
+  return String(text || '')
+    .split(/[,;\n]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function checked(selector) {

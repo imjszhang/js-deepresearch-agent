@@ -1,4 +1,4 @@
-import { normalizeSourceUrl } from '../source-candidates.mjs';
+import { normalizeSourceUrl, sourceDiversityKey } from '../source-candidates.mjs';
 import {
   classifySourceTier,
   hostnameOf,
@@ -30,6 +30,7 @@ export function buildUrlRecord(source = {}, {
     url,
     normalizedUrl: normalizePoolUrl(url),
     hostname: hostnameOf(url),
+    diversityKey: sourceDiversityKey(source, url),
     registrableDomain: registrableDomainFromUrl(url),
     gapId,
     query,
@@ -126,7 +127,7 @@ export class UrlPool {
     const counts = new Map();
     const kept = [];
     for (const record of records) {
-      const host = record.hostname;
+      const host = record.diversityKey || record.hostname;
       const count = host ? (counts.get(host) || 0) : 0;
       if (host && count >= this.maxPerHostname) {
         if (record.status === 'unread') {

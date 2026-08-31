@@ -6,6 +6,22 @@ import {
   CLAIM_EVALUATION_VERSION,
 } from './claim-quality.mjs';
 
+function snapshotCorpusDirs(settings = {}) {
+  const rawDirs = settings?.search?.local?.dirs;
+  if (!Array.isArray(rawDirs) || rawDirs.length === 0) return [];
+  const dirs = [];
+  const seen = new Set();
+  for (const dir of rawDirs) {
+    const text = String(dir || '').trim();
+    if (!text) continue;
+    const resolved = path.resolve(text);
+    if (seen.has(resolved)) continue;
+    seen.add(resolved);
+    dirs.push(resolved);
+  }
+  return dirs;
+}
+
 export function resolveWorkDir(settings, cwd = process.cwd()) {
   const configured = settings?.research?.workDir || 'work_dir';
   return path.isAbsolute(configured)
@@ -81,6 +97,8 @@ export function saveResearchArtifacts({
           questionsPerIteration: settings.research?.questionsPerIteration,
           concurrency: settings.research?.concurrency,
           budget: settings.research?.budget,
+          searchEngine: settings.search?.engine || null,
+          corpusDirs: snapshotCorpusDirs(settings),
         },
       },
       null,

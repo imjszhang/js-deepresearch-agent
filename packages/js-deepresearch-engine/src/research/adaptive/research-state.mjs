@@ -14,6 +14,7 @@ import {
   registrableDomainFromUrl,
   selectReadsByPolicy,
 } from './source-policy.mjs';
+import { sourceDiversityKey } from '../source-candidates.mjs';
 import { UrlPool } from './url-pool.mjs';
 
 export { hostnameOf } from './source-policy.mjs';
@@ -304,10 +305,10 @@ export class ResearchState {
     const perHostname = new Map();
     const selected = [];
     for (const candidate of ranked) {
-      const hostname = policyHostnameOf(candidate.url);
+      const hostname = sourceDiversityKey(candidate) || policyHostnameOf(candidate.url);
       const count = perHostname.get(hostname) || 0;
       if (hostname && count >= MAX_CANDIDATES_PER_HOSTNAME && !this.readSourceIds.has(candidate.id) && candidate.status === 'unread') continue;
-      perHostname.set(hostname, count + 1);
+      if (hostname) perHostname.set(hostname, count + 1);
       selected.push(candidate);
       if (selected.length >= RANKED_CANDIDATE_LIMIT) break;
     }
@@ -384,6 +385,7 @@ export class ResearchState {
         id,
         gapId: gapId || existing.gapId || 'gap-1',
         hostname: existing.hostname || policyHostnameOf(source.url || id),
+        diversityKey: existing.diversityKey || sourceDiversityKey({ ...existing, ...source }, source.url || id),
         registrableDomain: existing.registrableDomain || registrableDomainFromUrl(source.url || id),
         tier: classifySourceTier(source, gap),
         clusterId: clusterById[id] || existing.clusterId || source.clusterId || null,
@@ -420,7 +422,10 @@ export class ResearchState {
       && (!gapId || candidate.gapId === gap.id)
     ));
     const alreadyRead = new Set(
-      [...this.readSourceIds].map((id) => policyHostnameOf(this.candidates.get(id)?.url || id)).filter(Boolean),
+      [...this.readSourceIds].map((id) => {
+        const candidate = this.candidates.get(id);
+        return sourceDiversityKey(candidate || { url: id }, candidate?.url || id);
+      }).filter(Boolean),
     );
     return selectReadsByPolicy({
       candidates: unread,

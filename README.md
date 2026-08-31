@@ -123,7 +123,22 @@ Runtime settings are stored in the local SQLite database under `data/`. Values f
 - Research questions per iteration: `2`
 - Research concurrency: `1`
 
-SearXNG is the default search adapter in the embeddable `js-deepresearch-engine` package. **JS Eyes is an app-local provider** registered at startup from `src/search-providers/`—it is not bundled inside the npm package. DuckDuckGo, Tavily, and Brave Search are represented in the adapter metadata for later implementation.
+SearXNG is the default search adapter in the embeddable `js-deepresearch-engine` package. **JS Eyes and local directories are app-local providers** registered at startup from `src/search-providers/`—they are not bundled inside the npm package. DuckDuckGo, Tavily, and Brave Search are represented in the adapter metadata for later implementation.
+
+### Local Directory Search Provider (App-Local)
+
+`local` is a search source, not a new research strategy and not a persistent vector index. Each configured directory is an independent channel (search separately, fail separately, round-robin merge), matching the JS Eyes skill model. Hits enter the existing enrich path as normalized `file://` absolute URLs. `quick` keeps snippet-only evidence; `focused` / `exploratory` read file bodies. Files outside a configured corpus root (including `../` and outbound symlinks) are rejected.
+
+Using local **together** with SearXNG or JS Eyes in one run depends on issue #16 fan-out. Until that lands, `--corpus-dirs` enables `local` for the current run so directories are not silently dropped:
+
+```bash
+npm exec --package=. -- jdr research "监管处罚" \
+  --search local \
+  --corpus-dirs ~/notes/尽调,~/Downloads/年报 \
+  --strategy focused
+```
+
+Set `SEARCH_ENGINE=local` and `SEARCH_LOCAL_DIRS` (or `JDR_CORPUS_DIRS`) in `.env`, or `config get search.local.dirs`. Web UI: choose **Local directories** and enter one path per line or comma-separated paths.
 
 ### JS Eyes Search Provider (App-Local)
 
@@ -202,6 +217,8 @@ Supported `.env` keys:
 - `SEARCH_ENGINE`
 - `SEARCH_BASE_URL`
 - `SEARCH_API_KEY`
+- `SEARCH_LOCAL_DIRS`
+- `JDR_CORPUS_DIRS`
 - `JS_EYES_CLI`
 - `JS_EYES_SKILL`
 - `JS_EYES_COMMAND`

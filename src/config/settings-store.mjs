@@ -53,7 +53,14 @@ export class SettingsStore {
       ...overrides,
       http: { ...current.http, ...(overrides.http || {}) },
       llm: { ...current.llm, ...(overrides.llm || {}) },
-      search: { ...current.search, ...(overrides.search || {}) },
+      search: {
+        ...current.search,
+        ...(overrides.search || {}),
+        local: {
+          ...(current.search?.local || {}),
+          ...(overrides.search?.local || {}),
+        },
+      },
       research: { ...current.research, ...(overrides.research || {}) },
     });
   }
@@ -73,7 +80,14 @@ export class SettingsStore {
       ...stored,
       http: { ...(stored.http || {}), ...(envOverrides.http || {}) },
       llm: { ...(stored.llm || {}), ...(envOverrides.llm || {}) },
-      search: { ...(stored.search || {}), ...(envOverrides.search || {}) },
+      search: {
+        ...(stored.search || {}),
+        ...(envOverrides.search || {}),
+        local: {
+          ...((stored.search || {}).local || {}),
+          ...((envOverrides.search || {}).local || {}),
+        },
+      },
       research: {
         ...storedResearch,
         ...envResearch,

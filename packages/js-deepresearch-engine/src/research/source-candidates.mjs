@@ -1,8 +1,29 @@
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
 const TRACKING_KEYS = new Set(['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'gclid', 'fbclid']);
 
-export function normalizeSourceUrl(value = '') {
+export function isFileSourceUrl(value = '') {
   try {
-    const url = new URL(String(value).trim());
+    return new URL(String(value || '').trim()).protocol === 'file:';
+  } catch {
+    return false;
+  }
+}
+
+export function normalizeSourceUrl(value = '') {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  try {
+    const url = new URL(raw);
+    if (url.protocol === 'file:') {
+      try {
+        return pathToFileURL(path.normalize(fileURLToPath(url))).href;
+      } catch {
+        url.hash = '';
+        return url.href;
+      }
+    }
     url.hash = '';
     for (const key of [...url.searchParams.keys()]) {
       if (TRACKING_KEYS.has(key.toLowerCase())) url.searchParams.delete(key);
@@ -10,12 +31,29 @@ export function normalizeSourceUrl(value = '') {
     if (url.pathname !== '/') url.pathname = url.pathname.replace(/\/+$/, '');
     return url.toString();
   } catch {
-    return String(value || '').trim();
+    return raw;
   }
 }
 
 function hostname(value) {
   try { return new URL(value).hostname.toLowerCase().replace(/^www\./, ''); } catch { return ''; }
+}
+
+export function sourceDiversityKey(source = {}, url = source?.url) {
+  const normalized = normalizeSourceUrl(url || source?.url || source?.id || '');
+  if (isFileSourceUrl(normalized) || isFileSourceUrl(source?.url)) {
+    const root = String(source?.corpusRoot || '').trim();
+    if (root) return `local:${path.normalize(root)}`;
+    const engine = String(source?.engine || '');
+    if (engine.startsWith('local:')) return engine;
+    try {
+      const filePath = fileURLToPath(new URL(normalized || source.url));
+      return `local:${path.dirname(filePath)}`;
+    } catch {
+      return 'local';
+    }
+  }
+  return hostname(normalized);
 }
 
 const PRIMARY_HOSTS = /(?:^|\.)(?:github\.com|gitlab\.com|codeberg\.org|arxiv\.org|doi\.org)$/;
@@ -68,7 +106,7 @@ export function selectDiverseSources(sources = [], { enabled = false, maxPerHost
     const url = normalizeSourceUrl(raw?.url);
     const key = url || `${titleKey(raw?.title)}:${titleKey(raw?.snippet)}`;
     if (!key || seenUrls.has(key)) continue;
-    const host = hostname(url);
+    const host = sourceDiversityKey(raw, url);
     if (host && (hostCounts.get(host) || 0) >= maxPerHostname) continue;
     const cluster = `${host}:${titleKey(raw?.title).split(' ').slice(0, 8).join(' ')}`;
     if (clusterResults && cluster !== ':' && seenClusters.has(cluster)) continue;

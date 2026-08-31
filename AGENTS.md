@@ -98,7 +98,7 @@ npm exec --package=. -- jdr research "Explain the current state of local-first A
 | `--model` | `llm.model` | 模型名 |
 | `--base-url` | `llm.baseUrl` | LLM API 地址 |
 | `--api-key` | `llm.apiKey` | API Key（优先用 `.env`，避免在 shell 历史中泄露） |
-| `--search` | `search.engine` | `searxng` 或 `js-eyes` |
+| `--search` | `search.engine` | `searxng`、`js-eyes` 或 `local` |
 | `--search-base-url` | `search.baseUrl` | SearXNG 等服务地址 |
 | `--searxng-url` | `search.baseUrl` | `--search-base-url` 别名 |
 | `--search-api-key` | `search.apiKey` | 搜索 API Key |
@@ -113,6 +113,7 @@ npm exec --package=. -- jdr research "Explain the current state of local-first A
 | `--js-eyes-max-pages` | `search.provider.maxPages` | 兼容别名 |
 | `--search-timeout-ms` | `search.provider.timeoutMs` | JS Eyes 单次搜索超时（毫秒） |
 | `--js-eyes-timeout-ms` | `search.provider.timeoutMs` | 兼容别名 |
+| `--corpus-dirs` | `search.local.dirs` | 逗号分隔的本地目录通道；本次 run 启用 `local`（#16 fan-out 未合并前不会同时跑网页引擎） |
 | `--strategy` | `research.strategy` | `focused` \| `quick` \| `exploratory` |
 | `--iterations` | `research.iterations` | 迭代轮数 |
 | `--questions` | `research.questionsPerIteration` | 每轮生成问题数 |
@@ -163,10 +164,16 @@ npm exec --package=. -- jdr research "Compare SearXNG and Brave Search APIs" \
 
 # 单次运行临时指定 JS Eyes skill（不写入 .env / SQLite）
 npm exec --package=. -- jdr research "openclaw" \
-  --search js-eyes \
-  --search-skills js-reddit-ops-skill \
-  --search-server-url ws://localhost:18080 \
-  --strategy quick --iterations 1
+ --search js-eyes \
+ --search-skills js-reddit-ops-skill \
+ --search-server-url ws://localhost:18080 \
+ --strategy quick --iterations 1
+
+# 仅本地目录（single mode；与网页并用依赖 #16）
+npm exec --package=. -- jdr research "监管处罚" \
+ --search local \
+ --corpus-dirs ~/notes/尽调,~/Downloads/年报 \
+ --strategy focused
 ```
 
 ### 输出行为
@@ -246,6 +253,7 @@ npm exec --package=. -- jdr config get
 # 点分键
 npm exec --package=. -- jdr config get llm.model
 npm exec --package=. -- jdr config get search.engine
+npm exec --package=. -- jdr config get search.local.dirs
 npm exec --package=. -- jdr config get research.strategy
 ```
 
@@ -280,7 +288,12 @@ npm exec --package=. -- jdr config set research.iterations 3
     "jsEyesSkill": "js-zhihu-ops-skill",
     "jsEyesSkills": ["js-zhihu-ops-skill"],
     "jsEyesServerUrl": "",
-    "jsEyesTimeoutMs": 120000
+    "jsEyesTimeoutMs": 120000,
+    "local": {
+      "dirs": [],
+      "ignore": [".git", "node_modules", ".DS_Store"],
+      "extensions": ["md", "txt", "markdown", "pdf", "docx", "doc", "rtf", "pptx"]
+    }
   },
   "research": {
     "strategy": "focused",
@@ -599,6 +612,7 @@ npm run benchmark:strategies -- \
 | `SEARCH_ENGINE` | `search.engine` |
 | `SEARCH_BASE_URL` / `SEARXNG_URL` | `search.baseUrl` |
 | `SEARCH_API_KEY` | `search.apiKey` |
+| `SEARCH_LOCAL_DIRS` / `JDR_CORPUS_DIRS` | `search.local.dirs`（逗号分隔；未设 `SEARCH_ENGINE` 时启用 `local`） |
 | `JS_EYES_CLI` | `search.jsEyesCli` |
 | `JS_EYES_SKILL` | `search.jsEyesSkills`（逗号分隔多 skill） |
 | `JS_EYES_COMMAND` | `search.jsEyesCommand` |
@@ -676,6 +690,21 @@ npm exec --package=. -- jdr research "llm wiki" \
 
 - 默认地址 `http://127.0.0.1:8080`
 - 调研前确认 SearXNG 可访问，否则搜索阶段失败
+
+### 搜索：本地目录（`local`）
+
+`local` 与 SearXNG / js-eyes **同级**，是搜索源而不是新策略。每个 `--corpus-dirs` 目录是独立通道（分开检索、分开失败、round-robin 合并），语义对齐 js-eyes skill。命中文件以规范化 `file://` 绝对路径进入现有 enrich；`quick` 只信 snippet，`focused` / `exploratory` 真读文件。路径必须落在本次配置的某个 corpus 根内（resolve + realpath），根外、`../`、指向根外的 symlink 一律失败。
+
+与网页引擎同时 fan-out 见 issue #16；本仓库在 single mode 下可独立验收：给了 `--corpus-dirs` 时本次 run 启用 `local`，不会静默丢弃目录。
+
+```bash
+npm exec --package=. -- jdr research "监管处罚" \
+  --search local \
+  --corpus-dirs ~/notes/尽调,~/Downloads/年报 \
+  --strategy focused
+```
+
+环境变量：`SEARCH_LOCAL_DIRS` 或 `JDR_CORPUS_DIRS`（逗号分隔）。点分键：`search.local.dirs`。
 
 ### 搜索：JS Eyes（浏览器技能）
 
@@ -849,6 +878,7 @@ CLI 顶层错误输出 `error.message` 到 stderr；普通错误退出码 `1`，
 | `src/jobs/job-runner.mjs` | Web UI 异步任务、`cancel()` + `AbortController` |
 | `src/search-providers/js-eyes/cli-process.mjs` | js-eyes 子进程 spawn、abort 时 `killProcessTree()`（Windows `taskkill /T /F`） |
 | `src/search-providers/js-eyes/index.mjs` | js-eyes 搜索 adapter；skill-run 时 AbortError 立即向上抛 |
+| `src/search-providers/local/` | 本地目录搜索源：多目录通道、`file://` 安全读取 |
 | `src/bootstrap.mjs` | SQLite 服务（settings / history / sources） |
 | `src/config/settings-store.mjs` | 设置持久化 + `.env` 覆盖 |
 | `src/config/env-overrides.mjs` | 环境变量映射 |
@@ -880,6 +910,9 @@ npm exec --package=. -- jdr research "问题"
 
 # 机器可读输出
 npm exec --package=. -- jdr research "问题" --json --no-save
+
+# 本地目录搜索源（每个目录是独立通道）
+npm exec --package=. -- jdr research "问题" --search local --corpus-dirs ~/notes,~/reports
 
 # 取消：前台 Ctrl+C 一次（graceful），两次（force exit 130）
 

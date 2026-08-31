@@ -21,6 +21,11 @@ export const defaultSettings = Object.freeze({
     language: 'en',
     safeSearch: true,
     options: {},
+    local: {
+      dirs: [],
+      ignore: ['.git', 'node_modules', '.DS_Store'],
+      extensions: ['md', 'txt', 'markdown', 'pdf', 'docx', 'doc', 'rtf', 'pptx'],
+    },
   },
   research: {
     strategy: 'focused',
@@ -144,7 +149,14 @@ export function mergeSettings(overrides = {}) {
   const merged = {
     http: { ...defaultSettings.http, ...(overrides.http || {}) },
     llm: { ...defaultSettings.llm, ...(overrides.llm || {}) },
-    search: { ...defaultSettings.search, ...searchOverrides },
+    search: {
+      ...defaultSettings.search,
+      ...searchOverrides,
+      local: {
+        ...defaultSettings.search.local,
+        ...(searchOverrides.local || {}),
+      },
+    },
     research: {
       ...defaultSettings.research,
       ...researchOverrides,
