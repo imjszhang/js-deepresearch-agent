@@ -641,7 +641,7 @@ npm run benchmark:strategies -- \
 Agent 选型建议：
 
 - 用户要**快速答案** → `--strategy quick`（默认单轮；`--iterations` 未指定时不会沿用专题调研的轮次）
-- 用户要**引用与深度** → `--strategy focused`（默认；按 discovery → merge/read → material-gap repair 分波执行，并对 consequential/critical slot 做有界 challenge 与 spot-check）
+- 用户要**引用与深度** → `--strategy focused`（默认；discovery 为首轮，repair 受 `iterations` 或 `iterationControl` 约束；只对 `consequentialClaims` 精确匹配的 slot 做有界 challenge 与 spot-check）
 - 用户要**开放探索** → `--strategy exploratory`；用 `--exploratory-min-llm-tokens` 设下限、`--exploratory-max-llm-tokens` 或 `--max-llm-tokens` 设上限。下限不是停点：未到下限前必须继续 Search-Read-Reason。gate 未通过且探索额度还在时，失败的 finalize 是再探索，不是收工。只有确定性 readiness gate 通过才能输出 `evidence_sufficient`；LLM / rerank / embedding 不能把失败门槛改成通过。`requiredHosts` / `primary_filing` 只来自 LLM planner 对本题的承诺，或问句里字面出现的 hostname；规则层不会把「官方 / official」映射成港交所或 SEC 年报。额度或步数用尽时仍写长报告，但必须列出未关闭 gap、未兑现的 host 承诺和仅有二手证据的结论。次数和步数上限默认关闭；若要限制用 `--max-source-reads` / `--exploratory-max-steps`（用尽后立刻写报告）
 
 旧 ID（`rapid`、`parallel`、`source-based`、`adaptive`）不再注册。CLI 传入旧值会报迁移错误。历史 `work_dir` / Intel / SQLite 记录仍可读取。
@@ -652,7 +652,7 @@ Agent 选型建议：
 
 Schema v3 在旧四件套之外写入 `gaps.json`、`passages.json`、`claims.json`、`quality.json`、`trace.json`。Intel Store 继续读取 v2；`intel import --upgrade-existing` 可从有正文的旧产物派生 passage/claim，不能从 snippet 伪造正文证据。Wiki 会为 v3 生成 `Evidence/` 与 `Open Questions/` 页面。`report.md` 的 Evidence 是精选 passage 展示层：每个 citation 最多展示 1 段、长度不超过 `research.focused.evidencePassages.maxPassageChars`；完整正文以 `sources.json` 为准，完整候选证据以 `passages.json` 为准。主支持率 `supportedRate` 只统计 Summary / Key Findings 的原子事实（完全 supported / 全部分母）；`supportedOrPartialRate` 把 partial 也算进分子。Evidence / Sources / Caveats 不进这个分母。claim extraction v5 起，未知一级标题会开启新的文档根并重置为 `supporting_claim`，不再继承前面的 Key Findings。对比旧 run 时看 `qualityMetricsVersion` 与 `claimExtractionVersion`，不要直接比口径变更前后的百分比。已引用且有正文、规则尚未明确 supported/unsupported 的 key claim，默认再走 `research.quality.entailment=rules_then_llm` 做蕴含判定；设为 `rules` 可关掉。snippet-only 与无引用不能靠 LLM 洗白。
 
-Issue #27 起还写入 `brief.json`：ResearchBrief schema v1 兼容原字符串 query；gap schema v2 表达 answer slot / claim family、supporting/contradicting passage、missing evidence 与 resolution reason。planner 输出会确定性清洗，answer-slot required host 只有在 query 字面出现时才保留。focused 与 exploratory 共用确定性 readiness primitive；plateau 只能让 focused 停止追加 repair 或让 exploratory 换角度，不能越过 readiness failure 或 exploratory token floor。共享读取配置为 `research.read.*`，旧 `research.focused.*` 仍作为兼容 fallback；无效的 `plannerParallelism`、`enableCoding` 已移除。
+Issue #27 起还写入 `brief.json`：ResearchBrief schema v1 兼容原字符串 query；gap schema v2 表达 answer slot / claim family、supporting/contradicting passage、missing evidence 与 resolution reason。用户结构化输入优先，planner 只能补空；用户显式 slot host 经 hostname 清洗后保留，planner 新增 slot host 仍要求 query 字面出现。有 explicit slots 时 root gap 只做 roll-up，不重复搜索、不独立阻断 readiness。focused 与 exploratory 共用确定性 readiness primitive，normal required slot 也不能被忽略；plateau 只能让 focused 停止追加 repair 或让 exploratory 换角度，不能越过 readiness failure 或 exploratory token floor。共享读取配置为 `research.read.*`，旧 `research.focused.*` 仍作为兼容 fallback；无效的 `plannerParallelism`、`enableCoding` 已移除。`intel import` / archive 会 round-trip `brief`。
 
 ### Focused 深度阅读（可选）
 

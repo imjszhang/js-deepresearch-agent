@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 3,
+  "gate": "pass",
+  "flags": [],
+  "limitations": [],
+  "metrics": {
+    "marginal": {
+      "newIndependentSources": 1,
+      "materialGapsClosed": 1,
+      "plateau": false
+    }
+  }
+}

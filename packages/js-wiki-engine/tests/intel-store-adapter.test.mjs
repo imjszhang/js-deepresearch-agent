@@ -51,6 +51,7 @@ describe('intel-store adapter', () => {
       status: 'completed',
       sessionDir,
       reportPath,
+      researchBrief: { schemaVersion: 1, query: 'llm wiki', depth: 'focused' },
       archivedAt: now,
     });
 
@@ -78,6 +79,8 @@ describe('intel-store adapter', () => {
     assert.equal(loaded.sources[0].title, 'Example');
     assert.match(loaded.report, /Example claim/);
     assert.equal(loaded.meta.query, 'llm wiki');
+    assert.equal(loaded.brief.schemaVersion, 1);
+    assert.equal(loaded.meta.researchBrief.query, 'llm wiki');
   });
 
   it('prefers inline report over missing reportPath file', () => {

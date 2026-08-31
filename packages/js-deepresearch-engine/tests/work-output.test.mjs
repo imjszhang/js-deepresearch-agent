@@ -63,6 +63,13 @@ describe('work output', () => {
     const date = new Date('2026-05-25T17:38:28.455Z');
     const result = {
       report: '# Report\n\nExample.',
+      brief: {
+        schemaVersion: 1,
+        query: 'What is TypeScript?',
+        depth: 'focused',
+        exclusions: ['forums'],
+        requiredAnswerSlots: [{ id: 'status', answerSlot: 'status', question: 'What is supported?', priority: 'normal', requiredHosts: [], requiredSourceTypes: [], successCriteria: [], requiredSlot: true, claimFamily: null }],
+      },
       findings: [{ question: 'What is TypeScript?', sources: [{ title: 'Example', url: 'https://example.com' }] }],
       sources: [{ title: 'Example', url: 'https://example.com', snippet: 'Snippet' }],
     };
@@ -98,9 +105,15 @@ describe('work output', () => {
     assert.equal(meta.qualityMetricsVersion, 3);
     assert.equal(meta.claimExtractionVersion, 5);
     assert.equal(meta.claimEvaluationVersion, 4);
-    for (const key of ['gapsPath', 'passagesPath', 'claimsPath', 'qualityPath', 'tracePath']) {
+    for (const key of ['briefPath', 'gapsPath', 'passagesPath', 'claimsPath', 'qualityPath', 'tracePath']) {
       assert.equal(fs.existsSync(artifacts[key]), true);
       assert.equal(meta.artifacts[key], artifacts[key]);
     }
+    const brief = JSON.parse(fs.readFileSync(artifacts.briefPath, 'utf8'));
+    assert.equal(brief.schemaVersion, 1);
+    assert.equal(brief.query, 'What is TypeScript?');
+    assert.deepEqual(brief.exclusions, ['forums']);
+    assert.equal(meta.researchBrief.schemaVersion, 1);
+    assert.equal(meta.artifacts.briefPath, artifacts.briefPath);
   });
 });

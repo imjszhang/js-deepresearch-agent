@@ -31,7 +31,7 @@ describe('intel store import', () => {
     return dir;
   }
 
-  function writeSession(root, strategy, timestamp, { researchId = null, loopVersion = null, trace = null } = {}) {
+  function writeSession(root, strategy, timestamp, { researchId = null, loopVersion = null, trace = null, brief = null } = {}) {
     const sessionDir = path.join(root, strategy, timestamp);
     fs.mkdirSync(sessionDir, { recursive: true });
     fs.writeFileSync(path.join(sessionDir, 'report.md'), '# Report\n\nClaim [1.1].', 'utf8');
@@ -52,6 +52,9 @@ describe('intel store import', () => {
     }, null, 2), 'utf8');
     if (trace) {
       fs.writeFileSync(path.join(sessionDir, 'trace.json'), JSON.stringify(trace, null, 2), 'utf8');
+    }
+    if (brief) {
+      fs.writeFileSync(path.join(sessionDir, 'brief.json'), JSON.stringify(brief, null, 2), 'utf8');
     }
     return sessionDir;
   }
@@ -89,7 +92,9 @@ describe('intel store import', () => {
     const intelDir = path.join(root, 'intel');
     const workRoot = path.join(root, 'work_dir');
 
-    writeSession(workRoot, 'source-based', '2026-05-26_065414');
+    writeSession(workRoot, 'source-based', '2026-05-26_065414', {
+      brief: { schemaVersion: 1, query: 'test query', depth: 'focused', exclusions: ['forums'] },
+    });
     writeSession(workRoot, 'source-based', '2026-05-26_070000', { researchId: 'existing-id' });
     fs.mkdirSync(path.join(workRoot, 'rapid', '2026-05-26_080000'), { recursive: true });
 
@@ -111,6 +116,8 @@ describe('intel store import', () => {
     });
     assert.equal(imported.query, 'test query');
     assert.equal(imported.sourcesCount, 1);
+    assert.equal(imported.researchBrief.schemaVersion, 1);
+    assert.deepEqual(imported.researchBrief.exclusions, ['forums']);
 
     const dryRun = importWorkDirSessions({ root: workRoot, engine, dryRun: true, skipExisting: false });
     assert.equal(dryRun.imported, 0);

@@ -1,0 +1,20 @@
+[
+  {
+    "title": "Alpha docs",
+    "url": "https://docs.example.com/alpha",
+    "publisher": "Example Docs",
+    "author": null,
+    "publishedAt": null,
+    "content": "Alpha safety is documented in the official primary guide with enough body text.",
+    "fetchStatus": "ok"
+  },
+  {
+    "title": "Beta docs",
+    "url": "https://docs.example.com/beta",
+    "publisher": null,
+    "author": null,
+    "publishedAt": null,
+    "content": "Beta safety is documented after the repair wave with enough body text.",
+    "fetchStatus": "ok"
+  }
+]

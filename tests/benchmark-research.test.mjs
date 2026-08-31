@@ -478,9 +478,18 @@ LLM Wiki 由 Karpathy 提出，强调编译式知识沉淀 [1.1]。
       sources: [],
     });
 
+    fs.writeFileSync(path.join(dir, 'brief.json'), JSON.stringify({
+      schemaVersion: 1,
+      query: 'llm wiki',
+      depth: 'focused',
+      exclusions: ['forums'],
+    }, null, 2), 'utf8');
     const artifacts = loadArtifacts(dir);
     assert.equal(artifacts.meta.query, 'llm wiki');
     assert.match(artifacts.report, /Summary/);
+    assert.equal(artifacts.brief.schemaVersion, 1);
+    assert.deepEqual(artifacts.brief.exclusions, ['forums']);
+    assert.equal(artifacts.quality, null);
   });
 
   it('loads artifacts by researchId from intel store', async () => {

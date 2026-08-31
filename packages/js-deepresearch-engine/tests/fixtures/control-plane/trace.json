@@ -1,0 +1,67 @@
+[
+  {
+    "step": 1,
+    "action": "research_brief",
+    "reasonCode": "structured_input",
+    "createdAt": "2026-08-31T12:00:00.000Z"
+  },
+  {
+    "step": 2,
+    "action": "search_wave_started",
+    "reasonCode": "discovery",
+    "wave": "discovery",
+    "targetGapIds": ["gap-2", "gap-3"],
+    "queries": ["alpha safety", "beta safety"]
+  },
+  {
+    "step": 3,
+    "action": "search_wave_merged",
+    "reasonCode": "discovery_merge",
+    "wave": "discovery"
+  },
+  {
+    "step": 4,
+    "action": "readiness_gate",
+    "reasonCode": "repair_required",
+    "strategy": "focused",
+    "failures": [{ "code": "required_slot_open", "gapIds": ["gap-3"] }]
+  },
+  {
+    "step": 5,
+    "action": "search_wave_started",
+    "reasonCode": "repair",
+    "wave": "repair",
+    "targetGapIds": ["gap-3"],
+    "queries": ["beta safety successful_body primary source evidence"]
+  },
+  {
+    "step": 6,
+    "action": "plateau_evaluated",
+    "reasonCode": "focused_novelty",
+    "newIndependentSources": 1,
+    "materialGapsClosed": 1,
+    "plateau": false,
+    "consecutiveLowYield": 0
+  },
+  {
+    "step": 7,
+    "action": "challenge_completed",
+    "reasonCode": "bounded_consequential_claim_challenge",
+    "targetGapIds": ["gap-2"],
+    "queryCount": 1
+  },
+  {
+    "step": 8,
+    "action": "claim_spot_check",
+    "reasonCode": "direct_source_confirmed",
+    "targetGapIds": ["gap-2"],
+    "passed": true
+  },
+  {
+    "step": 9,
+    "action": "focused_stop_decision",
+    "reasonCode": "evidence_sufficient",
+    "readinessPass": true,
+    "plateau": false
+  }
+]

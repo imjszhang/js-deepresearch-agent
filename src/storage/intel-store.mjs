@@ -96,6 +96,19 @@ function buildSourceArchiveFields(source, index, archivedAt) {
   };
 }
 
+function resolveResearchBrief(result, artifacts = null) {
+  if (result?.brief && typeof result.brief === 'object') return result.brief;
+  const briefPath = artifacts?.briefPath;
+  if (briefPath && fs.existsSync(briefPath)) {
+    try {
+      return JSON.parse(fs.readFileSync(briefPath, 'utf8'));
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
 function resolveArchivedReport(run, reportMeta) {
   if (typeof reportMeta?.report === 'string' && reportMeta.report.length > 0) {
     return reportMeta.report;
@@ -195,7 +208,7 @@ export function archiveResearchResult({
     sourcesPath: artifacts?.sourcesPath ?? null,
     metaPath: artifacts?.metaPath ?? null,
     briefPath: artifacts?.briefPath ?? null,
-    researchBrief: result?.brief ?? null,
+    researchBrief: resolveResearchBrief(result, artifacts),
     findingsCount: findings.length,
     sourcesCount: sources.length,
     gapsCount: gaps.length,
@@ -299,11 +312,13 @@ export function readArchivedResearch(researchId, engine = getIntelStoreEngine())
     createdAt: run.first_seen ?? run.archivedAt,
     settings: run.settings ?? {},
     sessionDir: run.sessionDir ?? null,
+    researchBrief: run.researchBrief ?? null,
   };
 
   return {
     workDir: run.sessionDir ?? null,
     meta,
+    brief: run.researchBrief ?? null,
     findings: reconstructFindings(findingsRaw),
     sources: sourcesRaw.map(stripEntityJsonlFields),
     gaps: gapsRaw.map(stripEntityJsonlFields),
