@@ -1,27 +1,21 @@
 import { isSuccessfulBody, sourceHasObservableDate } from '../body-quality.mjs';
-import { classifyResearchQuery, subjectsMissingBodyEvidence } from './exploratory-sufficiency.mjs';
 import { classifySourceTier, hostnamesMatch, independentEvidenceKeysFromSources, hostnameOf } from './source-policy.mjs';
-import { isRequiredSlot } from '../gap-state.mjs';
+import { hasUsableResearchContract } from './research-profile.mjs';
+import { collectGapSources, isRequiredSlot } from '../gap-state.mjs';
 
-export const GAP_OPEN_STATUSES = new Set(['open', 'searched', 'missing', 'conflicting', 'limited']);
-export const GAP_CLOSED_STATUSES = new Set(['verified', 'body_read']);
+export const GAP_OPEN_STATUSES = new Set(['open', 'searched', 'missing', 'conflicting', 'limited', 'body_read']);
+export const GAP_CLOSED_STATUSES = new Set(['verified']);
 
 function successfulSources(findings = []) {
   return findings.flatMap((finding) => (finding.sources || []).filter(isSuccessfulBody));
 }
 
-function sourcesForGap(findings, gapId) {
-  return findings
-    .filter((finding) => !gapId || finding.gapId === gapId)
-    .flatMap((finding) => (finding.sources || []).filter(isSuccessfulBody));
-}
-
 function requiredHostsRead(gap, findings) {
   const hosts = gap.requiredHosts || [];
-  const sources = sourcesForGap(findings, gap.id);
+  const pool = collectGapSources(gap, findings);
   if (!hosts.length) {
     if ((gap.requiredSourceTypes || []).includes('primary_filing')) {
-      const primary = sources.filter((source) => (
+      const primary = pool.filter((source) => (
         ['required_primary', 'other_primary'].includes(source.tier || classifySourceTier(source, gap))
       ));
       return {
@@ -34,7 +28,7 @@ function requiredHostsRead(gap, findings) {
   const read = [];
   const missing = [];
   for (const host of hosts) {
-    const hit = sources.some((source) => hostnamesMatch(hostnameOf(source.url || source.id), host));
+    const hit = pool.some((source) => hostnamesMatch(hostnameOf(source.url || source.id), host));
     if (hit) read.push(host);
     else missing.push(host);
   }
@@ -46,19 +40,43 @@ function gapNeedsRequiredHost(gap) {
 }
 
 export function evaluateReadinessGate({
-  query,
   findings = [],
   gaps = [],
   profile = {},
   state = null,
 } = {}) {
-  const resolvedQuery = query || state?.query || '';
   const resolvedFindings = findings.length ? findings : (state?.findings || []);
   const resolvedGaps = gaps.length ? gaps : (state?.gaps || []);
-  const resolvedProfile = profile.flags ? profile : (state?.profile || {});
-  const shape = classifyResearchQuery(resolvedQuery);
+  const resolvedProfile = profile.flags || profile.requiredHosts || profile.contractUnavailable != null
+    ? profile
+    : (state?.profile || {});
   const failures = [];
   const flags = [];
+
+  if (resolvedProfile.contractUnavailable) {
+    failures.push({
+      code: 'contract_unavailable',
+      message: resolvedProfile.contractFailure
+        ? `Research contract is unavailable (${resolvedProfile.contractFailure}).`
+        : 'Research contract is unavailable; required slots were not planned.',
+    });
+    flags.push('contract_unavailable');
+  } else if (!hasUsableResearchContract(resolvedProfile, resolvedProfile.brief || state?.brief || {})
+    && !resolvedGaps.some(isRequiredSlot)
+    && !(resolvedProfile.requiredHosts || []).length
+    && !(resolvedProfile.requiredSourceTypes || []).length) {
+    // Root-only runs still need a planned or user contract before evidence_sufficient.
+    if (!resolvedGaps.some((gap) => isRequiredSlot(gap))) {
+      const root = resolvedGaps.find((gap) => gap.kind === 'root' && !gap.rollup);
+      if (root && root.status !== 'verified') {
+        failures.push({
+          code: 'contract_unavailable',
+          message: 'No dynamic required slots were available to verify.',
+        });
+        flags.push('contract_unavailable');
+      }
+    }
+  }
 
   const bodies = successfulSources(resolvedFindings);
   if (!bodies.length) {
@@ -67,16 +85,7 @@ export function evaluateReadinessGate({
   }
 
   const criticalGaps = resolvedGaps.filter((gap) => gap.priority === 'critical' && !gap.rollup);
-  const unresolvedCritical = criticalGaps.filter((gap) => {
-    if (GAP_CLOSED_STATUSES.has(gap.status) && gap.status !== 'body_read') return false;
-    if (gap.status === 'verified') return false;
-    const covered = sourcesForGap(resolvedFindings, gap.id).length > 0
-      || (state?.gapCovered?.(gap.id) && !gapNeedsRequiredHost(gap));
-    if (gap.status === 'body_read' && !gapNeedsRequiredHost(gap)) return false;
-    if (gap.status === 'blocked') return true;
-    if (GAP_OPEN_STATUSES.has(gap.status)) return true;
-    return !covered;
-  });
+  const unresolvedCritical = criticalGaps.filter((gap) => !GAP_CLOSED_STATUSES.has(gap.status));
   if (unresolvedCritical.length) {
     failures.push({
       code: 'critical_gap_open',
@@ -87,7 +96,7 @@ export function evaluateReadinessGate({
   }
 
   const unresolvedRequiredSlots = resolvedGaps.filter((gap) => (
-    isRequiredSlot(gap) && (GAP_OPEN_STATUSES.has(gap.status) || gap.status === 'blocked')
+    isRequiredSlot(gap) && !GAP_CLOSED_STATUSES.has(gap.status)
   ));
   if (unresolvedRequiredSlots.length) {
     failures.push({
@@ -115,7 +124,7 @@ export function evaluateReadinessGate({
     flags.push('required_host_missing');
   }
 
-  const minIndependent = Number(resolvedProfile.minIndependentSources) || (shape.kind === 'definitional' ? 1 : 2);
+  const minIndependent = Number(resolvedProfile.minIndependentSources) || 1;
   const evidenceKeys = independentEvidenceKeysFromSources(bodies);
   const scope = resolvedProfile.evidenceScope || state?.evidenceScope || 'web';
   if (bodies.length && evidenceKeys.size < minIndependent && minIndependent > 1) {
@@ -127,22 +136,9 @@ export function evaluateReadinessGate({
     flags.push('reprint_concentration');
   }
 
-  const missingSubjects = shape.kind === 'comparison'
-    ? subjectsMissingBodyEvidence(resolvedFindings.filter((finding) => (
-      (finding.sources || []).some(isSuccessfulBody)
-    )), shape.subjects)
-    : [];
-  if (missingSubjects.length) {
-    failures.push({
-      code: 'comparison_incomplete',
-      message: `Missing body evidence for: ${missingSubjects.join(', ')}`,
-    });
-    flags.push('comparison_coverage_incomplete');
-  }
-
-  if (resolvedProfile.flags?.freshness || /\b(latest|current|today|recent|as of)\b|目前|当前|最新|截至/i.test(resolvedQuery)) {
+  if (resolvedProfile.flags?.freshness) {
     const dated = bodies.some((source) => sourceHasObservableDate(source));
-    if (!dated && resolvedProfile.flags?.freshness) {
+    if (!dated) {
       failures.push({ code: 'freshness_unknown', message: 'Freshness was required but no dated source body was read.' });
       flags.push('freshness_unknown');
     }
@@ -158,7 +154,7 @@ export function evaluateReadinessGate({
     successfulBodyCount: bodies.length,
     unresolvedCriticalGapIds: unresolvedCritical.map((gap) => gap.id),
     missingRequiredHosts: missingRequired.flatMap((item) => item.hosts),
-    missingSubjects,
+    missingSubjects: [],
     method: 'rules',
     decision: pass ? 'finalize' : 'continue',
   };
@@ -172,21 +168,19 @@ export function repairGapsFromGate(gate = {}, gaps = []) {
   return gaps.filter((gap) => {
     if (gap.rollup) return false;
     return targetIds.has(gap.id)
-      || ['conflicting', 'limited'].includes(gap.status)
+      || ['conflicting', 'limited', 'body_read'].includes(gap.status)
       || (gap.priority === 'critical' && GAP_OPEN_STATUSES.has(gap.status))
-      || (isRequiredSlot(gap) && GAP_OPEN_STATUSES.has(gap.status));
+      || (isRequiredSlot(gap) && !GAP_CLOSED_STATUSES.has(gap.status));
   });
 }
 
 export function describeUnresolvedGaps(gaps = []) {
   return (gaps || [])
     .filter((gap) => !gap.rollup)
-    .filter((gap) => !GAP_CLOSED_STATUSES.has(gap.status) || (
-      gap.status === 'body_read'
-      && ((gap.requiredHosts || []).length || (gap.requiredSourceTypes || []).includes('primary_filing'))
-    ))
-    .filter((gap) => ['open', 'searched', 'missing', 'blocked', 'body_read', 'conflicting', 'limited'].includes(gap.status) && (
+    .filter((gap) => !GAP_CLOSED_STATUSES.has(gap.status))
+    .filter((gap) => (
       gap.priority === 'critical'
+      || isRequiredSlot(gap)
       || gap.status === 'blocked'
       || gap.status === 'missing'
       || (gap.requiredHosts || []).length

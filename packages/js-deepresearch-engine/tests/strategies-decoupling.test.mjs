@@ -28,4 +28,23 @@ describe('research strategies decoupling', () => {
 
     assert.match(source, /resolveStrategyConcurrency/);
   });
+
+  it('does not import the benchmark query battery from runtime engine code', () => {
+    const srcRoot = path.join(import.meta.dirname, '../src');
+    const stack = [srcRoot];
+    while (stack.length) {
+      const current = stack.pop();
+      for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+        const full = path.join(current, entry.name);
+        if (entry.isDirectory()) {
+          stack.push(full);
+          continue;
+        }
+        if (!entry.name.endsWith('.mjs')) continue;
+        const source = fs.readFileSync(full, 'utf8');
+        assert.doesNotMatch(source, /query-battery/);
+        assert.doesNotMatch(source, /apple-silicon-local-llm/);
+      }
+    }
+  });
 });

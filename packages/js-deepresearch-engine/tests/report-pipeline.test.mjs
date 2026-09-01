@@ -279,9 +279,20 @@ Short.
         return [{ title: 'Cap', url: 'https://budget.test', content: 'Budget topic evidence.', fetchStatus: 'ok' }];
       } },
       llm: {
-        async complete({ purpose }) {
+        async complete({ purpose, messages }) {
           if (purpose === 'agent_decision') return JSON.stringify({ action: 'search', query: 'budget topic', gapId: 'gap-1' });
           if (purpose === 'gap_decomposition') return 'no json';
+          if (purpose === 'research_profile') {
+            return JSON.stringify({
+              requiredAnswerSlots: [{ answerSlot: 'topic', question: 'topic evidence' }],
+              minIndependentSources: 1,
+            });
+          }
+          if (purpose === 'gap_support') {
+            const text = (messages || []).map((item) => item.content).join('\n');
+            const quote = (text.match(/\] ([^\n]+)/) || [])[1] || 'Budget topic evidence.';
+            return JSON.stringify({ judgments: [{ verdict: 'supported', quote }] });
+          }
           return `# Research Report
 
 ## Summary
@@ -386,7 +397,17 @@ Ollama is a local model runner for Apple Silicon and this fallback narrative is 
       },
       search: { async search() { return [{ title: 'Ollama docs', url: 'https://ollama.com', snippet: 'Ollama runs local models.' }]; } },
       llm: {
-        async complete({ purpose }) {
+        async complete({ purpose, messages }) {
+          if (purpose === 'research_profile') {
+            return JSON.stringify({
+              requiredAnswerSlots: [{ answerSlot: 'ollama', question: 'What is Ollama?' }],
+            });
+          }
+          if (purpose === 'gap_support') {
+            const text = (messages || []).map((item) => item.content).join('\n');
+            const quote = (text.match(/\] ([^\n]+)/) || [])[1] || 'Ollama is a local model runner.';
+            return JSON.stringify({ judgments: [{ verdict: 'supported', quote }] });
+          }
           if (purpose === 'question_generation') return '[]';
           return JSON.stringify(jsonNarrative);
         },
@@ -434,7 +455,17 @@ Ollama is a local model runner for Apple Silicon and this fallback narrative is 
         },
       },
       llm: {
-        async complete({ purpose }) {
+        async complete({ purpose, messages }) {
+          if (purpose === 'research_profile') {
+            return JSON.stringify({
+              requiredAnswerSlots: [{ answerSlot: '房产', question: '房产操作' }],
+            });
+          }
+          if (purpose === 'gap_support') {
+            const text = (messages || []).map((item) => item.content).join('\n');
+            const quote = (text.match(/\] ([^\n]+)/) || [])[1] || '房产交易需要注意税费和流动性。';
+            return JSON.stringify({ judgments: [{ verdict: 'supported', quote }] });
+          }
           if (purpose === 'question_generation') return '[]';
           return JSON.stringify({
             title: '房产操作',

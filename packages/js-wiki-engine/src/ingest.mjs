@@ -265,7 +265,7 @@ function buildEvidencePage({ researchId, claim, passages, sources }) {
 }
 
 function buildOpenQuestionsPage(topicTitle, gaps = []) {
-  const open = gaps.filter((gap) => gap.status !== 'resolved');
+  const open = gaps.filter((gap) => !['resolved', 'verified'].includes(gap.status) && !gap.rollup);
   return {
     relativePath: openQuestionsRelativePath(topicTitle),
     content: renderPage({

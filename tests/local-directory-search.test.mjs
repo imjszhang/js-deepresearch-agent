@@ -82,6 +82,32 @@ function validReport(marker = 'local report') {
   return `# Research Report\n\n## Summary\n\nThis ${marker} summarizes the collected local evidence and clearly distinguishes verified observations from unresolved limitations. It provides enough structured prose to validate the report output contract.\n\n## Key Findings\n\n- Local files mention 监管处罚 with supporting detail. [1.1]\n\n## Caveats\n\nThe test evidence is intentionally limited.`;
 }
 
+function localContractProfile(question, extra = {}) {
+  return JSON.stringify({
+    requiredAnswerSlots: [{
+      answerSlot: question,
+      question,
+      priority: 'normal',
+    }],
+    minIndependentSources: 1,
+    ...extra,
+  });
+}
+
+function localGapSupport(messages) {
+  const text = (messages || []).map((item) => item.content).join('\n');
+  const gapIds = [...new Set([...text.matchAll(/gapId:\s+(gap-\S+)/g)].map((match) => match[1]))];
+  const quote = (text.match(/\] ([^\n]+)/) || [])[1] || '';
+  return JSON.stringify({
+    judgments: (gapIds.length ? gapIds : ['gap-2']).map((gapId) => ({
+      gapId,
+      verdict: quote.length >= 12 ? 'supported' : 'unverifiable',
+      quote,
+      reason: 'local body supports the slot',
+    })),
+  });
+}
+
 describe('local directory search engine', () => {
   it('enumerates files and ignores .git, node_modules, and .DS_Store', async () => {
     const root = makeTempDir();
@@ -358,6 +384,8 @@ describe('local focused integration', () => {
       search,
       llm: {
         async complete({ purpose, messages }) {
+          if (purpose === 'research_profile') return localContractProfile('监管处罚');
+          if (purpose === 'gap_support') return localGapSupport(messages);
           if (purpose === 'question_generation' || messages[0].content.includes('research planner')) {
             return '[]';
           }
@@ -435,7 +463,7 @@ describe('local exploratory integration', () => {
       },
       search,
       llm: {
-        async complete({ purpose }) {
+        async complete({ purpose, messages }) {
           if (purpose === 'research_profile') {
             return JSON.stringify({
               flags: { primary_source: true },
@@ -446,6 +474,7 @@ describe('local exploratory integration', () => {
               gaps: [{ question: '哪个城市适合买', priority: 'normal', requiredHosts: ['fang.com'] }],
             });
           }
+          if (purpose === 'gap_support') return localGapSupport(messages);
           if (purpose === 'agent_decision') {
             return JSON.stringify({ action: 'search', query: '房产操作攻略', gapId: 'gap-1' });
           }

@@ -78,6 +78,40 @@ describe('deterministic readiness gate', () => {
     assert.ok(gate.failures.some((failure) => failure.code === 'required_host_missing'));
   });
 
+  it('does not satisfy one slot required host from another gap body', () => {
+    const gate = evaluateReadinessGate({
+      profile: { flags: {}, minIndependentSources: 1 },
+      gaps: [{
+        id: 'gap-2',
+        question: 'SubjectA official status',
+        status: 'verified',
+        priority: 'normal',
+        requiredSlot: true,
+        requiredHosts: ['docs.example.com'],
+      }],
+      findings: [
+        {
+          gapId: 'gap-2',
+          sources: [{
+            url: 'https://unavailable.example/subject-a',
+            fetchStatus: 'failed',
+          }],
+        },
+        {
+          gapId: 'gap-3',
+          sources: [{
+            url: 'https://docs.example.com/subject-b',
+            content: 'SubjectB documentation body is available, but it does not belong to the SubjectA required slot.',
+            fetchStatus: 'ok',
+          }],
+        },
+      ],
+    });
+
+    assert.equal(gate.pass, false);
+    assert.ok(gate.failures.some((failure) => failure.code === 'required_host_missing'));
+  });
+
   it('does not treat same-domain reprints as two independent sources', () => {
     const query = 'Compare two local LLM tools for deployment';
     const gate = evaluateReadinessGate({
@@ -135,7 +169,7 @@ describe('deterministic readiness gate', () => {
     const gate = evaluateReadinessGate({
       query,
       profile: { flags: {}, minIndependentSources: 1, evidenceScope: 'local', requiredHosts: [] },
-      gaps: [{ id: 'gap-1', question: query, status: 'body_read', priority: 'critical', requiredHosts: [] }],
+      gaps: [{ id: 'gap-1', question: query, status: 'verified', priority: 'critical', requiredHosts: [] }],
       findings: [{
         gapId: 'gap-1',
         sources: [
@@ -146,6 +180,64 @@ describe('deterministic readiness gate', () => {
     });
     assert.equal(gate.pass, true);
     assert.ok(!gate.failures.some((failure) => failure.code === 'independent_sources_short'));
+  });
+
+  it('rejects required slots that are only body_read, limited, or conflicting', () => {
+    for (const status of ['body_read', 'limited', 'conflicting']) {
+      const gate = evaluateReadinessGate({
+        query: 'SubjectA official status',
+        profile: { flags: {}, minIndependentSources: 1, requiredHosts: [] },
+        gaps: [{
+          id: 'gap-2',
+          question: 'SubjectA official status',
+          answerSlot: 'SubjectA',
+          kind: 'slot',
+          requiredSlot: true,
+          status,
+          priority: 'normal',
+          requiredHosts: [],
+        }],
+        findings: [{
+          gapId: 'gap-2',
+          sources: [{
+            url: 'https://docs.example.com/a',
+            content: 'SubjectA publishes a first-party guide at docs.example.com that states production support began in 2026.',
+            fetchStatus: 'ok',
+          }],
+        }],
+      });
+      assert.equal(gate.pass, false, status);
+      assert.ok(gate.failures.some((failure) => failure.code === 'required_slot_open'), status);
+    }
+  });
+
+  it('passes only when every required slot is verified', () => {
+    const gate = evaluateReadinessGate({
+      query: 'SubjectA official status',
+      profile: { flags: {}, minIndependentSources: 1, requiredHosts: [] },
+      gaps: [
+        { id: 'gap-1', kind: 'root', rollup: true, requiredSlot: false, status: 'verified', priority: 'critical' },
+        {
+          id: 'gap-2',
+          question: 'SubjectA official status',
+          answerSlot: 'SubjectA',
+          kind: 'slot',
+          requiredSlot: true,
+          status: 'verified',
+          priority: 'normal',
+          requiredHosts: [],
+        },
+      ],
+      findings: [{
+        gapId: 'gap-2',
+        sources: [{
+          url: 'https://docs.example.com/a',
+          content: 'SubjectA publishes a first-party guide at docs.example.com that states production support began in 2026.',
+          fetchStatus: 'ok',
+        }],
+      }],
+    });
+    assert.equal(gate.pass, true);
   });
 
   it('counts two local corpora as two independent evidence keys', () => {
@@ -205,8 +297,11 @@ describe('deterministic readiness gate', () => {
       }],
     });
     state.syncGapCoverage();
-    assert.equal(state.gaps[0].status, 'verified');
+    assert.equal(state.gaps[0].status, 'body_read');
     state.refreshBudgetView();
-    assert.equal(state.readiness.pass, true);
+    assert.equal(state.readiness.pass, false);
+    assert.ok(state.readiness.failures.some((failure) => (
+      failure.code === 'critical_gap_open' || failure.code === 'contract_unavailable'
+    )));
   });
 });

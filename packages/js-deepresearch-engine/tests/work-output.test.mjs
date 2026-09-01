@@ -68,7 +68,8 @@ describe('work output', () => {
         query: 'What is TypeScript?',
         depth: 'focused',
         exclusions: ['forums'],
-        requiredAnswerSlots: [{ id: 'status', answerSlot: 'status', question: 'What is supported?', priority: 'normal', requiredHosts: [], requiredSourceTypes: [], successCriteria: [], requiredSlot: true, claimFamily: null }],
+        requiredAnswerSlots: [{ id: 'status', answerSlot: 'status', question: 'What is supported?', priority: 'normal', requiredHosts: [], requiredSourceTypes: [], successCriteria: [], evidenceCriteria: ['official document'], requiredSlot: true, claimFamily: null }],
+        contractOrigin: 'user',
       },
       findings: [{ question: 'What is TypeScript?', sources: [{ title: 'Example', url: 'https://example.com' }] }],
       sources: [{ title: 'Example', url: 'https://example.com', snippet: 'Snippet' }],
@@ -113,6 +114,8 @@ describe('work output', () => {
     assert.equal(brief.schemaVersion, 1);
     assert.equal(brief.query, 'What is TypeScript?');
     assert.deepEqual(brief.exclusions, ['forums']);
+    assert.deepEqual(brief.requiredAnswerSlots[0].evidenceCriteria, ['official document']);
+    assert.equal(brief.contractOrigin, 'user');
     assert.equal(meta.researchBrief.schemaVersion, 1);
     assert.equal(meta.artifacts.briefPath, artifacts.briefPath);
   });

@@ -98,7 +98,17 @@ describe('compileWiki', () => {
       { id: 'claim-caveat', text: 'The available evidence is limited.', kind: 'caveat', section: 'Limitations', evaluation: { verdict: 'unverifiable', origin: 'stored_rule' }, evidence: [] },
     ];
     const passages = [{ id: 'passage-1', sourceId: 'run-1/source-001', text: 'Manifest enables incremental compile.', contentHash: 'abc' }];
-    const gaps = [{ id: 'gap-1', question: 'How does it evolve?', status: 'deferred', priority: 'normal', reason: 'Needs future evidence.' }];
+    const gaps = [
+      { id: 'gap-1', question: 'How does it evolve?', status: 'deferred', priority: 'normal', reason: 'Needs future evidence.' },
+      { id: 'gap-root', question: 'llm wiki', status: 'verified', rollup: true, priority: 'critical' },
+      {
+        id: 'gap-2',
+        question: 'What is supported?',
+        status: 'verified',
+        requiredSlot: true,
+        slotSupport: { verdict: 'supported', quote: 'Manifest enables incremental compile.', quoteAnchored: true },
+      },
+    ];
     const summary = compileWiki({ vaultDir, sources: sampleSources, report, meta: { query: 'llm wiki' }, claims, passages, gaps });
     assert.ok(summary.pages.includes('Evidence/run-1/claim-1.md'));
     assert.ok(summary.pages.includes('Open Questions/Llm Wiki.md'));
@@ -111,5 +121,9 @@ describe('compileWiki', () => {
     assert.match(claimsPage, /claimCount: 1/);
     assert.match(claimsPage, /## Caveats/);
     assert.doesNotMatch(claimsPage, /claim-source/);
+    const questionsPage = fs.readFileSync(path.join(vaultDir, 'Open Questions', 'Llm Wiki.md'), 'utf8');
+    assert.match(questionsPage, /How does it evolve/);
+    assert.doesNotMatch(questionsPage, /What is supported/);
+    assert.doesNotMatch(questionsPage, /gap-root/);
   });
 });

@@ -3,7 +3,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, it } from 'node:test';
+import { saveResearchToWorkDir } from 'js-deepresearch-engine';
 import { compareStrategySessions } from '../scripts/benchmark/compare-strategies.mjs';
+import {
+  archiveResearchResult,
+  createIntelStoreEngine,
+  loadArtifactsByResearchId,
+  resetIntelStoreEngine,
+} from '../src/storage/intel-store.mjs';
 import {
   durationFromTrace,
   extractRunStats,
@@ -23,6 +30,7 @@ import {
 const tempDirs = [];
 
 afterEach(() => {
+  resetIntelStoreEngine();
   while (tempDirs.length > 0) {
     fs.rmSync(tempDirs.pop(), { recursive: true, force: true });
   }
@@ -396,5 +404,190 @@ llama.cpp 定位为跨平台底层引擎 [1.1]。MLX 定位为 Apple 原生框�
     assert.match(markdown, /Optional semantic analysis \(non-official\)/);
     assert.doesNotMatch(markdown, /Narrative supported|Tokens \/ supported|official supported rate/);
     assert.doesNotMatch(markdown, /Subject × aspect|cellRate/);
+  });
+
+  it('does not let a display label change process-contract strategy semantics', async () => {
+    const query = 'SubjectA official status';
+    const quick = createFixture({
+      strategy: 'quick',
+      query,
+      report: '# Report\n\n## Summary\n\nSubjectA is documented in snippets only.\n',
+      sources: [{ id: 's1', title: 'A', url: 'https://docs.example.com/a', snippet: 'SubjectA snippet', engine: 'searxng' }],
+      findings: [{ question: query, sources: [{ title: 'A', url: 'https://docs.example.com/a', snippet: 'SubjectA snippet', engine: 'searxng' }] }],
+      quality: {
+        schemaVersion: 3,
+        gate: 'pass',
+        flags: [],
+        budget: { usage: { llmTokens: 1000, searchRequests: 2, sourceReads: 0, rerankRequests: 0 }, unknown: {} },
+      },
+    });
+    const focused = createFixture({
+      strategy: 'focused',
+      query,
+      report: '# Report\n\n## Summary\n\nSubjectA is documented in official docs [1.1].\n',
+      sources: [{
+        id: 's1',
+        title: 'A',
+        url: 'https://docs.example.com/a',
+        content: 'SubjectA publishes a first-party guide at docs.example.com that states production support began in 2026.',
+        fetchStatus: 'ok',
+        contentOrigin: 'fetched',
+        engine: 'searxng',
+      }],
+      findings: [{
+        question: query,
+        sources: [{
+          title: 'A',
+          url: 'https://docs.example.com/a',
+          content: 'SubjectA publishes a first-party guide at docs.example.com that states production support began in 2026.',
+          fetchStatus: 'ok',
+          contentOrigin: 'fetched',
+          engine: 'searxng',
+        }],
+      }],
+      quality: {
+        schemaVersion: 3,
+        gate: 'pass',
+        flags: [],
+        budget: { usage: { llmTokens: 8000, searchRequests: 3, sourceReads: 2, rerankRequests: 0 }, unknown: {} },
+      },
+    });
+
+    const comparison = await compareStrategySessions({
+      sessions: [`after-focused=${quick}`, `baseline-focused=${focused}`],
+      llmEnabled: false,
+    });
+
+    assert.equal(comparison.runs[0].strategyLabel, 'after-focused');
+    assert.equal(comparison.runs[0].displayLabel, 'after-focused');
+    assert.equal(comparison.runs[0].audit.processContract.checks.find((item) => item.id === 'source_reads_zero')?.pass, true);
+    assert.equal(comparison.runs[0].audit.processContract.checks.find((item) => item.id === 'source_reads_at_least_one'), undefined);
+    assert.equal(comparison.runs[1].audit.processContract.checks.find((item) => item.id === 'source_reads_at_least_one')?.pass, true);
+  });
+
+  it('round-trips work_dir brief/gap support through Intel into benchmark audit', async () => {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'strategy-roundtrip-'));
+    tempDirs.push(cwd);
+    const intelRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'strategy-intel-'));
+    tempDirs.push(intelRoot);
+    const engine = createIntelStoreEngine({ baseDir: path.join(intelRoot, 'store') });
+    const query = 'SubjectA official status at docs.example.com';
+    const sharedBrief = {
+      schemaVersion: 1,
+      query,
+      depth: 'focused',
+      contractOrigin: 'planner',
+      requiredAnswerSlots: [{
+        id: 'status',
+        answerSlot: 'status',
+        question: 'What is SubjectA status?',
+        evidenceCriteria: ['official document'],
+        requiredSlot: true,
+      }],
+    };
+    const sharedGaps = [{
+      id: 'gap-2',
+      question: 'What is SubjectA status?',
+      status: 'verified',
+      requiredSlot: true,
+      evidenceCriteria: ['official document'],
+      slotSupport: {
+        verdict: 'supported',
+        quote: 'SubjectA publishes a first-party guide at docs.example.com',
+        method: 'llm',
+        quoteAnchored: true,
+      },
+    }];
+    const body = 'SubjectA publishes a first-party guide at docs.example.com that states production support began in 2026.';
+    const focusedResult = {
+      report: '# Report\n\n## Summary\n\nSubjectA is documented in official docs [1.1].\n\n## Key Findings\n\n- SubjectA production support began in 2026. [1.1]\n',
+      brief: sharedBrief,
+      gaps: sharedGaps,
+      findings: [{
+        question: query,
+        sources: [{ title: 'A', url: 'https://docs.example.com/a', content: body, fetchStatus: 'ok', contentOrigin: 'fetched', engine: 'searxng' }],
+      }],
+      sources: [{
+        id: 's1',
+        title: 'A',
+        url: 'https://docs.example.com/a',
+        content: body,
+        fetchStatus: 'ok',
+        contentOrigin: 'fetched',
+        engine: 'searxng',
+      }],
+      quality: {
+        schemaVersion: 3,
+        gate: 'pass',
+        flags: [],
+        budget: { usage: { llmTokens: 8000, searchRequests: 3, sourceReads: 2, rerankRequests: 0 }, stopReason: 'evidence_sufficient' },
+      },
+      trace: [{ step: 1, action: 'search', strategy: 'focused' }],
+    };
+    const quickResult = {
+      ...focusedResult,
+      brief: { ...sharedBrief, depth: 'quick' },
+      gaps: [{ ...sharedGaps[0], status: 'open', slotSupport: null }],
+      findings: [{ question: query, sources: [{ title: 'A', url: 'https://docs.example.com/a', snippet: 'SubjectA snippet', engine: 'searxng' }] }],
+      sources: [{ id: 's1', title: 'A', url: 'https://docs.example.com/a', snippet: 'SubjectA snippet', engine: 'searxng' }],
+      quality: {
+        schemaVersion: 3,
+        gate: 'pass',
+        flags: [],
+        budget: { usage: { llmTokens: 1000, searchRequests: 2, sourceReads: 0, rerankRequests: 0 }, stopReason: null },
+      },
+      report: '# Report\n\n## Summary\n\nSubjectA is documented in snippets only.\n\n## Key Findings\n\n- Snippet-only scan of SubjectA.\n',
+    };
+
+    const focusedArtifacts = saveResearchToWorkDir({
+      settings: { research: { workDir: 'work_dir' } },
+      strategy: 'focused',
+      query,
+      result: focusedResult,
+      researchId: 'roundtrip-focused',
+      cwd,
+      date: new Date('2026-09-01T04:00:00.000Z'),
+    });
+    const quickArtifacts = saveResearchToWorkDir({
+      settings: { research: { workDir: 'work_dir' } },
+      strategy: 'quick',
+      query,
+      result: quickResult,
+      researchId: 'roundtrip-quick',
+      cwd,
+      date: new Date('2026-09-01T04:01:00.000Z'),
+    });
+
+    archiveResearchResult({
+      researchId: 'roundtrip-focused',
+      query,
+      strategy: 'focused',
+      result: focusedResult,
+      artifacts: focusedArtifacts,
+      engine,
+    });
+    archiveResearchResult({
+      researchId: 'roundtrip-quick',
+      query,
+      strategy: 'quick',
+      result: quickResult,
+      artifacts: quickArtifacts,
+      engine,
+    });
+
+    const loaded = loadArtifactsByResearchId('roundtrip-focused', { engine });
+    assert.equal(loaded.brief.contractOrigin, 'planner');
+    assert.deepEqual(loaded.brief.requiredAnswerSlots[0].evidenceCriteria, ['official document']);
+    assert.equal(loaded.gaps[0].slotSupport.verdict, 'supported');
+    assert.equal(loaded.gaps[0].slotSupport.quoteAnchored, true);
+
+    const comparison = await compareStrategySessions({
+      researchIds: ['roundtrip-quick', 'roundtrip-focused'],
+      engine,
+      llmEnabled: false,
+    });
+    assert.equal(comparison.runs[0].audit.processContract.checks.find((item) => item.id === 'source_reads_zero')?.pass, true);
+    assert.equal(comparison.runs[1].audit.processContract.checks.find((item) => item.id === 'source_reads_at_least_one')?.pass, true);
+    assert.equal(resolveStrategyLabel(loaded), 'focused');
   });
 });

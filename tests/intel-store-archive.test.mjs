@@ -51,7 +51,19 @@ describe('intel store archive', () => {
           { title: 'B', url: 'https://a.test', snippet: 'dup' },
           { title: 'C', url: '', snippet: 'no url' },
         ],
-        gaps: [{ id: 'gap-1', question: 'Q1', status: 'resolved' }],
+        gaps: [{
+          id: 'gap-1',
+          question: 'Q1',
+          status: 'verified',
+          requiredSlot: true,
+          evidenceCriteria: ['official document'],
+          slotSupport: {
+            verdict: 'supported',
+            quote: 'verbatim body quote for the slot',
+            method: 'llm',
+            quoteAnchored: true,
+          },
+        }],
         passages: [{ id: 'passage-1', sourceId: 'source-1', contentHash: 'hash-1', text: 'Evidence' }],
         claims: [{ id: 'claim-1', text: 'Claim', evidence: [{ passageId: 'passage-1', sourceId: 'source-1', verdict: 'supported' }] }],
         brief: {
@@ -59,6 +71,13 @@ describe('intel store archive', () => {
           query: 'What is LLM Wiki?',
           depth: 'focused',
           exclusions: ['forums'],
+          contractOrigin: 'planner',
+          requiredAnswerSlots: [{
+            id: 'status',
+            answerSlot: 'status',
+            question: 'What is supported?',
+            evidenceCriteria: ['official document'],
+          }],
         },
         quality: {
           schemaVersion: 3,
@@ -119,6 +138,10 @@ describe('intel store archive', () => {
     assert.equal(loaded.trace.length, 1);
     assert.equal(loaded.brief.schemaVersion, 1);
     assert.deepEqual(loaded.brief.exclusions, ['forums']);
+    assert.equal(loaded.brief.contractOrigin, 'planner');
+    assert.deepEqual(loaded.brief.requiredAnswerSlots[0].evidenceCriteria, ['official document']);
+    assert.equal(loaded.gaps[0].slotSupport.verdict, 'supported');
+    assert.equal(loaded.gaps[0].slotSupport.quoteAnchored, true);
     assert.equal(run.researchBrief.schemaVersion, 1);
 
     archiveResearchResult({

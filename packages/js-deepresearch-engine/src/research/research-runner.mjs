@@ -15,7 +15,7 @@ import { createResearchProviders } from './research-providers.mjs';
 import { calculateQualityMetrics, qualityGateFromClaims } from './claim-quality.mjs';
 import { applyClaimEntailment } from './claim-entailment.mjs';
 import { researchBriefFromInput } from './research-brief.mjs';
-import { evaluateGapEvidence } from './gap-state.mjs';
+import { collectGapSources, evaluateGapEvidence, rollupRootGap } from './gap-state.mjs';
 
 export class ResearchRunner {
   async run({ query, settings, signal, onProgress = () => {}, llm: providedLlm, search: providedSearch }) {
@@ -116,9 +116,18 @@ export class ResearchRunner {
     const snippetLimitation = (strategy === 'focused' || strategy === 'exploratory') && snippetOnlyKeys.length
       ? `Sources ${snippetOnlyKeys.map((key) => `[${key}]`).join(', ')} are search snippets only and cannot verify Summary or Key Findings facts. Mark those facts Unverified or move them to Caveats.`
       : null;
+    const earlyContractUnavailable = Boolean(
+      focusedControl?.contractUnavailable
+      || focusedControl?.profile?.contractUnavailable
+      || exploratoryLoop?.profile?.contractUnavailable,
+    );
+    const contractLimitation = earlyContractUnavailable
+      ? 'The research contract could not be planned; required slots were not available to verify.'
+      : null;
     const reportLimitations = [
       ...preReport.limitations,
       ...(budgetLimitation ? [budgetLimitation] : []),
+      ...(contractLimitation ? [contractLimitation] : []),
       ...(degradedLimitation ? [degradedLimitation] : []),
       ...(snippetLimitation ? [snippetLimitation] : []),
       ...(unresolvedLimitation ? [unresolvedLimitation] : []),
@@ -154,13 +163,16 @@ export class ResearchRunner {
     if (tracksGaps) {
       gaps = gaps.map((gap) => evaluateGapEvidence(
         gap,
-        findings.filter((finding) => finding.gapId === gap.id).flatMap((finding) => finding.sources || []),
+        collectGapSources(gap, findings),
         {
           passageIds: findings
             .filter((finding) => finding.gapId === gap.id)
             .flatMap((finding) => finding.passageIds || []),
+          passages: passageArtifacts.passages,
+          slotSupport: gap.slotSupport,
         },
       ));
+      rollupRootGap(gaps);
     }
     let narrativeDraft = await buildReport({
       llm, query, findings, signal, purpose: 'report', limitations: reportLimitations, strategy,
@@ -264,6 +276,13 @@ export class ResearchRunner {
     const finalGate = preReport.gate === 'fail' || claimGate === 'fail' || emptyExtraction
       ? 'fail'
       : (preReport.gate === 'pass_with_warnings' || claimGate === 'pass_with_warnings' || noClaims ? 'pass_with_warnings' : 'pass');
+    const controlProfile = focusedControl?.profile || exploratoryLoop?.profile || {};
+    const contractUnavailable = Boolean(
+      controlProfile.contractUnavailable || focusedControl?.contractUnavailable,
+    );
+    const slotSupportUnknown = gaps.some((gap) => (
+      gap?.slotSupport?.method === 'fail_closed' || gap?.slotSupport?.verdict === 'unverifiable'
+    ));
     const quality = {
       schemaVersion: 3,
       stopReason: budget.controllerStopReason || null,
@@ -276,13 +295,17 @@ export class ResearchRunner {
         ...preReport.flags,
         ...focusedFailures.map((failure) => failure.code).filter(Boolean),
         ...(budgetLimitation ? ['budget_exhausted'] : []),
+        ...(controlProfile.contractRetried ? ['contract_plan_retried'] : []),
+        ...(contractUnavailable ? ['contract_unavailable'] : []),
+        ...(slotSupportUnknown ? ['slot_support_unknown'] : []),
         ...(noClaims ? ['no_claims'] : []),
         ...(unverifiedKeyClaims.length ? ['unverified_key_claims'] : []),
       ],
       limitations: [
         ...preReport.limitations,
-        ...(budgetLimitation ? [budgetLimitation] : []),
-        ...(unresolvedLimitation ? [unresolvedLimitation] : []),
+      ...(budgetLimitation ? [budgetLimitation] : []),
+      ...(contractLimitation ? [contractLimitation] : []),
+      ...(unresolvedLimitation ? [unresolvedLimitation] : []),
         ...(blockedHostLimitation ? [blockedHostLimitation] : []),
         ...(secondaryLimitation ? [secondaryLimitation] : []),
         ...(unsupportedLimitation ? [unsupportedLimitation] : []),

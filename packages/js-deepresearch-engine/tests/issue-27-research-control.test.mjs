@@ -18,14 +18,30 @@ import { renderSourcesSection } from '../src/research/report-assembler.mjs';
 import { buildStrategyContext } from '../src/research/strategy-context.mjs';
 import { rollupRootGap } from '../src/research/gap-state.mjs';
 
+const BODY_QUOTE = 'A sufficiently detailed fetched source body containing direct evidence for this alpha and beta answer slot.';
+
 function body(url, extra = {}) {
   return {
     title: url,
     url,
-    content: 'A sufficiently detailed fetched source body containing direct evidence for this alpha and beta answer slot.',
+    content: BODY_QUOTE,
     fetchStatus: 'ok',
     ...extra,
   };
+}
+
+function gapSupportResponse(messages, { supported = true } = {}) {
+  const text = (messages || []).map((item) => item.content).join('\n');
+  const gapIds = [...new Set([...text.matchAll(/gapId:\s+(gap-\S+)/g)].map((match) => match[1]))];
+  const ids = gapIds.length ? gapIds : ['gap-2'];
+  return JSON.stringify({
+    judgments: ids.map((gapId) => ({
+      gapId,
+      verdict: supported && text.includes(BODY_QUOTE) ? 'supported' : 'unsupported',
+      quote: BODY_QUOTE,
+      reason: 'test slot support',
+    })),
+  });
 }
 
 function context(overrides = {}) {
@@ -248,7 +264,7 @@ describe('Issue #27 structured research control', () => {
     const calls = [];
     const ctx = context({
       llm: {
-        async complete({ purpose }) {
+        async complete({ purpose, messages }) {
           if (purpose === 'research_profile') {
             return JSON.stringify({
               minIndependentSources: 1,
@@ -258,6 +274,7 @@ describe('Issue #27 structured research control', () => {
               ],
             });
           }
+          if (purpose === 'gap_support') return gapSupportResponse(messages);
           return '[]';
         },
       },
@@ -383,7 +400,12 @@ describe('Issue #27 structured research control', () => {
           { answerSlot: 'beta', question: 'beta evidence', priority: 'normal' },
         ],
       }),
-      llm: { async complete() { return '{}'; } },
+      llm: {
+        async complete({ purpose, messages }) {
+          if (purpose === 'gap_support') return gapSupportResponse(messages);
+          return '{}';
+        },
+      },
       search: {
         id: 'test',
         async search(query) {
@@ -492,6 +514,13 @@ describe('Issue #27 structured research control', () => {
     const twoWave = context({
       iterations: 2,
       questionCount: 1,
+      brief: researchBriefFromInput({
+        query: 'compare alpha and beta',
+        requiredAnswerSlots: [
+          { answerSlot: 'alpha', question: 'alpha evidence', priority: 'normal' },
+          { answerSlot: 'beta', question: 'beta evidence', priority: 'normal' },
+        ],
+      }),
       settings: {
         research: {
           focused: {
@@ -503,7 +532,7 @@ describe('Issue #27 structured research control', () => {
           },
         },
       },
-      llm: { async complete() { return JSON.stringify(['follow-up question']); } },
+      llm: { async complete() { return '{}'; } },
       search: {
         async search(query) {
           return [{ title: query, url: `https://example.com/${encodeURIComponent(query)}`, snippet: 's' }];
@@ -511,7 +540,8 @@ describe('Issue #27 structured research control', () => {
       },
     });
     const twoWaveFindings = await runFocusedPipeline(twoWave);
-    assert.deepEqual(twoWaveFindings.map((finding) => finding.wave), ['discovery', 'discovery', 'repair']);
+    assert.ok(twoWaveFindings.some((finding) => finding.wave === 'discovery'));
+    assert.ok(twoWaveFindings.some((finding) => finding.wave === 'repair'));
 
     const early = context({
       iterations: 3,
@@ -529,7 +559,12 @@ describe('Issue #27 structured research control', () => {
           },
         },
       },
-      llm: { async complete() { return '{}'; } },
+      llm: {
+        async complete({ purpose, messages }) {
+          if (purpose === 'gap_support') return gapSupportResponse(messages);
+          return '{}';
+        },
+      },
       search: { async search() { return [body('https://alpha.example.com/ok')]; } },
     });
     await runFocusedPipeline(early);
@@ -539,6 +574,10 @@ describe('Issue #27 structured research control', () => {
     const noContinue = context({
       iterations: 3,
       questionCount: 1,
+      brief: researchBriefFromInput({
+        query: 'compare alpha and beta',
+        requiredAnswerSlots: [{ answerSlot: 'alpha', question: 'alpha evidence', priority: 'critical' }],
+      }),
       settings: {
         research: {
           focused: {
@@ -556,7 +595,7 @@ describe('Issue #27 structured research control', () => {
           },
         },
       },
-      llm: { async complete() { return JSON.stringify(['follow-up question']); } },
+      llm: { async complete() { return '{}'; } },
       search: {
         async search(query) {
           return [{ title: query, url: `https://example.com/${encodeURIComponent(query)}`, snippet: 's' }];
@@ -688,7 +727,20 @@ describe('Issue #27 structured research control', () => {
       llm: {
         async complete({ purpose }) {
           if (purpose === 'agent_decision') return JSON.stringify(decisions.shift());
-          if (purpose === 'research_profile') return '{}';
+          if (purpose === 'research_profile') {
+            return JSON.stringify({
+              requiredAnswerSlots: [{ answerSlot: 'topic', question: 'topic evidence', priority: 'normal' }],
+              minIndependentSources: 1,
+            });
+          }
+          if (purpose === 'gap_support') {
+            return JSON.stringify({
+              judgments: [{
+                verdict: 'supported',
+                quote: 'A successful exploratory body for novelty accounting.',
+              }],
+            });
+          }
           return '# Research Report\n\n## Summary\n\nPer-query novelty is recorded without treating a later duplicate as new yield. [1.1]\n\n## Key Findings\n\nThe second query that reused the same URL did not inflate novelty.\n\n## Caveats\n\nThe test evidence is intentionally limited and should not be treated as complete.';
         },
       },
@@ -697,5 +749,80 @@ describe('Issue #27 structured research control', () => {
     assert.ok(marginal.searchCount >= 2);
     assert.ok(Number.isFinite(marginal.duplicateQueryCount));
     assert.ok(Number.isFinite(marginal.recentNewIndependentSources));
+  });
+
+  it('does not close a required slot or root from unrelated long body text', async () => {
+    const ctx = context({
+      brief: researchBriefFromInput({
+        query: 'compare SubjectA and SubjectB',
+        requiredAnswerSlots: [{ answerSlot: 'SubjectA', question: 'SubjectA official status', priority: 'critical' }],
+      }),
+      settings: {
+        research: {
+          focused: {
+            fetchMode: 'disabled',
+            challenge: { enabled: false },
+            sourceSelection: { enabled: false },
+            iterationControl: { enabled: true, minIterations: 1, maxIterations: 3, earlyStop: true },
+          },
+        },
+      },
+      llm: {
+        async complete({ purpose }) {
+          if (purpose === 'gap_support') {
+            return JSON.stringify({
+              judgments: [{
+                gapId: 'gap-2',
+                verdict: 'unsupported',
+                quote: 'weather patterns, rainfall totals, and agricultural cycles without mentioning',
+              }],
+            });
+          }
+          return '{}';
+        },
+      },
+      search: {
+        async search() {
+          return [{
+            title: 'weather',
+            url: 'https://news.example.com/weather',
+            content: 'This long article discusses weather patterns, rainfall totals, and agricultural cycles without mentioning SubjectA or SubjectB.',
+            fetchStatus: 'ok',
+          }];
+        },
+      },
+    });
+    const findings = await runFocusedPipeline(ctx);
+    const slot = findings.researchControl.gaps.find((gap) => gap.requiredSlot);
+    assert.notEqual(slot.status, 'verified');
+    assert.equal(findings.researchControl.readiness.pass, false);
+    assert.notEqual(ctx.trace.find((entry) => entry.action === 'focused_stop_decision')?.reasonCode, 'evidence_sufficient');
+  });
+
+  it('keeps quick isolated from profile, slot judge, and readiness', async () => {
+    const purposes = [];
+    const findings = await runQuick({
+      query: 'SubjectA overview',
+      iterations: 1,
+      questionCount: 1,
+      concurrency: 1,
+      emit() {},
+      queryMemory: new QueryMemory({ enabled: false }),
+      search: {
+        async search() {
+          return [{ url: 'https://example.com/a', title: 'A', snippet: 'snippet only' }];
+        },
+      },
+      llm: {
+        async complete({ purpose }) {
+          purposes.push(purpose);
+          return JSON.stringify(['follow-up']);
+        },
+      },
+    });
+    assert.ok(!purposes.includes('research_profile'));
+    assert.ok(!purposes.includes('gap_support'));
+    assert.equal(findings.length >= 1, true);
+    assert.ok(!findings.researchControl);
   });
 });

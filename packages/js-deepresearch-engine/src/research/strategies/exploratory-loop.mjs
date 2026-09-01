@@ -4,7 +4,9 @@ import { applyExploratoryBudget, effectiveExploratoryMaxSteps, resolveExplorator
 import { decideAdaptiveAction, fallbackAdaptiveAction, evaluateAnswerReadiness, decomposeQuery, pickUnreadCandidates, buildAngleChangeSearch, belowHardCapFrom } from '../adaptive/agent-policy.mjs';
 import { ResearchState } from '../adaptive/research-state.mjs';
 import { classifyResearchQuery } from '../adaptive/exploratory-sufficiency.mjs';
-import { inferResearchProfile, planResearchProfile } from '../adaptive/research-profile.mjs';
+import { inferResearchProfile } from '../adaptive/research-profile.mjs';
+import { applyContractGaps, planAndNormalizeContract } from '../research-contract.mjs';
+import { applySlotSupportJudgments, judgeOpenSlotSupport } from '../gap-slot-support.mjs';
 import { mergeResearchBrief, researchBriefFromInput } from '../research-brief.mjs';
 import { classifyFetchedBody } from '../body-quality.mjs';
 import { inferEvidenceScope, listLocalCorpusChannels } from '../adaptive/source-policy.mjs';
@@ -25,6 +27,7 @@ const STOP_REASONS = {
   budgetExhausted: EXPLORATORY_STOP_REASONS.budgetExhausted,
   safetyCap: EXPLORATORY_STOP_REASONS.safetyCap,
   userCancelled: EXPLORATORY_STOP_REASONS.userCancelled,
+  contractUnavailable: EXPLORATORY_STOP_REASONS.contractUnavailable,
 };
 
 const FINALIZE_ACTIONS = new Set(['answer', 'finalize', 'stop', 'draft']);
@@ -321,6 +324,23 @@ export async function runExploratoryLoop(context) {
     state.addDiary(`${harvest ? 'auto-harvested' : 'read'} ${sourceIds.length} source(s) (${readHostnames.join(', ') || 'unknown hosts'}) for ${finding.gapId}; ${successful} successful bodies`);
     state.actionCosts.record('read', (budget?.usage?.llmTokens || 0) - tokensBefore);
     state.syncGapCoverage();
+    if (successful > 0) {
+      const support = await judgeOpenSlotSupport({
+        llm,
+        signal,
+        query,
+        gaps: state.gaps,
+        findings: state.findings,
+      });
+      applySlotSupportJudgments(state.gaps, support.judgments);
+      state.syncGapCoverage();
+      addTrace(trace, state, 'slot_support', {
+        reasonCode: support.unknown ? 'slot_support_unknown' : 'slot_support_judged',
+        unknown: support.unknown,
+        retried: support.retried,
+        gapIds: support.judgments.map((item) => item.gapId).filter(Boolean),
+      }, budget, support.unknown ? 'degraded' : 'success');
+    }
     addTrace(trace, state, 'read', {
       reasonCode,
       targetGapIds: [finding.gapId],
@@ -334,36 +354,55 @@ export async function runExploratoryLoop(context) {
   }
 
   const profileTokensBefore = budget?.usage?.llmTokens || 0;
-  profile = await planResearchProfile({ llm, query, profile, signal, settings, evidenceScope });
-  profile.brief = mergeResearchBrief(incomingBrief, profile.brief, { query, depth: 'exploratory' });
+  const contract = await planAndNormalizeContract({
+    llm,
+    query,
+    incomingBrief,
+    settings,
+    signal,
+    evidenceScope,
+    depth: 'exploratory',
+  });
+  profile = contract.profile;
   state.profile = profile;
-  state.brief = profile.brief;
+  state.brief = contract.brief;
   state.evidenceScope = profile.evidenceScope || evidenceScope;
-  state.gaps[0] = {
-    ...state.gaps[0],
-    requiredHosts: profile.requiredHosts ?? [],
-    preferredHosts: profile.preferredHosts ?? [],
-    requiredSourceTypes: profile.requiredSourceTypes ?? [],
-    minIndependentSources: profile.minIndependentSources || 1,
-  };
-  for (const slot of profile.brief?.requiredAnswerSlots || []) {
-    if (state.gaps.length >= maxOpenGaps) break;
-    state.addGap(slot.question || slot.answerSlot, slot.priority, {
-      answerSlot: slot.answerSlot,
-      claimFamily: slot.claimFamily,
-      requiredHosts: slot.requiredHosts,
-      requiredSourceTypes: slot.requiredSourceTypes,
-    });
-  }
+  applyContractGaps(state, contract, { maxGaps: maxOpenGaps });
   addTrace(trace, state, 'research_brief_sanitized', {
-    reasonCode: 'planner_output_validated',
+    reasonCode: contract.contractUnavailable ? 'contract_unavailable' : 'planner_output_validated',
     brief: state.brief,
+    contractOrigin: state.brief?.contractOrigin,
+    contractRetried: contract.contractRetried,
+    contractFailure: contract.contractFailure,
   }, budget);
   state.actionCosts.record('reflect', (budget?.usage?.llmTokens || 0) - profileTokensBefore);
 
-  if (queryShape.kind === 'definitional') {
+  if (contract.contractUnavailable) {
+    stopReason = STOP_REASONS.contractUnavailable;
+    addTrace(trace, state, 'stop', { reasonCode: STOP_REASONS.contractUnavailable }, budget, 'failed');
+    budget?.setControllerStopReason?.(stopReason);
+    refreshState();
+    emit({
+      stage: 'research_stopped',
+      reason: stopReason,
+      step: state.step,
+      maxSteps: state.maxSteps,
+    });
+    return attachLoopMeta(state.findings, {
+      stopReason,
+      profile: state.profile,
+      brief: state.brief,
+      gaps: state.gaps,
+      readiness: state.readiness,
+      embeddingTraces: state.embeddingTraces,
+      marginal: state.snapshot().marginal,
+      ...state.unresolvedReportNotes(),
+    });
+  }
+
+  if (queryShape.kind === 'definitional' || contract.slots.length) {
     addTrace(trace, state, 'decompose', {
-      reasonCode: 'decompose_skipped_definitional',
+      reasonCode: contract.slots.length ? 'decompose_skipped_slots' : 'decompose_skipped_definitional',
       targetGapIds: state.gaps.map((gap) => gap.id),
       subQuestionCount: 0,
     }, budget, 'skipped');

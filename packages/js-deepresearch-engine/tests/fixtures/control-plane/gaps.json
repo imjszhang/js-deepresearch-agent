@@ -1,6 +1,6 @@
 [
   {
-    "schemaVersion": 2,
+    "schemaVersion": 3,
     "id": "gap-1",
     "question": "compare alpha and beta safety",
     "kind": "root",
@@ -14,7 +14,7 @@
     "resolutionReason": "All required answer slots were verified."
   },
   {
-    "schemaVersion": 2,
+    "schemaVersion": 3,
     "id": "gap-2",
     "question": "alpha safety",
     "answerSlot": "alpha safety",
@@ -26,10 +26,10 @@
     "supportingPassageIds": ["passage-1"],
     "contradictingPassageIds": [],
     "missingEvidence": [],
-    "resolutionReason": "Deterministic body, source-policy, and independence requirements passed."
+    "resolutionReason": "Required slot is quote-anchored supported and provenance passed."
   },
   {
-    "schemaVersion": 2,
+    "schemaVersion": 3,
     "id": "gap-3",
     "question": "beta safety",
     "answerSlot": "beta safety",
@@ -41,6 +41,6 @@
     "supportingPassageIds": ["passage-2"],
     "contradictingPassageIds": [],
     "missingEvidence": [],
-    "resolutionReason": "Deterministic body, source-policy, and independence requirements passed."
+    "resolutionReason": "Required slot is quote-anchored supported and provenance passed."
   }
 ]

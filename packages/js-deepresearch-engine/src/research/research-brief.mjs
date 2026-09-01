@@ -64,6 +64,7 @@ export function sanitizeAnswerSlots(slots, {
       requiredHosts: allowExplicitHosts ? hosts : hosts.filter((host) => allowedHosts.has(host)),
       requiredSourceTypes: sanitizeSourceTypes(source.requiredSourceTypes),
       successCriteria: uniqueText(source.successCriteria, 8),
+      evidenceCriteria: uniqueText(source.evidenceCriteria, 8),
       requiredSlot: source.requiredSlot !== false,
     });
     if (result.length >= 20) break;
@@ -102,7 +103,24 @@ export function sanitizeResearchBrief(input = {}, {
     successCriteria: uniqueText(source.successCriteria),
     requiredAnswerSlots,
     consequentialClaims: uniqueText(source.consequentialClaims),
+    contractOrigin: text(source.contractOrigin, 40) || null,
   };
+}
+
+export function slotsFromPlannerGaps(gaps = [], { query = '' } = {}) {
+  if (!Array.isArray(gaps) || !gaps.length) return [];
+  return sanitizeAnswerSlots(gaps.map((gap, index) => ({
+    id: gap.id,
+    answerSlot: gap.answerSlot || gap.question || `slot-${index + 1}`,
+    question: gap.question || gap.answerSlot,
+    claimFamily: gap.claimFamily,
+    priority: gap.priority,
+    requiredHosts: gap.requiredHosts,
+    requiredSourceTypes: gap.requiredSourceTypes,
+    successCriteria: gap.successCriteria,
+    evidenceCriteria: gap.evidenceCriteria,
+    requiredSlot: gap.requiredSlot !== false,
+  })), { query, literalHosts: extractLiteralHosts(query), allowExplicitHosts: false });
 }
 
 export function researchBriefFromInput(input, { depth = 'focused' } = {}) {
@@ -123,11 +141,14 @@ export function mergeResearchBrief(base, plan = {}, options = {}) {
   const pickList = (key) => (
     sanitizedBase[key]?.length ? sanitizedBase[key] : (Array.isArray(plan[key]) ? plan[key] : sanitizedBase[key])
   );
-  const plannerSlots = sanitizeAnswerSlots(plan.requiredAnswerSlots, {
-    query: sanitizedBase.query,
-    literalHosts: extractLiteralHosts(sanitizedBase.query),
-    allowExplicitHosts: false,
-  });
+  const plannerSlots = sanitizeAnswerSlots(
+    (plan.requiredAnswerSlots?.length ? plan.requiredAnswerSlots : slotsFromPlannerGaps(plan.gaps, { query: sanitizedBase.query })),
+    {
+      query: sanitizedBase.query,
+      literalHosts: extractLiteralHosts(sanitizedBase.query),
+      allowExplicitHosts: false,
+    },
+  );
   return sanitizeResearchBrief({
     ...sanitizedBase,
     audience: pickScalar('audience'),
@@ -143,6 +164,7 @@ export function mergeResearchBrief(base, plan = {}, options = {}) {
       ? sanitizedBase.requiredAnswerSlots
       : plannerSlots,
     consequentialClaims: pickList('consequentialClaims'),
+    contractOrigin: sanitizedBase.contractOrigin || plan.contractOrigin || null,
   }, {
     query: sanitizedBase.query,
     depth: sanitizedBase.depth,

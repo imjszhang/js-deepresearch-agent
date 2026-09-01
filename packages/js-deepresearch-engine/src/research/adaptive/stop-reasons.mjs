@@ -4,6 +4,7 @@ export const EXPLORATORY_STOP_REASONS = Object.freeze({
   sourceBlocked: 'source_blocked',
   safetyCap: 'safety_cap',
   userCancelled: 'user_cancelled',
+  contractUnavailable: 'contract_unavailable',
 });
 
 const LEGACY_TO_CANONICAL = Object.freeze({
@@ -68,6 +69,7 @@ export function resolveNewRunStopReason(reason, { step = 0, maxSteps = 0, budget
     || normalized === EXPLORATORY_STOP_REASONS.userCancelled
     || normalized === EXPLORATORY_STOP_REASONS.safetyCap
     || normalized === EXPLORATORY_STOP_REASONS.budgetExhausted
+    || normalized === EXPLORATORY_STOP_REASONS.contractUnavailable
   ) {
     return normalized;
   }

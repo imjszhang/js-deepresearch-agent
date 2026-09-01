@@ -7,7 +7,7 @@ import {
   hostnameOf,
 } from './adaptive/source-policy.mjs';
 
-export const GAP_SCHEMA_VERSION = 2;
+export const GAP_SCHEMA_VERSION = 3;
 export const GAP_STATUSES = Object.freeze(['open', 'searched', 'body_read', 'verified', 'conflicting', 'limited']);
 
 function unique(values) {
@@ -45,6 +45,25 @@ function satisfiesRequiredEvidence(source, gap) {
   return true;
 }
 
+export function isRequiredSlot(gap) {
+  return Boolean(gap?.requiredSlot) && !gap?.rollup;
+}
+
+export function needsSemanticClose(gap) {
+  if (gap?.rollup) return false;
+  return Boolean(gap?.requiredSlot) || gap?.kind === 'root';
+}
+
+export function collectGapSources(gap, findings = []) {
+  const dedicatedFindings = findings.filter((finding) => finding.gapId === gap.id);
+  const dedicated = dedicatedFindings.flatMap((finding) => (finding.sources || []).filter(sourceHasBody));
+  if (dedicatedFindings.length) return dedicated;
+  if (isRequiredSlot(gap)) {
+    return findings.flatMap((finding) => (finding.sources || []).filter(sourceHasBody));
+  }
+  return [];
+}
+
 export function normalizeGapRecord(gap = {}, defaults = {}) {
   return {
     ...gap,
@@ -61,13 +80,15 @@ export function normalizeGapRecord(gap = {}, defaults = {}) {
     supportingPassageIds: unique(gap.supportingPassageIds || gap.evidencePassageIds),
     contradictingPassageIds: unique(gap.contradictingPassageIds),
     confidence: Number.isFinite(gap.confidence) ? gap.confidence : null,
+    evidenceCriteria: unique(gap.evidenceCriteria || defaults.evidenceCriteria),
+    slotSupport: gap.slotSupport || defaults.slotSupport || null,
     missingEvidence: unique(gap.missingEvidence),
     nextQueries: unique(gap.nextQueries),
     resolutionReason: gap.resolutionReason || null,
   };
 }
 
-export function evaluateGapEvidence(gap, sources = [], { passageIds = [], passages = [] } = {}) {
+export function evaluateGapProvenance(gap, sources = [], { passageIds = [], passages = [] } = {}) {
   const normalized = normalizeGapRecord(gap);
   const bodies = sources.filter(sourceHasBody);
   const supporting = bodies.filter((source) => !contradicts(source));
@@ -93,39 +114,108 @@ export function evaluateGapEvidence(gap, sources = [], { passageIds = [], passag
   const independent = new Set(supporting.map(evidenceIndependenceKey).filter(Boolean));
   const minIndependent = Math.max(1, Number(normalized.minIndependentSources) || 1);
   if (independent.size < minIndependent) missingEvidence.push('independent_sources');
-
-  let status = normalized.status === 'searched' && !bodies.length ? 'searched' : 'open';
-  let resolutionReason = null;
-  if (contradicting.length) {
-    status = 'conflicting';
-    resolutionReason = 'Contradicting body evidence remains unresolved.';
-  } else if (bodies.length && missingEvidence.length) {
-    status = 'limited';
-    resolutionReason = `Body evidence is incomplete: ${missingEvidence.join(', ')}.`;
-  } else if (bodies.length) {
-    status = 'verified';
-    resolutionReason = 'Deterministic body, source-policy, and independence requirements passed.';
-  }
   return {
     ...normalized,
-    status,
+    bodies,
+    supporting,
+    contradicting,
     supportingPassageIds,
     contradictingPassageIds,
     missingEvidence,
-    confidence: status === 'verified' ? 1 : null,
-    resolutionReason,
+    requiredSatisfied,
   };
 }
 
-export function isRequiredSlot(gap) {
-  return Boolean(gap?.requiredSlot) && !gap?.rollup;
+export function synthesizeGapStatus(gap, provenance = {}, slotSupport = null) {
+  const support = slotSupport || provenance.slotSupport || gap.slotSupport || null;
+  const missingEvidence = unique(provenance.missingEvidence);
+  const base = {
+    ...normalizeGapRecord(gap),
+    supportingPassageIds: unique([
+      ...(provenance.supportingPassageIds || []),
+      ...(support?.supportingPassageIds || []),
+    ]),
+    contradictingPassageIds: unique([
+      ...(provenance.contradictingPassageIds || []),
+      ...(support?.contradictingPassageIds || []),
+    ]),
+    slotSupport: support,
+    missingEvidence,
+    confidence: null,
+    resolutionReason: null,
+  };
+
+  const searched = base.status === 'searched' || (gap.searchedQueries || []).length > 0;
+  if (!(provenance.bodies || []).length) {
+    return {
+      ...base,
+      status: searched ? 'searched' : 'open',
+      resolutionReason: null,
+    };
+  }
+  if ((provenance.contradicting || []).length || support?.verdict === 'conflicting') {
+    return {
+      ...base,
+      status: 'conflicting',
+      resolutionReason: 'Contradicting body evidence remains unresolved.',
+    };
+  }
+  if (missingEvidence.length) {
+    return {
+      ...base,
+      status: 'limited',
+      resolutionReason: `Body evidence is incomplete: ${missingEvidence.join(', ')}.`,
+    };
+  }
+  if (needsSemanticClose(gap) || isRequiredSlot(gap)) {
+    const anchored = Boolean(support?.quoteAnchored && support?.method === 'llm');
+    if (support?.verdict === 'supported' && anchored) {
+      return {
+        ...base,
+        status: 'verified',
+        missingEvidence: [],
+        confidence: 1,
+        resolutionReason: 'Required slot is quote-anchored supported and provenance passed.',
+      };
+    }
+    if (support?.verdict === 'partially_supported' && anchored) {
+      return {
+        ...base,
+        status: 'body_read',
+        missingEvidence: unique([...missingEvidence, 'slot_partial']),
+        resolutionReason: 'Body evidence only partially supports the required slot.',
+      };
+    }
+    return {
+      ...base,
+      status: 'body_read',
+      missingEvidence: unique([...missingEvidence, 'slot_support']),
+      resolutionReason: 'Body was read but the slot is not quote-anchored supported.',
+    };
+  }
+  return {
+    ...base,
+    status: 'verified',
+    missingEvidence: [],
+    confidence: 1,
+    resolutionReason: 'Deterministic body, source-policy, and independence requirements passed.',
+  };
+}
+
+export function evaluateGapEvidence(gap, sources = [], {
+  passageIds = [],
+  passages = [],
+  slotSupport,
+} = {}) {
+  const provenance = evaluateGapProvenance(gap, sources, { passageIds, passages });
+  return synthesizeGapStatus(gap, provenance, slotSupport ?? gap.slotSupport);
 }
 
 export function isMaterialGap(gap) {
   if (gap?.rollup) return false;
   return isRequiredSlot(gap)
     || gap?.priority === 'critical'
-    || ['open', 'searched', 'conflicting', 'limited'].includes(gap?.status);
+    || ['open', 'searched', 'conflicting', 'limited', 'body_read'].includes(gap?.status);
 }
 
 export function rollupRootGap(gaps = []) {

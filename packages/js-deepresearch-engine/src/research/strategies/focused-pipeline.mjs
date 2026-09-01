@@ -1,4 +1,3 @@
-import { generateQuestions } from '../question-generator.mjs';
 import { searchQuestion } from '../search-executor.mjs';
 import { enrichFindings } from '../source-enricher.mjs';
 import { resolveFocusedSettings } from '../focused-settings.mjs';
@@ -6,12 +5,12 @@ import { resolveReadSettings } from '../read-settings.mjs';
 import { filterFindingsByRelevance } from '../source-relevance-filter.mjs';
 import { applySourceSelection } from '../source-candidates.mjs';
 import { ResearchState } from '../adaptive/research-state.mjs';
-import { inferResearchProfile, planResearchProfile } from '../adaptive/research-profile.mjs';
 import { evaluateReadinessGate, repairGapsFromGate } from '../adaptive/readiness-gate.mjs';
 import { isMaterialGap } from '../gap-state.mjs';
+import { applySlotSupportJudgments, judgeOpenSlotSupport } from '../gap-slot-support.mjs';
 import { normalizeSourceUrl } from '../source-candidates.mjs';
 import { resolveStrategyConcurrency } from '../strategy-utils.mjs';
-import { mergeResearchBrief, researchBriefFromInput } from '../research-brief.mjs';
+import { applyContractGaps, planAndNormalizeContract } from '../research-contract.mjs';
 import { isSuccessfulBody } from '../body-quality.mjs';
 
 function addTrace(trace, action, fields = {}) {
@@ -102,9 +101,26 @@ async function enrichWave(findings, context, focused, readPolicy) {
   }));
 }
 
-function syncState(state, findings) {
+async function syncState(state, findings, { llm, signal, query, trace } = {}) {
   state.findings = findings;
   state.syncGapCoverage();
+  const support = await judgeOpenSlotSupport({
+    llm,
+    signal,
+    query: query || state.query,
+    gaps: state.gaps,
+    findings,
+  });
+  applySlotSupportJudgments(state.gaps, support.judgments);
+  state.syncGapCoverage();
+  if (trace && support.judgments.length) {
+    addTrace(trace, 'slot_support', {
+      reasonCode: support.unknown ? 'slot_support_unknown' : 'slot_support_judged',
+      unknown: support.unknown,
+      retried: support.retried,
+      gapIds: support.judgments.map((item) => item.gapId).filter(Boolean),
+    });
+  }
   return evaluateReadinessGate({
     query: state.query,
     findings,
@@ -173,49 +189,55 @@ export async function runFocusedPipeline(context) {
 
   const focused = resolveFocusedSettings(settings);
   const readPolicy = resolveReadSettings(settings, { strategy: 'focused' });
-  const incomingBrief = context.brief || researchBriefFromInput(query, { depth: 'focused' });
-  let profile = inferResearchProfile({ ...incomingBrief, query }, { settings, depth: 'focused' });
-  profile.brief = mergeResearchBrief(incomingBrief, profile.brief, { query, depth: 'focused' });
-  profile = await planResearchProfile({ llm, query, profile, signal, settings });
-  profile.brief = mergeResearchBrief(incomingBrief, profile.brief, { query, depth: 'focused' });
-  const brief = profile.brief;
+  const contract = await planAndNormalizeContract({
+    llm,
+    query,
+    incomingBrief: context.brief,
+    settings,
+    signal,
+    depth: 'focused',
+  });
+  const { profile, brief, slots } = contract;
   addTrace(trace, 'research_brief_sanitized', {
-    reasonCode: 'planner_output_validated',
+    reasonCode: contract.contractUnavailable ? 'contract_unavailable' : 'planner_output_validated',
     brief,
+    contractOrigin: brief.contractOrigin,
+    contractRetried: contract.contractRetried,
+    contractFailure: contract.contractFailure,
   });
   const state = new ResearchState({ query, profile, brief, settings, budget });
-  const plannedSlots = [
-    ...(brief.requiredAnswerSlots.length ? brief.requiredAnswerSlots : (profile.plannedGaps || [])),
-  ];
-  const explicitSlots = plannedSlots.length > 0;
-  if (!plannedSlots.length) {
-    emit({ stage: 'generating_questions', iteration: 1, iterations: 2 });
-    const questions = await generateQuestions({ llm, query, count: questionCount, signal, mode: 'initial' });
-    plannedSlots.push(...questions.map((question) => ({
-      question,
-      answerSlot: question,
-      priority: 'normal',
-      requiredSlot: false,
-    })));
-  }
-  if (explicitSlots) {
-    state.gaps[0].rollup = true;
-    state.gaps[0].kind = 'root';
-  }
-  const gapCap = explicitSlots
-    ? Math.max(plannedSlots.length + 1, questionCount + 1)
-    : Math.max(2, questionCount + 1);
-  for (const slot of plannedSlots) {
-    if (state.gaps.length >= gapCap) break;
-    state.addGap(slot.question || slot.answerSlot, slot.priority || 'normal', {
-      answerSlot: slot.answerSlot,
-      claimFamily: slot.claimFamily,
-      requiredHosts: slot.requiredHosts,
-      requiredSourceTypes: slot.requiredSourceTypes,
-      requiredSlot: slot.requiredSlot !== false && explicitSlots,
-      kind: explicitSlots ? 'slot' : 'followup',
+  if (contract.contractUnavailable) {
+    const gate = evaluateReadinessGate({
+      query,
+      findings: [],
+      gaps: state.gaps,
+      profile,
+      state,
+    });
+    addTrace(trace, 'focused_stop_decision', {
+      reasonCode: 'contract_unavailable',
+      readinessPass: false,
+      failures: gate.failures,
+    });
+    budget?.setControllerStopReason?.('contract_unavailable');
+    return attachControl([], {
+      schemaVersion: 1,
+      brief,
+      profile,
+      gaps: state.gaps,
+      readiness: gate,
+      contractUnavailable: true,
+      marginal: {
+        newIndependentSources: 0,
+        duplicateResultRatio: 0,
+        materialGapsClosed: 0,
+        plateau: false,
+      },
     });
   }
+  applyContractGaps(state, contract, {
+    maxGaps: Math.max(slots.length + 1, questionCount + 1),
+  });
 
   let findings = [];
   const executeWave = async (wave, targets, queryFor = (gap) => gap.question) => {
@@ -272,7 +294,7 @@ export async function runFocusedPipeline(context) {
   };
 
   await executeWave('discovery', searchableGaps(state));
-  let gate = syncState(state, findings);
+  let gate = await syncState(state, findings, { llm, signal, query, trace });
   addTrace(trace, 'readiness_gate', {
     reasonCode: gate.pass ? 'evidence_sufficient' : 'repair_required',
     strategy: 'focused',
@@ -319,7 +341,7 @@ export async function runFocusedPipeline(context) {
     const gapsBeforeRepair = state.gaps.map((gap) => ({ ...gap }));
     const bodyUrlsBeforeRepair = bodyUrlsFromFindings(findings);
     await executeWave('repair', repairTargets, (gap) => gap.nextQueries[0]);
-    gate = syncState(state, findings);
+    gate = await syncState(state, findings, { llm, signal, query, trace });
     latestMarginal = waveMetrics(bodyUrlsBeforeRepair, findings, gapsBeforeRepair, state.gaps);
     consecutiveLowYield = latestMarginal.plateau ? consecutiveLowYield + 1 : 0;
     addTrace(trace, 'plateau_evaluated', {
@@ -335,7 +357,7 @@ export async function runFocusedPipeline(context) {
     : [];
   if (challengeTargets.length && (!budget || budget.canClaim('searchRequests'))) {
     await executeWave('challenge', challengeTargets, (gap) => gapQuery(gap, query, 'challenge'));
-    gate = syncState(state, findings);
+    gate = await syncState(state, findings, { llm, signal, query, trace });
     addTrace(trace, 'challenge_completed', {
       reasonCode: 'bounded_consequential_claim_challenge',
       targetGapIds: challengeTargets.map((gap) => gap.id),
@@ -357,12 +379,15 @@ export async function runFocusedPipeline(context) {
     });
   }
 
+  const stopReason = gate.pass ? 'evidence_sufficient' : 'budget_exhausted';
   addTrace(trace, 'focused_stop_decision', {
     reasonCode: gate.pass ? 'evidence_sufficient' : (latestMarginal.plateau ? 'plateau_with_open_gaps' : 'budget_or_wave_limit'),
     readinessPass: gate.pass,
     plateau: latestMarginal.plateau,
     failures: gate.failures,
+    stopReason,
   });
+  budget?.setControllerStopReason?.(stopReason);
 
   if (focused.enableRelevanceFilter) {
     emit({ stage: 'filtering_sources' });

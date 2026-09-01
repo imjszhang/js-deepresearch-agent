@@ -38,7 +38,7 @@ describe('exploratory budget snapshot and sufficiency', () => {
     assert.equal(snapshot.budget.reservedReportTokens, 0);
     assert.equal(snapshot.budget.hardCapReached, false);
     assert.ok(snapshot.budget.actionCostEstimates.read.estimatedTokens > 0);
-    assert.equal(snapshot.sufficiency.sufficient, true);
+    assert.equal(snapshot.sufficiency.sufficient, false);
     assert.equal(view.reservedReportTokens, 0);
     assert.ok(estimateReportPromptTokens({ query: state.query, findings: state.findings }) > 0);
   });

@@ -117,6 +117,42 @@ export function claimEntailmentPrompt({ claim, passages = [] }) {
   ];
 }
 
+export function gapSlotSupportPrompt({ query, slots = [], compact = false } = {}) {
+  const slotBlock = slots.map(({ gap, passages = [] }, index) => {
+    const passageBlock = passages.map((passage, passageIndex) => (
+      `[${gap.id}:P${passageIndex + 1} id=${passage.id}] ${passage.text}`
+    )).join('\n\n');
+    return [
+      `Slot ${index + 1}`,
+      `gapId: ${gap.id}`,
+      `answerSlot: ${gap.answerSlot || gap.question}`,
+      `question: ${gap.question}`,
+      gap.evidenceCriteria?.length ? `evidenceCriteria: ${gap.evidenceCriteria.join('; ')}` : '',
+      `passages:\n${passageBlock}`,
+    ].filter(Boolean).join('\n');
+  }).join('\n\n');
+  const schema = compact
+    ? '{"judgments":[{"gapId":"...","verdict":"supported|partially_supported|unsupported|unverifiable|conflicting","quote":"...","supportingPassageIds":[],"reason":"..."}]}'
+    : '{"judgments":[{"gapId":"...","answerSlot":"...","verdict":"supported|partially_supported|unsupported|unverifiable|conflicting","quote":"...","supportingPassageIds":[],"contradictingPassageIds":[],"reason":"..."}]}';
+  return [
+    {
+      role: 'system',
+      content: [
+        'Judge whether the successful source-body passages support each required answer slot for THIS query.',
+        `Return JSON only: ${schema}`,
+        'supported: a passage clearly answers the slot. partially_supported: only part of the slot is answered.',
+        'unsupported: passages do not answer the slot. conflicting: passages disagree. unverifiable: cannot decide.',
+        'quote must be a verbatim excerpt copied from one provided passage. Do not invent quotes.',
+        'Do not use search snippets. Embedding scores are only for ranking, not for closing a slot.',
+      ].join(' '),
+    },
+    {
+      role: 'user',
+      content: `Query:\n${query}\n\n${slotBlock}`,
+    },
+  ];
+}
+
 export function reportRetryPrompt({
   query,
   findings,

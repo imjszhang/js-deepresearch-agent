@@ -58,14 +58,18 @@ export {
   sanitizeAnswerSlots,
   researchBriefFromInput,
   mergeResearchBrief,
+  slotsFromPlannerGaps,
 } from './research/research-brief.mjs';
 export {
   GAP_SCHEMA_VERSION,
   GAP_STATUSES,
   normalizeGapRecord,
   evaluateGapEvidence,
+  evaluateGapProvenance,
+  synthesizeGapStatus,
   isMaterialGap,
   isRequiredSlot,
+  needsSemanticClose,
   rollupRootGap,
 } from './research/gap-state.mjs';
 export { normalizeSourceUrl, selectDiverseSources, SourceCandidatePool, isPrimarySource, sourceDiversityKey, isFileSourceUrl } from './research/source-candidates.mjs';
@@ -100,7 +104,17 @@ export {
   detectDocumentFormat,
   convertDocumentToMarkdown,
 } from './research/document-converter.mjs';
-export { inferResearchProfile, sanitizeEvidenceProfile } from './research/adaptive/research-profile.mjs';
+export {
+  inferResearchProfile,
+  sanitizeEvidenceProfile,
+  planResearchProfile,
+  hasUsableResearchContract,
+} from './research/adaptive/research-profile.mjs';
+export {
+  judgeOpenSlotSupport,
+  applySlotSupportJudgments,
+  failClosedSupport,
+} from './research/gap-slot-support.mjs';
 export { evaluateReadinessGate } from './research/adaptive/readiness-gate.mjs';
 export {
   classifySourceTier,

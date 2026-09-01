@@ -8,24 +8,48 @@ function report() {
   return '# Research Report\n\n## Summary\n\nThe selected source provides enough evidence to answer the requested topic while keeping the agent source choice visible. [1.1]\n\n## Key Findings\n\nThe selected source provides evidence for the requested topic and preserves agent source choice. [1.1]';
 }
 
+function defaultContractProfile(extra = {}) {
+  return JSON.stringify({
+    requiredAnswerSlots: [{ answerSlot: 'topic', question: 'topic evidence', priority: 'normal' }],
+    minIndependentSources: 1,
+    ...extra,
+  });
+}
+
+function defaultGapSupport(messages) {
+  const text = (messages || []).map((item) => item.content).join('\n');
+  const gapIds = [...new Set([...text.matchAll(/gapId:\s+(gap-\S+)/g)].map((match) => match[1]))];
+  const quote = (text.match(/\] ([^\n]+)/) || [])[1] || '';
+  return JSON.stringify({
+    judgments: (gapIds.length ? gapIds : ['gap-2']).map((gapId) => ({
+      gapId,
+      verdict: quote.length >= 12 ? 'supported' : 'unverifiable',
+      quote,
+      reason: 'test default support',
+    })),
+  });
+}
+
 function llmFor(decisions, {
   onEvaluation = () => report(),
   onDecompose = () => 'no json here',
-  onProfile = () => '{}',
+  onProfile = () => defaultContractProfile(),
+  onGapSupport = defaultGapSupport,
 } = {}) {
   return {
-    async complete({ purpose }) {
+    async complete({ purpose, messages }) {
       if (purpose === 'agent_decision') return JSON.stringify(decisions.shift());
       if (purpose === 'answer_evaluation') return onEvaluation();
       if (purpose === 'gap_decomposition') return onDecompose();
       if (purpose === 'research_profile') return onProfile();
+      if (purpose === 'gap_support') return onGapSupport(messages);
       return report();
     },
   };
 }
 
 function keepExploringProfile() {
-  return JSON.stringify({ minIndependentSources: 2 });
+  return defaultContractProfile({ minIndependentSources: 2 });
 }
 
 describe('exploratory agent loop', () => {
@@ -317,6 +341,8 @@ describe('exploratory agent loop', () => {
       'answer_gate_failed',
       'readiness_gate_failed',
       'critical_gap_open',
+      'required_slot_open',
+      'no_successful_body',
     ].includes(retry.reasonCode));
     assert.ok(result.trace.some((entry) => entry.action === 'read' && entry.reasonCode === 'improve_evidence'));
   });
@@ -375,6 +401,7 @@ describe('exploratory agent loop', () => {
       } },
       llm: llmFor(decisions, {
         onDecompose: () => JSON.stringify({ subQuestions: ['How does ollama work?', 'How does llama.cpp work?'] }),
+        onProfile: () => JSON.stringify({ requiredHosts: ['docs.example.com'] }),
       }),
     });
 
@@ -411,6 +438,8 @@ describe('exploratory agent loop', () => {
           return JSON.stringify(decisions.shift());
         }
         if (purpose === 'gap_decomposition') return 'no json';
+        if (purpose === 'research_profile') return defaultContractProfile();
+        if (purpose === 'gap_support') return defaultGapSupport(messages);
         return report();
       } },
     });
@@ -435,9 +464,11 @@ describe('exploratory agent loop', () => {
         { title: 'A', url: 'https://auto-a.test/page', content: 'Auto topic evidence from a selected source.', fetchStatus: 'ok' },
         { title: 'B', url: 'https://auto-b.test/page', content: 'More auto topic evidence from another host.', fetchStatus: 'ok' },
       ]; } },
-      llm: { async complete({ purpose }) {
+      llm: { async complete({ purpose, messages }) {
         if (purpose === 'agent_decision') { decisionCalls += 1; return JSON.stringify(decisions.shift()); }
         if (purpose === 'gap_decomposition') return 'no json';
+        if (purpose === 'research_profile') return defaultContractProfile();
+        if (purpose === 'gap_support') return defaultGapSupport(messages);
         return report();
       } },
     });
@@ -459,6 +490,7 @@ describe('exploratory agent loop', () => {
 
     const decisions = [
       { action: 'search', query: 'extract topic', gapId: 'gap-1', reasonCode: 'search' },
+      { action: 'read', sourceIds: ['https://extract.test/page'], gapId: 'gap-1', reasonCode: 'read' },
       { action: 'answer', reasonCode: 'done' },
     ];
     const purposes = [];
@@ -477,10 +509,12 @@ describe('exploratory agent loop', () => {
         },
       } },
       search: { async search() { return [{ title: 'Extract', url: 'https://extract.test/page', snippet: 'snippet', content: 'Extract topic evidence from a selected source.', fetchStatus: 'ok' }]; } },
-      llm: { async complete({ purpose }) {
+      llm: { async complete({ purpose, messages }) {
         purposes.push(purpose);
         if (purpose === 'agent_decision') return JSON.stringify(decisions.shift());
         if (purpose === 'gap_decomposition') return 'no json';
+        if (purpose === 'research_profile') return defaultContractProfile();
+        if (purpose === 'gap_support') return defaultGapSupport(messages);
         if (purpose === 'source_summary') throw new Error('extract mode should not call source_summary');
         return report();
       } },
@@ -609,13 +643,15 @@ describe('exploratory agent loop', () => {
       } },
       search: { async search() { return [{ title: 'First', url: 'https://first.test', snippet: 'gathered evidence' }]; } },
       llm: {
-        async complete({ purpose }) {
+        async complete({ purpose, messages }) {
           if (purpose === 'agent_decision') {
             decisionCalls += 1;
             return JSON.stringify(decisions.shift());
           }
           if (purpose === 'answer_evaluation') return report();
           if (purpose === 'gap_decomposition') return 'no json here';
+          if (purpose === 'research_profile') return defaultContractProfile();
+          if (purpose === 'gap_support') return defaultGapSupport(messages);
           return report();
         },
       },
@@ -645,7 +681,22 @@ describe('exploratory agent loop', () => {
         focused: { fetchMode: 'disabled' },
       } },
       search: { async search() { return searches.shift() || []; } },
-      llm: llmFor(decisions, { onDecompose: () => JSON.stringify({ subQuestions: ['How does Ollama work?', 'How does llama.cpp work?'] }) }),
+      llm: llmFor(decisions, {
+        onDecompose: () => JSON.stringify({ subQuestions: ['How does Ollama work?', 'How does llama.cpp work?'] }),
+        onProfile: () => JSON.stringify({
+          requiredAnswerSlots: [
+            { answerSlot: 'Ollama', question: 'How does Ollama work?', priority: 'critical' },
+            { answerSlot: 'llama.cpp', question: 'How does llama.cpp work?', priority: 'critical' },
+          ],
+          minIndependentSources: 1,
+        }),
+        onGapSupport: () => JSON.stringify({
+          judgments: [
+            { gapId: 'gap-2', verdict: 'supported', quote: 'Ollama is a local model runner.' },
+            { gapId: 'gap-3', verdict: 'supported', quote: 'llama.cpp is a C++ inference engine.' },
+          ],
+        }),
+      }),
     });
     assert.equal(result.quality.budget.usage.searchRequests, 2);
     assert.equal(result.quality.stopReason, 'evidence_sufficient');
@@ -669,7 +720,22 @@ describe('exploratory agent loop', () => {
       search: { async search() {
         return [{ title: 'Ollama', url: 'https://ollama.com', content: 'Ollama is a local model runner.', fetchStatus: 'ok' }];
       } },
-      llm: llmFor(decisions, { onDecompose: () => JSON.stringify({ subQuestions: ['How does Ollama work?', 'How does llama.cpp work?'] }) }),
+      llm: llmFor(decisions, {
+        onDecompose: () => JSON.stringify({ subQuestions: ['How does Ollama work?', 'How does llama.cpp work?'] }),
+        onProfile: () => JSON.stringify({
+          requiredAnswerSlots: [
+            { answerSlot: 'Ollama', question: 'How does Ollama work?', priority: 'critical' },
+            { answerSlot: 'llama.cpp', question: 'How does llama.cpp work?', priority: 'critical' },
+          ],
+          minIndependentSources: 1,
+        }),
+        onGapSupport: () => JSON.stringify({
+          judgments: [
+            { gapId: 'gap-2', verdict: 'supported', quote: 'Ollama is a local model runner.' },
+            { gapId: 'gap-3', verdict: 'unsupported', quote: 'Ollama is a local model runner.' },
+          ],
+        }),
+      }),
     });
     assert.notEqual(result.quality.stopReason, 'evidence_sufficient');
     assert.ok(['safety_cap', 'budget_exhausted'].includes(result.quality.stopReason));
@@ -704,7 +770,9 @@ describe('exploratory agent loop', () => {
     assert.equal(result.quality.stopReason, 'evidence_sufficient');
     assert.equal(result.quality.budget.controllerStopReason, 'evidence_sufficient');
     assert.ok((result.quality.budget.usage.llmTokens || 0) < 20000);
-    assert.equal(result.trace.find((entry) => entry.action === 'decompose')?.reasonCode, 'decompose_skipped_definitional');
+    assert.ok(['decompose_skipped_definitional', 'decompose_skipped_slots'].includes(
+      result.trace.find((entry) => entry.action === 'decompose')?.reasonCode,
+    ));
     assert.ok(!result.trace.some((entry) => entry.action === 'reflect'));
     assert.ok(events.every((message) => !/undefined\/undefined/.test(message)));
     assert.ok(events.some((message) => /Research stopped: evidence_sufficient/.test(message)));
@@ -927,13 +995,15 @@ describe('exploratory agent loop', () => {
           ];
         } },
         llm: {
-          async complete({ purpose }) {
+          async complete({ purpose, messages }) {
             if (purpose === 'agent_decision') {
               decisionCalls += 1;
               return JSON.stringify(decisions.shift());
             }
             if (purpose === 'answer_evaluation') return report();
             if (purpose === 'gap_decomposition') return 'no json here';
+            if (purpose === 'research_profile') return defaultContractProfile();
+            if (purpose === 'gap_support') return defaultGapSupport(messages);
             return report();
           },
         },

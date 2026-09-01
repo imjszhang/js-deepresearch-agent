@@ -28,14 +28,32 @@ const HKEX_PROFILE = {
 function llmFor(decisions, {
   onEvaluation = () => report(),
   onDecompose = () => 'no json here',
-  onProfile = () => '{}',
+  onProfile = () => JSON.stringify({
+    requiredAnswerSlots: [{ answerSlot: 'topic', question: 'topic evidence', priority: 'normal' }],
+    minIndependentSources: 1,
+  }),
+  onGapSupport = null,
 } = {}) {
   return {
-    async complete({ purpose }) {
+    async complete({ purpose, messages }) {
       if (purpose === 'agent_decision') return JSON.stringify(decisions.shift());
       if (purpose === 'answer_evaluation') return onEvaluation();
       if (purpose === 'gap_decomposition') return onDecompose();
       if (purpose === 'research_profile') return onProfile();
+      if (purpose === 'gap_support') {
+        if (onGapSupport) return onGapSupport({ messages });
+        const text = (messages || []).map((item) => item.content).join('\n');
+        const quote = (text.match(/\] ([^\n]+)/) || [])[1] || '';
+        const gapIds = [...new Set([...text.matchAll(/gapId:\s+(gap-\S+)/g)].map((match) => match[1]))];
+        return JSON.stringify({
+          judgments: (gapIds.length ? gapIds : ['gap-2']).map((gapId) => ({
+            gapId,
+            verdict: quote.length >= 12 ? 'supported' : 'unverifiable',
+            quote,
+            reason: 'test default support',
+          })),
+        });
+      }
       return report();
     },
   };
@@ -440,6 +458,13 @@ describe('exploratory Search-Read-Reason loop', () => {
       } },
       llm: llmFor(decisions, {
         onDecompose: () => JSON.stringify({ subQuestions: ['How does alpha work?', 'How does beta work?'] }),
+        onProfile: () => JSON.stringify({
+          requiredAnswerSlots: [
+            { answerSlot: 'alpha', question: 'How does alpha work?' },
+            { answerSlot: 'beta', question: 'How does beta work?' },
+          ],
+          minIndependentSources: 1,
+        }),
       }),
     });
     assert.ok(rerankQueries.length);
@@ -518,5 +543,48 @@ describe('exploratory Search-Read-Reason loop', () => {
   it('rejects empty bullets during report validation', () => {
     const check = emptyBulletLines('# Research Report\n\n## Key Findings\n-\n- Real finding [1.1]\n');
     assert.equal(check.length, 1);
+  });
+
+  it('keeps exploring when the token floor is reached but a required slot is still missing', async () => {
+    const searches = [];
+    const result = await new ResearchRunner().run({
+      query: 'SubjectA official status',
+      settings: { llm: {}, search: {}, research: {
+        strategy: 'exploratory',
+        exploratory: { minLlmTokens: 20, maxLlmTokens: 200000, maxSteps: 8, maxEvaluationRetries: 0, autoReadTopK: 0 },
+        focused: { fetchMode: 'disabled' },
+      } },
+      search: { async search(searchQuery) {
+        searches.push(searchQuery);
+        return [{
+          title: 'Weather',
+          url: 'https://news.example.com/weather',
+          content: 'This long article discusses weather patterns, rainfall totals, and agricultural cycles without mentioning SubjectA.',
+          fetchStatus: 'ok',
+        }];
+      } },
+      llm: llmFor([
+        { action: 'search', query: 'SubjectA official', gapId: 'gap-1', reasonCode: 'search' },
+        { action: 'read', sourceIds: ['https://news.example.com/weather'], gapId: 'gap-1', reasonCode: 'read' },
+        { action: 'answer', reasonCode: 'evidence_sufficient' },
+        { action: 'search', query: 'SubjectA site:docs.example.com', gapId: 'gap-2', reasonCode: 'repair' },
+        { action: 'answer', reasonCode: 'evidence_sufficient' },
+      ], {
+        onProfile: () => JSON.stringify({
+          requiredAnswerSlots: [{ answerSlot: 'SubjectA', question: 'SubjectA official status', priority: 'critical' }],
+          minIndependentSources: 1,
+        }),
+        onGapSupport: () => JSON.stringify({
+          judgments: [{
+            gapId: 'gap-2',
+            verdict: 'unsupported',
+            quote: 'weather patterns, rainfall totals, and agricultural cycles without mentioning',
+          }],
+        }),
+      }),
+    });
+    assert.notEqual(result.quality.stopReason, 'evidence_sufficient');
+    assert.ok(searches.length >= 2);
+    assert.ok((result.quality.limitations || []).some((line) => /unresolved|slot|required/i.test(line)));
   });
 });

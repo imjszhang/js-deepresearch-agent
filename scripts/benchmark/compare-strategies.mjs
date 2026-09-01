@@ -1,6 +1,6 @@
 import { loadArtifacts, loadArtifactsByResearchId } from './load-artifacts.mjs';
 import { runBenchmark } from './run-benchmark.mjs';
-import { extractRunStats } from './extract-run-stats.mjs';
+import { extractRunStats, resolveStrategyLabel } from './extract-run-stats.mjs';
 import { auditStrategyRun } from './strategy-effectiveness.mjs';
 
 function collectWarnings(runs) {
@@ -90,6 +90,7 @@ export async function compareStrategySessions({
       : loadArtifacts(target.workDir);
     const wallClockDurationMs = target.workDir ? wallClockByWorkDir.get(target.workDir) ?? null : null;
     const stats = extractRunStats(artifacts, { wallClockDurationMs });
+    const displayLabel = target.label || stats.strategyLabel;
     if (target.label) stats.strategyLabel = target.label;
 
     const benchmark = await runBenchmark({
@@ -103,7 +104,7 @@ export async function compareStrategySessions({
 
     const audit = auditStrategyRun({
       query: artifacts.meta?.query || stats.query,
-      strategy: stats.strategyLabel,
+      strategy: resolveStrategyLabel(artifacts),
       report: artifacts.report,
       findings: artifacts.findings,
       sources: artifacts.sources,
@@ -117,6 +118,7 @@ export async function compareStrategySessions({
 
     runs.push({
       ...stats,
+      displayLabel,
       audit,
       effectiveness: audit,
       benchmark: {

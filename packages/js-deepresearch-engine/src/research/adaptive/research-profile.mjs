@@ -1,7 +1,8 @@
 import { classifyResearchQuery } from './exploratory-sufficiency.mjs';
 import { inferEvidenceScope, listLocalCorpusChannels } from './source-policy.mjs';
-import { mergeResearchBrief, sanitizeResearchBrief } from '../research-brief.mjs';
+import { mergeResearchBrief, sanitizeResearchBrief, slotsFromPlannerGaps } from '../research-brief.mjs';
 import { GAP_SCHEMA_VERSION } from '../gap-state.mjs';
+import { completeStructuredJson, hasUsablePlannerPayload } from '../structured-llm.mjs';
 
 const HOST_IN_QUERY = /\b(?:[a-z0-9-]+\.)+(?:com|org|net|edu|gov|io|hk|cn|uk|jp|ai|info)\b/gi;
 const FILE_EXT_HOSTS = /\.(cpp|js|ts|py|md|pdf|exe|zip|png|jpg)$/i;
@@ -151,13 +152,21 @@ export function mergeProfilePlan(base, plan = {}) {
       Number(base.minIndependentSources) || 1,
       Number(plan.minIndependentSources) || 0,
     ),
-    plannedGaps: sanitizePlannedGaps(plan.gaps),
-    brief: mergeResearchBrief(base.brief || { query: base.query }, plan.brief || plan, {
+    plannedGaps: sanitizePlannedGaps(plan.gaps ?? plan.plannedGaps),
+    brief: mergeResearchBrief(base.brief || { query: base.query }, {
+      ...(plan.brief || plan),
+      requiredAnswerSlots: (plan.brief || plan).requiredAnswerSlots?.length
+        ? (plan.brief || plan).requiredAnswerSlots
+        : slotsFromPlannerGaps(plan.gaps ?? plan.plannedGaps, { query: base.query }),
+    }, {
       query: base.query,
       depth: base.brief?.depth || 'exploratory',
     }),
     evidenceScope: plan.evidenceScope || base.evidenceScope,
     method: plan.method ? `${base.method}+${plan.method}` : base.method,
+    contractUnavailable: Boolean(plan.contractUnavailable),
+    contractFailure: plan.contractFailure || null,
+    contractRetried: Boolean(plan.contractRetried),
   };
   for (const flag of PROFILE_FLAGS) {
     if (plan.flags && typeof plan.flags[flag] === 'boolean') next.flags[flag] = plan.flags[flag];
@@ -165,12 +174,39 @@ export function mergeProfilePlan(base, plan = {}) {
   return next;
 }
 
-function extractJson(text) {
-  const raw = String(text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
-  const start = raw.indexOf('{');
-  const end = raw.lastIndexOf('}');
-  if (start < 0 || end < start) return null;
-  try { return JSON.parse(raw.slice(start, end + 1)); } catch { return null; }
+function profileSystemPrompt(scope, compact = false) {
+  const local = scope === 'local'
+    ? 'This run can only read local files. Do not invent web hosts such as fang.com, ke.com, or sec.gov. Leave requiredHosts empty unless the query literally names a hostname. Do not require primary_filing.'
+    : '';
+  if (compact) {
+    return [
+      'Return compact JSON only for THIS query. Do not invent a fixed industry questionnaire.',
+      'Schema: {"requiredAnswerSlots":[{"answerSlot":"...","question":"...","priority":"critical|normal","evidenceCriteria":[]}],"requiredHosts":[],"requiredSourceTypes":[],"flags":{}}',
+      'requiredAnswerSlots must be non-empty for this query. Do not omit the closing brace.',
+      '"官方" / "official" means first-party documents of the subject, not stock-exchange or SEC filings unless the query names that venue.',
+      'Do not default to hkexnews.hk, sec.gov, sse.com.cn, or szse.cn.',
+      local,
+    ].filter(Boolean).join('\n');
+  }
+  return [
+    'Infer a research evidence profile for THIS query only. Do not invent a fixed industry questionnaire.',
+    'Return JSON only: {"audience":null,"decision":null,"assumedExpertise":null,"timeRange":null,"geography":[],"entities":[],"exclusions":[],"successCriteria":[],"requiredAnswerSlots":[{"answerSlot":"...","question":"...","claimFamily":null,"priority":"critical|normal","evidenceCriteria":[]}],"consequentialClaims":[],"flags":{"freshness":false,"completeness":false,"plurality":false,"attribution":false,"primary_source":false,"numeric":false,"decision_critical":false},"requiredHosts":[],"preferredHosts":[],"requiredSourceTypes":[],"minIndependentSources":1,"gaps":[{"question":"...","priority":"critical|normal","requiredHosts":[]}]}',
+    'requiredHosts and preferredHosts must be real hostnames you decide this query needs. Leave them empty when unknown.',
+    '"官方" / "official" means first-party documents of the subject, not stock-exchange or SEC filings unless the query names that venue.',
+    'Do not default to hkexnews.hk, sec.gov, sse.com.cn, or szse.cn. Do not add primary_filing unless the query itself is about filings or disclosures.',
+    'requiredSourceTypes may include primary_filing or numeric only.',
+    local,
+  ].filter(Boolean).join('\n');
+}
+
+export function hasUsableResearchContract(profile = {}, brief = {}) {
+  const resolved = brief.requiredAnswerSlots || profile.brief?.requiredAnswerSlots || [];
+  return Boolean(
+    resolved.length
+    || (profile.requiredHosts || []).length
+    || (profile.requiredSourceTypes || []).length
+    || (profile.plannedGaps || []).length,
+  );
 }
 
 export async function planResearchProfile({ llm, query, profile, signal, settings, evidenceScope } = {}) {
@@ -180,40 +216,85 @@ export async function planResearchProfile({ llm, query, profile, signal, setting
     settings,
     query,
   });
-  if (!llm?.complete) return scoped;
+  if (!llm?.complete) {
+    return sanitizeEvidenceProfile({
+      ...scoped,
+      method: scoped.method || 'rules',
+      contractUnavailable: !hasUsableResearchContract(scoped, scoped.brief),
+      contractFailure: hasUsableResearchContract(scoped, scoped.brief) ? null : 'no_llm',
+    }, { evidenceScope: scope, settings, query });
+  }
   try {
-    const response = await llm.complete({
-      purpose: 'research_profile',
+    const userSlots = scoped.brief?.requiredAnswerSlots || [];
+    const acceptsSanitizedPlan = (parsed) => {
+      if (!hasUsablePlannerPayload(parsed)) return false;
+      if (userSlots.length) return true;
+      const candidate = sanitizeEvidenceProfile(mergeProfilePlan(scoped, parsed), {
+        evidenceScope: scope,
+        settings,
+        query,
+      });
+      return hasUsableResearchContract(candidate, candidate.brief);
+    };
+    const result = await completeStructuredJson({
+      llm,
       signal,
-      temperature: 0,
-      maxTokens: 500,
+      purpose: 'research_profile',
+      maxTokens: 1200,
+      retryMaxTokens: 800,
+      accept: acceptsSanitizedPlan,
       messages: [{
         role: 'system',
-        content: [
-          'Infer a research evidence profile for THIS query only. Do not invent a fixed industry questionnaire.',
-          'Return JSON only: {"audience":null,"decision":null,"assumedExpertise":null,"timeRange":null,"geography":[],"entities":[],"exclusions":[],"successCriteria":[],"requiredAnswerSlots":[{"answerSlot":"...","question":"...","claimFamily":null,"priority":"critical|normal"}],"consequentialClaims":[],"flags":{"freshness":false,"completeness":false,"plurality":false,"attribution":false,"primary_source":false,"numeric":false,"decision_critical":false},"requiredHosts":[],"preferredHosts":[],"requiredSourceTypes":[],"minIndependentSources":1,"gaps":[{"question":"...","priority":"critical|normal","requiredHosts":[]}]}',
-          'requiredHosts and preferredHosts must be real hostnames you decide this query needs. Leave them empty when unknown.',
-          '"官方" / "official" means first-party documents of the subject, not stock-exchange or SEC filings unless the query names that venue.',
-          'Do not default to hkexnews.hk, sec.gov, sse.com.cn, or szse.cn. Do not add primary_filing unless the query itself is about filings or disclosures.',
-          'requiredSourceTypes may include primary_filing or numeric only.',
-          scope === 'local'
-            ? 'This run can only read local files. Do not invent web hosts such as fang.com, ke.com, or sec.gov. Leave requiredHosts empty unless the query literally names a hostname. Do not require primary_filing.'
-            : '',
-        ].filter(Boolean).join('\n'),
+        content: profileSystemPrompt(scope, false),
       }, {
         role: 'user',
         content: query,
       }],
+      retryMessages: [{
+        role: 'system',
+        content: profileSystemPrompt(scope, true),
+      }, {
+        role: 'user',
+        content: `Previous profile JSON was truncated or invalid. Return complete compact JSON for: ${query}`,
+      }],
     });
-    const parsed = extractJson(response);
-    if (!parsed) return scoped;
-    return sanitizeEvidenceProfile(mergeProfilePlan(scoped, { ...parsed, method: 'llm' }), {
-      evidenceScope: scope,
-      settings,
-      query,
-    });
-  } catch {
-    return scoped;
+    if (result.ok) {
+      const merged = sanitizeEvidenceProfile(mergeProfilePlan(scoped, {
+        ...result.parsed,
+        method: result.retried ? 'llm+retry' : 'llm',
+        contractRetried: result.retried,
+      }), {
+        evidenceScope: scope,
+        settings,
+        query,
+      });
+      merged.brief = {
+        ...merged.brief,
+        contractOrigin: userSlots.length ? 'user' : 'planner',
+      };
+      const usable = hasUsableResearchContract(merged, merged.brief);
+      merged.contractUnavailable = !usable;
+      merged.contractFailure = usable ? null : 'sanitized_empty_contract';
+      merged.contractRetried = result.retried;
+      return merged;
+    }
+    const unavailable = !userSlots.length && !hasUsableResearchContract(scoped, scoped.brief);
+    return sanitizeEvidenceProfile({
+      ...scoped,
+      method: `${scoped.method}+degraded`,
+      contractUnavailable: unavailable,
+      contractFailure: result.reason || 'invalid_or_empty_json',
+      contractRetried: result.retried,
+    }, { evidenceScope: scope, settings, query });
+  } catch (error) {
+    if (error?.name === 'AbortError') throw error;
+    const userSlots = scoped.brief?.requiredAnswerSlots || [];
+    return sanitizeEvidenceProfile({
+      ...scoped,
+      method: `${scoped.method}+degraded`,
+      contractUnavailable: !userSlots.length && !hasUsableResearchContract(scoped, scoped.brief),
+      contractFailure: error?.message || 'planner_error',
+    }, { evidenceScope: scope, settings, query });
   }
 }
 
@@ -245,6 +326,7 @@ export function createGapRecord({
   requiredSlot,
   kind,
   rollup,
+  evidenceCriteria,
 } = {}) {
   return {
     schemaVersion: GAP_SCHEMA_VERSION,
@@ -271,6 +353,8 @@ export function createGapRecord({
     supportingPassageIds: [],
     contradictingPassageIds: [],
     confidence: null,
+    evidenceCriteria: Array.isArray(evidenceCriteria) ? evidenceCriteria.filter(Boolean) : [],
+    slotSupport: null,
     missingEvidence: ['successful_body'],
     nextQueries: [],
     resolutionReason: null,

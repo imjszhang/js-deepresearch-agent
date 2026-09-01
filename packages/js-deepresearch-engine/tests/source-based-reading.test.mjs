@@ -515,8 +515,16 @@ describe('focused pipeline', () => {
         },
       },
       llm: {
-        async complete({ messages }) {
-          return messages[1].content.includes('Evidence:')
+        async complete({ purpose, messages }) {
+          if (purpose === 'research_profile') {
+            return JSON.stringify({
+              requiredAnswerSlots: [
+                { answerSlot: 'deep topic', question: 'deep topic', priority: 'critical' },
+                { answerSlot: 'first iteration question', question: 'first iteration question' },
+              ],
+            });
+          }
+          return messages[1]?.content.includes('Evidence:')
             ? JSON.stringify(['second iteration question'])
             : JSON.stringify(['first iteration question']);
         },
@@ -524,12 +532,11 @@ describe('focused pipeline', () => {
       emit: () => {},
     });
 
-    assert.deepEqual(searchedQuestions, [
-      'deep topic',
-      'first iteration question',
-      'deep topic successful_body independent_sources primary source evidence',
-    ]);
-    assert.deepEqual(findings.map((finding) => finding.wave), ['discovery', 'discovery', 'repair']);
+    assert.ok(searchedQuestions.includes('deep topic'));
+    assert.ok(searchedQuestions.includes('first iteration question'));
+    assert.ok(searchedQuestions.some((question) => question.includes('primary source evidence')));
+    assert.ok(findings.some((finding) => finding.wave === 'discovery'));
+    assert.ok(findings.some((finding) => finding.wave === 'repair'));
   });
 
   it('emits enrichment and filter stages when enabled', async () => {
@@ -562,8 +569,13 @@ describe('focused pipeline', () => {
         },
       },
       llm: {
-        async complete({ messages }) {
-          if (messages[1].content.includes('Rate source relevance')) {
+        async complete({ purpose, messages }) {
+          if (purpose === 'research_profile') {
+            return JSON.stringify({
+              requiredAnswerSlots: [{ answerSlot: 'topic', question: 'topic' }],
+            });
+          }
+          if (messages[1]?.content.includes('Rate source relevance')) {
             return JSON.stringify([{ index: 1, keep: true, score: 0.8, reason: 'ok' }]);
           }
           return JSON.stringify(['sub question']);
@@ -586,13 +598,29 @@ describe('focused pipeline', () => {
       query: 'well covered topic', iterations: 2, questionCount: 1, concurrency: 1,
       settings: { research: { focused: { fetchMode: 'disabled', iterationControl: { enabled: true, minIterations: 1, maxIterations: 4, earlyStop: true } } } },
       search: { async search(question) { searches.push(question); return [{ title: question, url: `https://source-${searches.length}.test`, snippet: 'usable evidence' }]; } },
-      llm: { async complete() { return JSON.stringify(['independent angle']); } },
+      llm: {
+        async complete({ purpose }) {
+          if (purpose === 'research_profile') {
+            return JSON.stringify({
+              requiredAnswerSlots: [
+                { answerSlot: 'well covered topic', question: 'well covered topic', priority: 'critical' },
+                { answerSlot: 'independent angle', question: 'independent angle' },
+              ],
+            });
+          }
+          return JSON.stringify(['independent angle']);
+        },
+      },
       emit: (event) => stages.push(event.stage),
       trace,
     });
-    assert.equal(searches.length, 3);
-    assert.equal(findings.length, 3);
+    assert.ok(searches.length >= 3);
+    assert.ok(findings.length >= 3);
     assert.ok(trace.some((entry) => entry.action === 'readiness_gate' && entry.reasonCode === 'repair_required'));
+    const stop = trace.find((entry) => entry.action === 'focused_stop_decision');
+    assert.ok(stop);
+    assert.notEqual(stop.reasonCode, 'evidence_sufficient');
+    assert.equal(stop.stopReason, 'budget_exhausted');
   });
 
   it('targets the open material gap rather than repeating broad discovery', async () => {
@@ -608,7 +636,20 @@ describe('focused pipeline', () => {
         searches.push(question);
         return [{ title: 'Secondary overview', url: `https://blog.csdn.net/${searches.length}`, snippet: 'secondary summary' }];
       } },
-      llm: { async complete() { return JSON.stringify(['general comparison']); } },
+      llm: {
+        async complete({ purpose }) {
+          if (purpose === 'research_profile') {
+            return JSON.stringify({
+              requiredAnswerSlots: [{
+                answerSlot: 'architecture',
+                question: 'compare open source research framework architecture',
+                priority: 'critical',
+              }],
+            });
+          }
+          return JSON.stringify(['general comparison']);
+        },
+      },
       emit: () => {},
       trace,
     });
@@ -624,6 +665,7 @@ describe('quick strategy isolation', () => {
     const quickPath = path.join(import.meta.dirname, '../src/research/strategies/quick.mjs');
     const source = fs.readFileSync(quickPath, 'utf8');
     assert.match(source, /runIterativeStrategy/);
+    assert.doesNotMatch(source, /planAndNormalizeContract|judgeOpenSlotSupport|evaluateReadinessGate|research-profile/);
 
     const stages = [];
     await runStrategy({

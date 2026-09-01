@@ -118,4 +118,103 @@ describe('research profile does not invent venue policy', () => {
     assert.deepEqual(kept.requiredHosts, ['fang.com']);
     assert.equal(kept.minIndependentSources, 2);
   });
+
+  it('retries truncated planner JSON and accepts compact slots', async () => {
+    let calls = 0;
+    const query = 'Compare SubjectA and SubjectB using docs.example.com';
+    const profile = await planResearchProfile({
+      query,
+      profile: inferResearchProfile(query),
+      llm: {
+        _meta: null,
+        getLastCallMetadata() { return this._meta; },
+        async complete() {
+          calls += 1;
+          if (calls === 1) {
+            this._meta = { finishReason: 'length' };
+            return '{"requiredAnswerSlots":[{"answerSlot":"SubjectA","question":"What is SubjectA';
+          }
+          this._meta = { finishReason: 'stop' };
+          return JSON.stringify({
+            requiredAnswerSlots: [{
+              answerSlot: 'SubjectA',
+              question: 'What is SubjectA official status?',
+              evidenceCriteria: ['official document'],
+            }],
+          });
+        },
+      },
+    });
+    assert.equal(calls, 2);
+    assert.equal(profile.contractUnavailable, false);
+    assert.equal(profile.contractRetried, true);
+    assert.equal(profile.brief.requiredAnswerSlots[0].answerSlot, 'SubjectA');
+    assert.ok(!profile.requiredHosts.includes('hkexnews.hk'));
+  });
+
+  it('marks a double planner failure as contract_unavailable', async () => {
+    const query = 'Open research question without a user brief';
+    const profile = await planResearchProfile({
+      query,
+      profile: inferResearchProfile(query),
+      llm: {
+        getLastCallMetadata() { return { finishReason: 'length' }; },
+        async complete() { return '{}'; },
+      },
+    });
+    assert.equal(profile.contractUnavailable, true);
+    assert.equal(profile.brief.requiredAnswerSlots.length, 0);
+    assert.ok(['finish_reason_length', 'invalid_or_empty_json'].includes(profile.contractFailure));
+  });
+
+  it('retries when sanitization removes the apparent planner contract', async () => {
+    let calls = 0;
+    const query = 'SubjectA current status';
+    const profile = await planResearchProfile({
+      query,
+      profile: inferResearchProfile(query),
+      llm: {
+        async complete() {
+          calls += 1;
+          if (calls === 1) {
+            return JSON.stringify({ requiredHosts: ['not a hostname'] });
+          }
+          return JSON.stringify({
+            requiredAnswerSlots: [{
+              answerSlot: 'current status',
+              question: 'What is SubjectA current status?',
+            }],
+          });
+        },
+      },
+    });
+
+    assert.equal(calls, 2);
+    assert.equal(profile.contractRetried, true);
+    assert.equal(profile.contractUnavailable, false);
+    assert.equal(profile.brief.requiredAnswerSlots[0].answerSlot, 'current status');
+  });
+
+  it('keeps user slots when the planner returns a different contract', async () => {
+    const query = 'Read docs.example.com for SubjectA';
+    const incoming = inferResearchProfile({
+      query,
+      requiredAnswerSlots: [{ answerSlot: 'status', question: 'Is SubjectA supported?' }],
+    });
+    const profile = await planResearchProfile({
+      query,
+      profile: incoming,
+      llm: {
+        async complete() {
+          return JSON.stringify({
+            requiredAnswerSlots: [{ answerSlot: 'planner-only', question: 'invented' }],
+            requiredHosts: ['sec.gov'],
+          });
+        },
+      },
+    });
+    assert.equal(profile.brief.requiredAnswerSlots[0].answerSlot, 'status');
+    assert.equal(profile.contractUnavailable, false);
+    assert.ok(!profile.brief.requiredAnswerSlots.some((slot) => slot.answerSlot === 'planner-only'));
+  });
 });

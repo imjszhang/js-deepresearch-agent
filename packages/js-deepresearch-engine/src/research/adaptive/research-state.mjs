@@ -17,7 +17,7 @@ import {
 } from './source-policy.mjs';
 import { sourceDiversityKey } from '../source-candidates.mjs';
 import { UrlPool } from './url-pool.mjs';
-import { evaluateGapEvidence, rollupRootGap } from '../gap-state.mjs';
+import { collectGapSources, evaluateGapEvidence, rollupRootGap } from '../gap-state.mjs';
 
 export { hostnameOf } from './source-policy.mjs';
 
@@ -133,7 +133,7 @@ export class ResearchState {
   addGap(question, priority = 'normal', options = {}) {
     const text = String(question || '').trim();
     if (!text) return null;
-    if (this.gaps.some((gap) => similarQuestions(gap.question, text))) return null;
+    if (this.gaps.some((gap) => !gap.rollup && similarQuestions(gap.question, text))) return null;
     const nextDepth = options.depth ?? 1;
     if (this.maxGapDepth > 0 && nextDepth > this.maxGapDepth) return null;
     const gap = createGapRecord({
@@ -151,6 +151,7 @@ export class ResearchState {
       requiredSlot: options.requiredSlot,
       kind: options.kind,
       rollup: options.rollup,
+      evidenceCriteria: options.evidenceCriteria,
     });
     this.gaps.push(gap);
     return gap;
@@ -245,9 +246,7 @@ export class ResearchState {
   syncGapCoverage() {
     const verifiedBefore = new Set(this.gaps.filter((gap) => gap.status === 'verified').map((gap) => gap.id));
     for (const gap of this.gaps) {
-      const sources = this.findings
-        .filter((finding) => finding.gapId === gap.id)
-        .flatMap((finding) => (finding.sources || []).filter(sourceHasBody));
+      const sources = collectGapSources(gap, this.findings);
       gap.readSourceIds = [...new Set([
         ...(gap.readSourceIds || []),
         ...sources.map((source) => source.id || source.url).filter(Boolean),
@@ -257,6 +256,7 @@ export class ResearchState {
         passageIds: this.findings
           .filter((finding) => finding.gapId === gap.id)
           .flatMap((finding) => finding.passageIds || []),
+        slotSupport: gap.slotSupport,
       }));
       if (gap.status === 'verified') gap.resolvedAtStep = this.step;
     }
