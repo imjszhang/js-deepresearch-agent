@@ -5,6 +5,7 @@ import {
   applySlotSupportJudgments,
   failClosedSupport,
   judgeOpenSlotSupport,
+  selectSlotPassages,
 } from '../src/research/gap-slot-support.mjs';
 
 const SUBJECT_A_BODY = 'SubjectA publishes a first-party guide at docs.example.com that states production support began in 2026.';
@@ -165,6 +166,80 @@ describe('gap slot support judgments', () => {
     });
     assert.equal(timedOut.judgments[0].method, 'fail_closed');
     assert.deepEqual(failClosedSupport('timeout').verdict, 'unverifiable');
+  });
+
+  it('bounds body excerpts before sending them to the support judge', () => {
+    const gap = slotGap('gap-2', 'SubjectA');
+    const longBody = `${'Unrelated preface text. '.repeat(100)}${SUBJECT_A_BODY}${' Unrelated appendix text.'.repeat(100)}`;
+    const selected = selectSlotPassages(
+      gap,
+      [finding('gap-2', 'https://docs.example.com/a', longBody)],
+      { topK: 3, chunkChars: 600 },
+    );
+
+    assert.ok(selected.length > 0);
+    assert.ok(selected.every((passage) => passage.text.length <= 600));
+    assert.ok(selected.some((passage) => passage.text.includes('SubjectA publishes')));
+  });
+
+  it('splits a repeatedly truncated batch and preserves successful single-slot judgments', async () => {
+    const gaps = [
+      slotGap('gap-2', 'SubjectA'),
+      slotGap('gap-3', 'SubjectB'),
+    ];
+    const findings = [
+      finding('gap-2', 'https://docs.example.com/a', SUBJECT_A_BODY),
+      finding('gap-3', 'https://docs.example.com/b', SUBJECT_B_BODY),
+    ];
+    const calls = [];
+    const llm = {
+      metadata: null,
+      getLastCallMetadata() {
+        return this.metadata;
+      },
+      async complete({ messages, maxTokens }) {
+        const prompt = (messages || []).map((item) => item.content).join('\n');
+        calls.push({ prompt, maxTokens });
+        if (prompt.includes('Slot 2')) {
+          this.metadata = { finishReason: 'length' };
+          return JSON.stringify({
+            judgments: [{
+              gapId: 'gap-2',
+              verdict: 'supported',
+              quote: 'production support began in 2026',
+            }],
+          });
+        }
+        this.metadata = { finishReason: 'stop' };
+        const isSubjectA = prompt.includes('gapId: gap-2');
+        return JSON.stringify({
+          judgments: [{
+            gapId: isSubjectA ? 'gap-2' : 'gap-3',
+            verdict: 'supported',
+            quote: isSubjectA
+              ? 'production support began in 2026'
+              : 'it remains experimental only',
+          }],
+        });
+      },
+    };
+
+    const result = await judgeOpenSlotSupport({
+      query: 'Compare SubjectA and SubjectB',
+      gaps,
+      findings,
+      llm,
+      batchSize: 2,
+    });
+
+    assert.equal(result.unknown, false);
+    assert.equal(result.retried, true);
+    assert.equal(result.batches, 1);
+    assert.equal(result.splitRetries, 1);
+    assert.equal(result.attempts, 4);
+    assert.equal(result.judgments.length, 2);
+    assert.ok(result.judgments.every((judgment) => judgment.method === 'llm' && judgment.quoteAnchored));
+    assert.deepEqual(calls.map((call) => call.maxTokens), [1200, 1600, 800, 800]);
   });
 
   it('does not treat a follow-up without requiredSlot as a semantic close', () => {

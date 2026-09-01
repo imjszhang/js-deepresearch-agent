@@ -118,6 +118,9 @@ async function syncState(state, findings, { llm, signal, query, trace } = {}) {
       reasonCode: support.unknown ? 'slot_support_unknown' : 'slot_support_judged',
       unknown: support.unknown,
       retried: support.retried,
+      attempts: support.attempts,
+      batches: support.batches,
+      splitRetries: support.splitRetries,
       gapIds: support.judgments.map((item) => item.gapId).filter(Boolean),
     });
   }
