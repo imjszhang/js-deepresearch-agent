@@ -361,14 +361,8 @@ function asScopeTexts(value) {
   return text ? [text] : [];
 }
 
-export function queryMatchesGapScope(query = '', gap = {}, entities = [], extraScope = [], extraAliases = []) {
-  let scopeText = [
-    gap.question,
-    publicScopeField(gap.answerSlot),
-    publicScopeField(gap.claimFamily),
-    ...(gap.evidenceCriteria || []).map(publicScopeField),
-    ...asScopeTexts(extraScope),
-  ].filter(Boolean).join(' ').normalize('NFKC').toLowerCase();
+function scopeTerms(texts, entities = [], extraAliases = []) {
+  let scopeText = asScopeTexts(texts).join(' ').normalize('NFKC').toLowerCase();
   for (const alias of resolveEntityAliases(entities, extraAliases)) {
     scopeText = scopeText.replaceAll(alias.normalize('NFKC').toLowerCase(), ' ');
   }
@@ -382,10 +376,24 @@ export function queryMatchesGapScope(query = '', gap = {}, entities = [], extraS
     if (term.length <= 4) return [term];
     return Array.from({ length: term.length - 1 }, (_, index) => term.slice(index, index + 2));
   }).filter((term) => !generic.has(term));
-  const terms = uniqueTerms([...latin, ...han]);
-  if (!terms.length) return true;
+  return uniqueTerms([...latin, ...han]);
+}
+
+export function queryMatchesGapScope(query = '', gap = {}, entities = [], extraScope = [], extraAliases = []) {
+  const gapTerms = scopeTerms([
+    gap.question,
+    publicScopeField(gap.answerSlot),
+    publicScopeField(gap.claimFamily),
+    ...(gap.evidenceCriteria || []).map(publicScopeField),
+  ], entities, extraAliases);
+  const extraTerms = scopeTerms(extraScope, entities, extraAliases);
   const normalizedQuery = String(query || '').normalize('NFKC').toLowerCase();
-  return terms.some((term) => normalizedQuery.includes(term));
+  if (gapTerms.some((term) => normalizedQuery.includes(term))) return true;
+  if (extraTerms.some((term) => normalizedQuery.includes(term))) return true;
+  // Generic slots have no distinctive terms. The planner may still pass the
+  // original research question as extraScope so a translated query can match,
+  // but those extra terms must not become an exclusive filter.
+  return gapTerms.length === 0;
 }
 
 export function independentDomainsFromSources(sources = []) {
