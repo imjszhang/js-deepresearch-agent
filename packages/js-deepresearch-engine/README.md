@@ -68,6 +68,10 @@ const result = await runner.run({
 
 Focused runs use bounded discovery/merge/repair waves and the same deterministic base readiness checks as exploratory runs. Gap schema v2 is claim/answer-slot aware. Search snippets never verify deep-research gaps, and semantic providers cannot override readiness failures.
 
+Executed search queries come only from the original user query or the shared LLM Search Query Planner (`purpose: search_query_planning`). Planner items may include optional `searchOptions` (`engines`, `categories`, `language`, `pageno`); those values are type-checked and passed through to SearXNG. Strategies may schedule, validate, deduplicate, and stop; they do not splice hosts, detect language, pick engines, or strip `site:` to invent a new query. Invalid or exhausted planner output skips the wave or blocks the gap (`quality.stopDetail=query_planner_exhausted`) instead of falling back to rule templates. Every executed search carries `queryOrigin` of `user_query` or `llm_planner`, plus provider observations on the `Source[]` metadata symbol.
+
+Summary-mode reads use one structured `source_assessment` call. `readability=unreadable` or invalid JSON fail-closes and cannot become a successful body. Extra assessment in `full`/`extract` is opt-in via `research.read.sourceAssessment.enabled`. Do not add rule-generated queries or hardcoded content-classification tables when extending this package.
+
 ## Injecting Mock Adapters
 
 For tests or custom integrations, pass `llm` and `search` directly:

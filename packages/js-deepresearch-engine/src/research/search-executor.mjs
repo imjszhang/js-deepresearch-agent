@@ -1,15 +1,75 @@
-export async function searchQuestion({ question, search, signal, queryMemory, gapId = null, onSkip = () => {} }) {
-  const duplicate = await queryMemory?.findDuplicate(question, gapId);
+import { getSearchMeta } from '../search/search-result.mjs';
+
+function questionText(item) {
+  if (typeof item === 'string') return item;
+  return String(item?.question || item?.query || '').trim();
+}
+
+function questionSearchOptions(item) {
+  if (!item || typeof item === 'string') return undefined;
+  return item.searchOptions || undefined;
+}
+
+export async function searchQuestion({
+  question,
+  search,
+  signal,
+  queryMemory,
+  gapId = null,
+  searchOptions,
+  onSkip = () => {},
+  onResult = () => {},
+}) {
+  const query = questionText(question);
+  const options = searchOptions || questionSearchOptions(question);
+  const duplicate = await queryMemory?.findDuplicate(query, gapId);
   if (duplicate) {
-    onSkip({ question, duplicateOf: duplicate.entry.query, score: duplicate.score });
-    return { question, sources: [], skipped: 'duplicate_query' };
+    onSkip({ question: query, duplicateOf: duplicate.entry.query, score: duplicate.score });
+    const skipped = {
+      question: query,
+      searchQuery: query,
+      sources: [],
+      skipped: 'duplicate_query',
+      searchOptions: options || null,
+      searchMeta: null,
+    };
+    onResult(skipped);
+    return skipped;
   }
-  const sources = await search.search(question, { signal });
-  queryMemory?.record({ query: question, gapId, provider: search.id || '', status: sources?.length ? 'useful' : 'empty', results: Array.isArray(sources) ? sources : [] });
-  return {
-    question,
-    sources: Array.isArray(sources) ? sources : [],
-  };
+  try {
+    const sources = await search.search(query, { signal, searchOptions: options });
+    const list = Array.isArray(sources) ? sources : [];
+    const searchMeta = getSearchMeta(sources);
+    queryMemory?.record({
+      query,
+      gapId,
+      provider: search.id || '',
+      status: list.length ? 'useful' : 'empty',
+      results: list,
+    });
+    const result = {
+      question: query,
+      searchQuery: query,
+      sources: list,
+      searchOptions: options || null,
+      searchMeta,
+    };
+    onResult(result);
+    return result;
+  } catch (error) {
+    if (isAbortError(error)) throw error;
+    queryMemory?.record({ query, gapId, provider: search.id || '', status: 'failed', results: [] });
+    const result = {
+      question: query,
+      searchQuery: query,
+      sources: [],
+      searchOptions: options || null,
+      searchMeta: null,
+      error: serializeSearchError(error),
+    };
+    onResult(result);
+    return result;
+  }
 }
 
 export async function searchQuestions({
@@ -19,6 +79,7 @@ export async function searchQuestions({
   concurrency = 1,
   onProgress = () => {},
   onSkip = () => {},
+  onResult = () => {},
   queryMemory,
   gapId = null,
 }) {
@@ -38,16 +99,21 @@ export async function searchQuestions({
       nextIndex += 1;
       const question = uniqueQuestions[index];
 
-      try {
-        results[index] = await searchQuestion({ question, search, signal, queryMemory, gapId, onSkip });
-      } catch (error) {
-        if (isAbortError(error)) throw error;
-        queryMemory?.record({ query: question, gapId, provider: search.id || '', status: 'failed', results: [] });
-        results[index] = { question, sources: [], error: serializeSearchError(error) };
-      } finally {
-        completed += 1;
-        onProgress({ question, completed, total: uniqueQuestions.length });
-      }
+      results[index] = await searchQuestion({
+        question,
+        search,
+        signal,
+        queryMemory,
+        gapId,
+        onSkip,
+        onResult,
+      });
+      completed += 1;
+      onProgress({
+        question: questionText(question),
+        completed,
+        total: uniqueQuestions.length,
+      });
     }
   }
 
@@ -56,15 +122,16 @@ export async function searchQuestions({
 }
 
 async function uniqueQueriesForBatch(values, queryMemory, onSkip) {
-  const exact = uniqueNonEmptyStrings(values);
+  const exact = uniqueQuestionItems(values);
   if (!queryMemory?.enabled) return exact;
   const accepted = [];
-  for (const query of exact) {
+  for (const item of exact) {
     let duplicate = null;
+    const query = questionText(item);
     for (const seen of accepted) {
-      const pair = await queryMemory.queriesMatch(query, seen);
+      const pair = await queryMemory.queriesMatch(query, questionText(seen));
       if (pair.match) {
-        duplicate = { query: seen, score: pair.score };
+        duplicate = { query: questionText(seen), score: pair.score };
         break;
       }
     }
@@ -72,7 +139,7 @@ async function uniqueQueriesForBatch(values, queryMemory, onSkip) {
       queryMemory.onSkip?.({ query, duplicateOf: duplicate.query, score: duplicate.score, reason: 'duplicate_batch_query' });
       onSkip({ question: query, duplicateOf: duplicate.query, score: duplicate.score });
     } else {
-      accepted.push(query);
+      accepted.push(item);
     }
   }
   return accepted;
@@ -98,17 +165,15 @@ function serializeSearchError(error) {
   };
 }
 
-function uniqueNonEmptyStrings(values) {
+function uniqueQuestionItems(values) {
   const seen = new Set();
   const unique = [];
-
   for (const value of values || []) {
-    const item = String(value || '').trim();
-    if (!item || seen.has(item)) continue;
-    seen.add(item);
-    unique.push(item);
+    const query = questionText(value);
+    if (!query || seen.has(query)) continue;
+    seen.add(query);
+    unique.push(typeof value === 'string' ? query : { ...value, question: query, query });
   }
-
   return unique;
 }
 

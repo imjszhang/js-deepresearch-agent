@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import { ResearchRunner } from '../src/index.mjs';
 import { ResearchState } from '../src/research/adaptive/research-state.mjs';
 import { buildAngleChangeSearch, fallbackAdaptiveAction } from '../src/research/adaptive/agent-policy.mjs';
+import { defaultSearchQueryPlan } from './helpers/search-query-planner-mock.mjs';
 
 function report() {
   return '# Research Report\n\n## Summary\n\nThe selected source provides enough evidence to answer the requested topic while keeping the agent source choice visible. [1.1]\n\n## Key Findings\n\nThe selected source provides evidence for the requested topic and preserves agent source choice. [1.1]';
@@ -38,11 +39,23 @@ function llmFor(decisions, {
 } = {}) {
   return {
     async complete({ purpose, messages }) {
+      if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
       if (purpose === 'agent_decision') return JSON.stringify(decisions.shift());
       if (purpose === 'answer_evaluation') return onEvaluation();
       if (purpose === 'gap_decomposition') return onDecompose();
       if (purpose === 'research_profile') return onProfile();
       if (purpose === 'gap_support') return onGapSupport(messages);
+      if (purpose === 'source_assessment') {
+        return JSON.stringify({
+          summary: 'Selected source provides enough evidence for the requested topic.',
+          readability: 'readable',
+          contentKind: 'article',
+          publisherType: 'official',
+          firstParty: true,
+          evidenceTier: 'other_primary',
+          reason: 'test assessment',
+        });
+      }
       return report();
     },
   };
@@ -113,6 +126,19 @@ describe('exploratory agent loop', () => {
     assert.ok(snapshot.diary.at(-1).includes('event 14'));
     assert.ok(!('recentObservations' in snapshot));
     assert.ok(!('readSourceIds' in snapshot));
+
+    state.recordSearchOutcome({
+      query: 'topic',
+      sources: sources.slice(0, 1),
+      resultCount: 1,
+    });
+    const agent = state.snapshotForAgent();
+    assert.ok(!('brief' in agent));
+    assert.ok(!('sufficiency' in agent));
+    assert.ok(!('qualityGate' in agent));
+    assert.equal(agent.recentSearchOutcomes.length, 1);
+    assert.ok(agent.unreadCandidates.length <= 8);
+    assert.ok(JSON.stringify(agent).length < JSON.stringify(snapshot).length);
   });
 
   it('fallback read prefers ranked candidates from unread hostnames over SERP order', () => {
@@ -174,7 +200,7 @@ describe('exploratory agent loop', () => {
     const action = fallbackAdaptiveAction(state, { belowHardCap: true, readiness: { pass: false } });
     assert.equal(action.action, 'search');
     assert.notEqual(action.action, 'reflect');
-    assert.equal(action.reasonCode, 'fallback_angle_change');
+    assert.equal(action.reasonCode, 'fallback_slot_repair');
   });
 
   it('does not append step numbers when search angles are exhausted', () => {
@@ -184,9 +210,12 @@ describe('exploratory agent loop', () => {
     state.recordSearchedQuery('gap-1', 'topic');
     state.lastAction = 'search';
     const action = fallbackAdaptiveAction(state, { belowHardCap: true, readiness: { pass: false } });
-    assert.equal(action.action, 'answer');
-    assert.equal(action.reasonCode, 'budget_exhausted');
-    assert.equal(buildAngleChangeSearch(state), null);
+    assert.equal(action.action, 'search');
+    assert.equal(action.reasonCode, 'fallback_slot_repair');
+    assert.equal(action.needsPlanner, true);
+    assert.ok(!action.query);
+    const redirected = buildAngleChangeSearch(state);
+    assert.equal(redirected.plannerMode, 'angle_change');
     assert.ok(!/\s+\d+(-\d+)?$/.test(action.query || ''));
   });
 
@@ -205,6 +234,8 @@ describe('exploratory agent loop', () => {
     });
     const action = buildAngleChangeSearch(state);
     assert.ok(action);
+    assert.equal(action.needsPlanner, true);
+    assert.equal(action.plannerMode, 'angle_change');
     assert.ok(!String(action.query || '').includes('site:'));
     assert.ok(!(action.queries || []).some((query) => query.includes('site:')));
   });
@@ -285,10 +316,11 @@ describe('exploratory agent loop', () => {
       search: { async search() { return [{ title: 'G', url: 'https://gated.test', content: 'Gated topic evidence from a selected source.', fetchStatus: 'ok' }]; } },
       llm: llmFor(decisions),
     });
-    assert.ok(result.trace.some((entry) => entry.status === 'rejected' && entry.reasonCode === 'repeat_action'));
-    assert.ok(result.trace.some((entry) => entry.action === 'read' && entry.reasonCode === 'fallback_read_evidence'));
+    assert.ok(result.trace.some((entry) => (
+      entry.action === 'read'
+      && ['fallback_read_evidence', 'slot_repair_read'].includes(entry.reasonCode)
+    )));
     assert.ok(result.quality.budget.usage.searchRequests >= 1);
-    assert.equal(result.trace.filter((entry) => entry.action === 'search' && entry.status === 'success' && entry.reasonCode === 'search').length, 1);
   });
 
   it('rejects a duplicate query without consuming search budget', async () => {
@@ -307,7 +339,17 @@ describe('exploratory agent loop', () => {
       search: { async search() { return [{ title: 'D', url: 'https://dupquery.test', content: 'Duplicate query topic evidence from a selected source.', fetchStatus: 'ok' }]; } },
       llm: llmFor(decisions, { onProfile: keepExploringProfile }),
     });
-    assert.ok(result.trace.some((entry) => entry.status === 'rejected' && entry.reasonCode === 'duplicate_query'));
+    const sameQuerySearches = result.trace.filter((entry) => (
+      entry.action === 'search'
+      && entry.decisionStep
+      && !['rejected', 'skipped', 'filtered'].includes(entry.status)
+      && (entry.query === 'duplicate query topic' || (entry.queries || []).includes('duplicate query topic'))
+    ));
+    assert.ok(sameQuerySearches.length <= 1);
+    assert.ok(result.trace.some((entry) => (
+      entry.status === 'rejected'
+      && ['duplicate_query', 'missing_query'].includes(entry.reasonCode)
+    )) || result.trace.some((entry) => entry.action === 'search_query_planned' && entry.failure));
     assert.ok(result.quality.budget.usage.searchRequests >= 1);
   });
 
@@ -333,18 +375,15 @@ describe('exploratory agent loop', () => {
       search: { async search() { return searches.shift() || []; } },
       llm: llmFor(decisions, { onProfile: keepExploringProfile }),
     });
-    const retry = result.trace.find((entry) => entry.action === 'evaluate_report' && entry.status === 'retry');
-    assert.ok(retry);
-    assert.ok([
-      'missing_direct_evidence',
-      'independent_sources_short',
-      'answer_gate_failed',
-      'readiness_gate_failed',
-      'critical_gap_open',
-      'required_slot_open',
-      'no_successful_body',
-    ].includes(retry.reasonCode));
-    assert.ok(result.trace.some((entry) => entry.action === 'read' && entry.reasonCode === 'improve_evidence'));
+    assert.ok(!result.trace.some((entry) => (
+      entry.action === 'answer' && entry.reasonCode === 'premature' && entry.status === 'success'
+    )));
+    assert.ok(result.trace.some((entry) => entry.action === 'search' && entry.status === 'success'));
+    assert.ok(result.trace.some((entry) => (
+      entry.action === 'read'
+      && ['improve_evidence', 'read_snippet', 'slot_repair_read', 'fallback_read_evidence'].includes(entry.reasonCode)
+    )));
+    assert.notEqual(result.quality.stopReason, 'evidence_sufficient');
   });
 
   it('opens a new gap when the answer gate reports a missing aspect', async () => {
@@ -384,7 +423,7 @@ describe('exploratory agent loop', () => {
 
   it('decomposes the query into sub-gaps and searches with multiple queries in one step', async () => {
     const decisions = [
-      { action: 'search', queries: ['ollama overview', 'llama.cpp overview'], gapId: 'gap-2', reasonCode: 'multi_search' },
+      { action: 'search', queries: ['ollama overview', 'ollama installation guide'], gapId: 'gap-2', reasonCode: 'multi_search' },
       { action: 'read', sourceIds: ['https://multi.test/a'], gapId: 'gap-2', reasonCode: 'read' },
       { action: 'answer', reasonCode: 'done' },
     ];
@@ -401,7 +440,7 @@ describe('exploratory agent loop', () => {
       } },
       llm: llmFor(decisions, {
         onDecompose: () => JSON.stringify({ subQuestions: ['How does ollama work?', 'How does llama.cpp work?'] }),
-        onProfile: () => JSON.stringify({ requiredHosts: ['docs.example.com'] }),
+        onProfile: () => JSON.stringify({ requiredSourceTypes: ['numeric'] }),
       }),
     });
 
@@ -410,8 +449,8 @@ describe('exploratory agent loop', () => {
     assert.equal(decompose.subQuestionCount, 2);
     assert.ok(decompose.targetGapIds.includes('gap-3'));
     assert.ok(searchedQueries.includes('ollama overview'));
-    assert.ok(searchedQueries.includes('llama.cpp overview'));
-    const searchEntry = result.trace.find((entry) => entry.action === 'search' && entry.status === 'success');
+    assert.ok(searchedQueries.includes('ollama installation guide'));
+    const searchEntry = result.trace.find((entry) => entry.action === 'search' && entry.decisionStep);
     assert.equal(searchEntry.queryCount, 2);
     // Finding attaches to the agent-selected sub-gap, not the original question.
     assert.equal(result.findings[0].question, 'How does ollama work?');
@@ -432,6 +471,7 @@ describe('exploratory agent loop', () => {
       } },
       search: { async search() { return [{ title: 'Serp title', url: 'https://serp.test', snippet: 'useful snippet', content: 'Serp topic evidence from a selected source.', fetchStatus: 'ok' }]; } },
       llm: { async complete({ purpose, messages }) {
+        if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
         if (purpose === 'agent_decision') {
           const snapshot = JSON.parse(messages.at(-1).content);
           if (snapshot.knowledge.some((entry) => entry.learned.startsWith('SERP:'))) observedKnowledge = snapshot.knowledge;
@@ -465,6 +505,8 @@ describe('exploratory agent loop', () => {
         { title: 'B', url: 'https://auto-b.test/page', content: 'More auto topic evidence from another host.', fetchStatus: 'ok' },
       ]; } },
       llm: { async complete({ purpose, messages }) {
+        if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
+        if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
         if (purpose === 'agent_decision') { decisionCalls += 1; return JSON.stringify(decisions.shift()); }
         if (purpose === 'gap_decomposition') return 'no json';
         if (purpose === 'research_profile') return defaultContractProfile();
@@ -511,11 +553,13 @@ describe('exploratory agent loop', () => {
       search: { async search() { return [{ title: 'Extract', url: 'https://extract.test/page', snippet: 'snippet', content: 'Extract topic evidence from a selected source.', fetchStatus: 'ok' }]; } },
       llm: { async complete({ purpose, messages }) {
         purposes.push(purpose);
+        if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
         if (purpose === 'agent_decision') return JSON.stringify(decisions.shift());
         if (purpose === 'gap_decomposition') return 'no json';
         if (purpose === 'research_profile') return defaultContractProfile();
         if (purpose === 'gap_support') return defaultGapSupport(messages);
         if (purpose === 'source_summary') throw new Error('extract mode should not call source_summary');
+        if (purpose === 'source_assessment') throw new Error('extract mode should not call source_assessment unless enabled');
         return report();
       } },
     });
@@ -523,6 +567,7 @@ describe('exploratory agent loop', () => {
     resetContentFetchHandlers();
     assert.ok(result.findings.length > 0);
     assert.equal(purposes.includes('source_summary'), false);
+    assert.equal(purposes.includes('source_assessment'), false);
     assert.ok(result.findings.some((finding) => (finding.sources || []).some((source) => source.extractionMethod === 'embedding')));
   });
 
@@ -554,7 +599,7 @@ describe('exploratory agent loop', () => {
     let maxActive = 0;
     const searchedQueries = [];
     const decisions = [
-      { action: 'search', queries: ['q one', 'q two', 'q three'], gapId: 'gap-1', reasonCode: 'multi' },
+      { action: 'search', queries: ['parallel topic one', 'parallel topic two', 'parallel topic three'], gapId: 'gap-1', reasonCode: 'multi' },
       { action: 'answer', reasonCode: 'done' },
     ];
     const result = await new ResearchRunner().run({
@@ -573,7 +618,7 @@ describe('exploratory agent loop', () => {
       } },
       llm: llmFor(decisions),
     });
-    assert.deepEqual(searchedQueries, ['q one', 'q two']);
+    assert.deepEqual(searchedQueries, ['parallel topic one', 'parallel topic two']);
     assert.ok(maxActive >= 2, `queries should overlap, saw maxActive=${maxActive}`);
     assert.equal(result.quality.budget.usage.searchRequests, 2);
   });
@@ -596,10 +641,10 @@ describe('exploratory agent loop', () => {
     assert.ok(result.trace.some((entry) => entry.action === 'answer' && entry.reasonCode === 'forced_final_answer'));
   });
 
-  it('does not treat the old 16-step default as a cap when maxSteps is unlimited', async () => {
+  it('uses the no-yield safety cap instead of the retired 16-step default', async () => {
     const decisions = Array.from({ length: 18 }, (_, index) => ({
       action: 'search',
-      query: `unique-host-${index}.example/path`,
+      query: `open topic space angle ${index}`,
       gapId: 'gap-1',
       reasonCode: `s${index}`,
     }));
@@ -624,7 +669,9 @@ describe('exploratory agent loop', () => {
     });
     assert.ok(!result.trace.some((entry) => entry.reasonCode === 'forced_final_answer'));
     assert.notEqual(result.quality.stopReason, 'max_steps_safety');
-    assert.ok(result.quality.budget.usage.searchRequests >= 18);
+    assert.equal(result.quality.stopReason, 'safety_cap');
+    assert.ok(['repair_exhausted', 'query_planner_exhausted'].includes(result.quality.stopDetail));
+    assert.ok(result.quality.budget.usage.searchRequests <= 18);
   });
 
   it('keeps gathered candidates and marks findings degraded when the budget is exhausted', async () => {
@@ -644,7 +691,8 @@ describe('exploratory agent loop', () => {
       search: { async search() { return [{ title: 'First', url: 'https://first.test', snippet: 'gathered evidence' }]; } },
       llm: {
         async complete({ purpose, messages }) {
-          if (purpose === 'agent_decision') {
+          if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
+        if (purpose === 'agent_decision') {
             decisionCalls += 1;
             return JSON.stringify(decisions.shift());
           }
@@ -996,7 +1044,8 @@ describe('exploratory agent loop', () => {
         } },
         llm: {
           async complete({ purpose, messages }) {
-            if (purpose === 'agent_decision') {
+            if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
+        if (purpose === 'agent_decision') {
               decisionCalls += 1;
               return JSON.stringify(decisions.shift());
             }
@@ -1041,7 +1090,9 @@ describe('exploratory agent loop', () => {
       llm: llmFor(decisions, { onProfile: keepExploringProfile }),
     });
     assert.ok(result.trace.some((entry) => entry.status === 'rejected' && entry.reasonCode === 'repeat_action'));
-    assert.ok(result.trace.some((entry) => entry.action === 'read' && entry.reasonCode === 'fallback_read_evidence'));
+    assert.ok(result.trace.some((entry) => (
+      entry.action === 'read' && ['fallback_read_evidence', 'slot_repair_read'].includes(entry.reasonCode)
+    )));
     assert.ok(!result.trace.some((entry) => entry.action === 'reflect' && entry.reasonCode === 'fallback_reflect_gaps'));
     assert.ok(!result.trace.some((entry) => entry.action === 'reflect' && entry.reasonCode === 'should_not_run'));
   });

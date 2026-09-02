@@ -1,6 +1,4 @@
 import { isFileSourceUrl, sourceDiversityKey } from '../source-candidates.mjs';
-import { extractComparisonSubjects, questionTokens } from './exploratory-sufficiency.mjs';
-
 const MULTI_LABEL_PUBLIC_SUFFIXES = new Set([
   'com.cn', 'net.cn', 'org.cn', 'gov.cn',
   'com.hk', 'org.hk', 'gov.hk',
@@ -108,6 +106,106 @@ export function hostnamesMatch(urlHostname, policyHost) {
   return left.endsWith(`.${right}`) || right.endsWith(`.${left}`);
 }
 
+export function siteHostsFromQuery(query = '') {
+  return uniqueTerms(
+    [...String(query || '').matchAll(/(?:^|\s)site:([^\s]+)/gi)]
+      .map((match) => stripLeadingWww(String(match[1] || '').replace(/^https?:\/\//i, '').split('/')[0])),
+  );
+}
+
+export function sourceMatchesSiteQuery(source = {}, query = '') {
+  const hosts = siteHostsFromQuery(query);
+  if (!hosts.length) return true;
+  const hostname = hostnameOf(source.url || source.id);
+  return hosts.some((host) => hostnamesMatch(hostname, host));
+}
+
+function entityAliases(entities = []) {
+  return uniqueTerms((entities || []).flatMap((entity) => {
+    const value = String(entity || '').trim();
+    if (!value) return [];
+    const compact = value.replace(/\s+/g, '');
+    const withoutSuffix = compact.replace(/(股份有限公司|有限责任公司|有限公司|集团|公司)$/u, '');
+    const cjkAliases = value.match(/[\p{Script=Han}]{2,}/gu) || [];
+    const latinAliases = (value.match(/[a-z][a-z0-9.-]{2,}/gi) || [])
+      .filter((item) => !['company', 'limited', 'technology'].includes(item.toLowerCase()));
+    return [value, compact, withoutSuffix, ...cjkAliases, ...latinAliases]
+      .map((item) => item.replace(/(股份有限公司|有限责任公司|有限公司|集团|公司)$/u, ''))
+      .map((item) => item.replace(/AI$/i, ''))
+      .filter((item) => item.length >= 2);
+  }));
+}
+
+export function sourceMatchesEntities(source = {}, entities = []) {
+  const aliases = entityAliases(entities);
+  if (!aliases.length) return true;
+  const haystack = [
+    source.title,
+    source.snippet,
+    source.summary,
+    source.content,
+    source.publisher,
+  ].filter(Boolean).join('\n').normalize('NFKC').toLowerCase();
+  return aliases.some((alias) => haystack.includes(alias.normalize('NFKC').toLowerCase()));
+}
+
+export function evaluateSourceRelevance(source = {}, {
+  gap = {},
+  query = '',
+  entities = [],
+  enabled = true,
+  enforceEntity = true,
+  minRerankScore = 0.01,
+  rerankProvider = source?.rerank?.provider || null,
+  allowRequiredHostProbe = true,
+} = {}) {
+  const rawRerankScore = source?.rerank?.score ?? source?.rerankScore;
+  const rerankScore = rawRerankScore == null ? null : Number(rawRerankScore);
+  const threshold = Number(minRerankScore);
+  const rerankEvaluated = Boolean(rerankProvider) && Number.isFinite(rerankScore);
+  const siteMatch = sourceMatchesSiteQuery(source, query);
+  const entityMatch = sourceMatchesEntities(source, entities);
+  const requiredHostProbe = allowRequiredHostProbe && isRequiredHostSource(source, gap);
+  const base = {
+    accepted: true,
+    reasonCode: requiredHostProbe
+      ? 'required_host_probe'
+      : (rerankEvaluated ? 'relevance_accepted' : 'rerank_not_evaluated'),
+    entityMatch,
+    siteMatch,
+    rerankScore: Number.isFinite(rerankScore) ? rerankScore : null,
+    threshold: Number.isFinite(threshold) ? threshold : null,
+    requiredHostProbe,
+  };
+  if (!enabled) return { ...base, reasonCode: 'relevance_disabled' };
+  if (!siteMatch) return { ...base, accepted: false, reasonCode: 'site_constraint_violation' };
+  if (enforceEntity && !entityMatch && !requiredHostProbe) {
+    return { ...base, accepted: false, reasonCode: 'entity_mismatch' };
+  }
+  const shouldApplyThreshold = rerankProvider
+    && !['disabled', 'rules'].includes(rerankProvider)
+    && Number.isFinite(rerankScore) && Number.isFinite(threshold);
+  if (shouldApplyThreshold && rerankScore < threshold && !requiredHostProbe) {
+    return { ...base, accepted: false, reasonCode: 'rerank_below_threshold' };
+  }
+  return base;
+}
+
+export function requiredHostCoverage(sources = [], gap = {}) {
+  const required = uniqueTerms(gap?.requiredHosts || []);
+  const read = required.filter((host) => (
+    (sources || []).some((source) => hostnamesMatch(hostnameOf(source?.url || source?.id), host))
+  ));
+  const missing = required.filter((host) => !read.includes(host));
+  const mode = gap?.requiredHostMode === 'all' ? 'all' : 'any';
+  return {
+    mode,
+    read,
+    missing,
+    satisfied: !required.length || (mode === 'all' ? missing.length === 0 : read.length > 0),
+  };
+}
+
 export function registrableDomain(hostname) {
   const stripped = stripLeadingWww(hostname);
   if (!stripped) return '';
@@ -134,6 +232,10 @@ export function classifySourceTier(source = {}, gap = {}) {
   if (!host) return 'unknown';
   const required = gap.requiredHosts || [];
   if (required.some((item) => hostnamesMatch(host, item))) return 'required_primary';
+  const assessed = source.assessment?.evidenceTier;
+  if (assessed && ['other_primary', 'specialist', 'mainstream', 'reprint', 'ugc', 'unknown'].includes(assessed)) {
+    return assessed;
+  }
   if (matchesAny(host, PRIMARY_HOST_PATTERNS) || source.sourceType === 'primary') return 'other_primary';
   if (matchesAny(host, SPECIALIST_HOST_PATTERNS)) return 'specialist';
   if (matchesAny(host, UGC_HOST_PATTERNS)) return 'ugc';
@@ -215,57 +317,44 @@ export function gapHasPolicyHosts(gap = {}) {
   return Boolean((gap?.requiredHosts || []).length);
 }
 
-export function siteQueryTermVariants(query = '') {
-  const text = String(query || '').trim();
-  const subjects = extractQuerySubjects(text);
-  const cjk = subjects.filter((item) => /[\u4e00-\u9fff]/.test(item));
-  const latin = subjects.filter((item) => /[A-Za-z]/.test(item));
-  const tickers = subjects.filter((item) => /^\d{4,6}$/.test(item));
-  const compact = [cjk[0], tickers[0], latin[0]].filter(Boolean).join(' ');
-  const cjkTicker = [cjk[0], tickers[0]].filter(Boolean).join(' ');
-  const slice8 = text.replace(/\s+/g, ' ').slice(0, 8);
-  const slice12 = text.replace(/\s+/g, ' ').slice(0, 12);
-  return uniqueTerms([compact, cjkTicker, cjk[0], latin[0], tickers[0], slice8, slice12]);
+function publicScopeField(value) {
+  const text = String(value || '').trim();
+  if (!text || /_/.test(text)) return '';
+  return text;
 }
 
-export function shortSearchTerms(query = '', { maxChars = 12 } = {}) {
-  const variants = siteQueryTermVariants(query);
-  if (variants[0]) return variants[0];
-  return String(query || '').replace(/\s+/g, ' ').trim().slice(0, maxChars);
+function asScopeTexts(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.flatMap((item) => asScopeTexts(item));
+  const text = String(value).trim();
+  return text ? [text] : [];
 }
 
-export function nextUnusedSearchAngles(query, searchedQueries = [], { limit = 2 } = {}) {
-  const searched = new Set((searchedQueries || []).map(String));
-  const out = [];
-  for (const terms of siteQueryTermVariants(query)) {
-    if (!terms || searched.has(terms)) continue;
-    out.push(terms);
-    if (out.length >= limit) return out;
+export function queryMatchesGapScope(query = '', gap = {}, entities = [], extraScope = []) {
+  let scopeText = [
+    gap.question,
+    publicScopeField(gap.answerSlot),
+    publicScopeField(gap.claimFamily),
+    ...(gap.evidenceCriteria || []).map(publicScopeField),
+    ...asScopeTexts(extraScope),
+  ].filter(Boolean).join(' ').normalize('NFKC').toLowerCase();
+  for (const alias of entityAliases(entities)) {
+    scopeText = scopeText.replaceAll(alias.normalize('NFKC').toLowerCase(), ' ');
   }
-  return out;
-}
-
-export function nextUnusedSiteQueries(gap, query, searchedQueries = [], { limit = 2 } = {}) {
-  const hosts = uniqueTerms(gap?.requiredHosts || []);
-  if (!hosts.length) return [];
-  const searched = new Set((searchedQueries || []).map(String));
-  const variants = siteQueryTermVariants(query || gap?.question);
-  const out = [];
-  for (const terms of variants) {
-    for (const host of hosts) {
-      const next = `site:${host} ${terms}`.trim();
-      if (searched.has(next)) continue;
-      out.push(next);
-      if (out.length >= limit) return out;
-    }
-  }
-  return out;
-}
-
-export function buildSiteHostQueries(gap, extraTerms = '', options = {}) {
-  const hosts = uniqueTerms(gap?.requiredHosts || []);
-  const terms = String(extraTerms || '').trim() || shortSearchTerms(options.query || gap?.question || '');
-  return hosts.map((host) => `site:${host} ${terms}`.trim());
+  const generic = new Set([
+    'what', 'does', 'work', 'topic', 'evidence', 'status', 'company', 'research',
+    '如何', '情况', '公司', '研究', '证据', '状态', '最新', '历史',
+  ]);
+  const latin = (scopeText.match(/[a-z][a-z0-9]{3,}/g) || [])
+    .filter((term) => !generic.has(term));
+  const han = (scopeText.match(/[\p{Script=Han}]{2,}/gu) || []).flatMap((term) => {
+    if (term.length <= 4) return [term];
+    return Array.from({ length: term.length - 1 }, (_, index) => term.slice(index, index + 2));
+  }).filter((term) => !generic.has(term));
+  const terms = uniqueTerms([...latin, ...han]);
+  if (!terms.length) return true;
+  const normalizedQuery = String(query || '').normalize('NFKC').toLowerCase();
+  return terms.some((term) => normalizedQuery.includes(term));
 }
 
 export function independentDomainsFromSources(sources = []) {
@@ -308,35 +397,6 @@ export function independentEvidenceKeysFromSources(sources = []) {
   );
 }
 
-export function collectSearchAngleCandidates(query, gaps = [], searchedQueries = [], { evidenceScope = 'web' } = {}) {
-  const searched = new Set((searchedQueries || []).map(String));
-  const out = [];
-  const push = (value) => {
-    const term = String(value || '').trim();
-    if (!term || searched.has(term) || out.includes(term)) return;
-    out.push(term);
-  };
-  if (evidenceScope !== 'local') {
-    for (const gap of gaps) {
-      for (const next of nextUnusedSiteQueries(gap, query, [...searched, ...out], { limit: 3 })) {
-        push(next);
-      }
-    }
-  }
-  for (const angle of nextUnusedSearchAngles(query, [...searched, ...out], { limit: 6 })) {
-    push(angle);
-  }
-  for (const subject of extractComparisonSubjects(query)) push(subject);
-  for (const token of questionTokens(query)) {
-    if (String(token).length >= 3) push(token);
-  }
-  for (const gap of gaps) {
-    if (['open', 'searched', 'missing'].includes(gap.status || 'open')) push(gap.question);
-  }
-  push(String(query || '').replace(/\s+/g, ' ').trim().slice(0, 16));
-  return out;
-}
-
 export function selectReadsByPolicy({
   candidates = [],
   gap = {},
@@ -344,11 +404,16 @@ export function selectReadsByPolicy({
   maxPerHostname = 2,
   minCount = 2,
   maxCount = 5,
+  relevance = null,
 } = {}) {
   const ranked = [...candidates]
     .filter((candidate) => candidate && !isBlockedHostSource(candidate, gap))
     .map((candidate) => {
       const tier = candidate.tier || classifySourceTier(candidate, gap);
+      const evaluated = relevance
+        ? evaluateSourceRelevance(candidate, { ...relevance, gap })
+        : (candidate.relevanceDecision || null);
+      const decision = evaluated ? { ...evaluated, gapId: gap.id || candidate.gapId || null } : null;
       return {
         ...candidate,
         hostname: candidate.hostname || hostnameOf(candidate.url || candidate.id),
@@ -356,12 +421,23 @@ export function selectReadsByPolicy({
         registrableDomain: candidate.registrableDomain || registrableDomainFromUrl(candidate.url || candidate.id),
         tier,
         tierRank: sourceTierRank(tier),
-        rerankScore: Number(candidate.rerank?.score ?? candidate.rerankScore ?? 0) || 0,
+        rerankScore: candidate.rerank?.score ?? candidate.rerankScore ?? null,
+        hostPreferenceBoost: (gap.preferredHosts || []).some((host) => (
+          hostnamesMatch(candidate.hostname || hostnameOf(candidate.url || candidate.id), host)
+        )) ? 0.15 : 0,
+        relevanceDecision: decision,
       };
     })
+    .filter((candidate) => candidate.relevanceDecision?.accepted !== false)
     .sort((left, right) => {
+      if (left.tier === 'required_primary' && right.tier !== 'required_primary') return -1;
+      if (right.tier === 'required_primary' && left.tier !== 'required_primary') return 1;
+      const rightScore = right.rerankScore == null ? Number.NEGATIVE_INFINITY : Number(right.rerankScore);
+      const leftScore = left.rerankScore == null ? Number.NEGATIVE_INFINITY : Number(left.rerankScore);
+      const rightRank = (Number.isFinite(rightScore) ? rightScore : Number.NEGATIVE_INFINITY) + right.hostPreferenceBoost;
+      const leftRank = (Number.isFinite(leftScore) ? leftScore : Number.NEGATIVE_INFINITY) + left.hostPreferenceBoost;
+      if (rightRank !== leftRank) return rightRank - leftRank;
       if (left.tierRank !== right.tierRank) return left.tierRank - right.tierRank;
-      if (right.rerankScore !== left.rerankScore) return right.rerankScore - left.rerankScore;
       return (right.freq || 0) - (left.freq || 0);
     });
 

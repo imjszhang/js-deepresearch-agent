@@ -1,8 +1,8 @@
 import { hostnameOf } from './research-state.mjs';
 import { isOrthogonalGap } from './exploratory-sufficiency.mjs';
-import { collectSearchAngleCandidates, inferEvidenceScope } from './source-policy.mjs';
+import { nextSlotRepairAction } from './slot-repair-scheduler.mjs';
 
-const ACTION_SCHEMA = '{"action":"search|read|reflect|draft|finalize","reasonCode":"short_code","gapId":"gap-1","query":"...","queries":["..."],"sourceIds":["..."],"gapQuestion":"..."}';
+const ACTION_SCHEMA = '{"action":"search|read|reflect|draft|finalize","reasonCode":"short_code","gapId":"gap-1","plannerMode":"initial|repair|challenge|angle_change|recovery|site_fallback","sourceIds":["..."],"gapQuestion":"..."}';
 
 function extractJson(text) {
   const raw = String(text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
@@ -16,11 +16,16 @@ function normalizeDecision(parsed) {
   if (!parsed || typeof parsed !== 'object') return parsed;
   if (parsed.action === 'answer') parsed.action = 'finalize';
   if (parsed.action === 'stop') parsed.action = 'finalize';
+  if (parsed.action === 'search') {
+    parsed.needsPlanner = true;
+    parsed.plannerMode = parsed.plannerMode || 'repair';
+  }
   return parsed;
 }
 
 export async function decideAdaptiveAction({ llm, state, signal }) {
-  const snapshot = state.snapshot();
+  const snapshot = state.snapshotForAgent();
+  state.lastAgentSnapshotChars = Buffer.byteLength(JSON.stringify(snapshot));
   const belowMin = Boolean(snapshot.budget?.belowMin);
   const gatePass = Boolean(snapshot.readiness?.pass);
   const response = await llm.complete({
@@ -35,14 +40,15 @@ export async function decideAdaptiveAction({ llm, state, signal }) {
       'While budget.belowMin is true, keep exploring: search or read missing subjects and open gaps. Do not finalize yet.',
       'readiness.pass is the only evidence-sufficient signal. You cannot override a failed readiness gate.',
       'After a search, you must read a real body before draft/finalize. Snippets, WAF, and shell pages do not count.',
-      'If a gap lists requiredHosts, those are commitments from the research profile. You may use site:host queries for them. Do not invent exchange, regulator, or annual-report hosts.',
+      'Do not write search queries. Choose action, gapId, and plannerMode only. A later planner writes the actual queries.',
+      'plannerMode: initial for first coverage, repair for failed slots, angle_change after a plateau, recovery after a rejected action.',
+      'If a gap lists requiredHosts, those are commitments from the research profile. The planner may use site:host only for allowed hosts.',
+      'preferredHosts are ranking hints; only requiredHosts or confirmed observed hosts may use site:host.',
       'Use read to pick unread sources for the current focus gap. Consecutive reads of different unread sources are allowed.',
       'Use reflect only when you have a genuinely new orthogonal gap that is not a paraphrase of an existing gap.',
       'Use draft for a candidate answer that will be checked; failed drafts become repair gaps.',
       'Use finalize only when readiness.pass is true and you are not below the token floor.',
       'If budget.belowMin is false but readiness.pass is false, do not finalize. Keep searching or reading unread sources that address the failed gate.',
-      'Never repeat or closely paraphrase a query listed in searchedQueries.',
-      'A search action may include up to 3 distinct queries in "queries"; make them complementary, not paraphrases.',
       'A read action should include 2-4 sourceIds when several promising unread candidates exist.',
       belowMin ? 'You are still below the token floor. Do not finalize. Explore another unread source or uncovered subject.' : '',
       !belowMin && !gatePass ? 'The token floor is already met but readiness.pass is false. Do not finalize. Search or read for the missing commitment, not a default filing venue.' : '',
@@ -118,20 +124,12 @@ export function belowHardCapFrom(state, options = {}) {
 
 export function buildAngleChangeSearch(state, { reasonCode = 'fallback_angle_change' } = {}) {
   const focus = (typeof state.focusGap === 'function' ? state.focusGap() : null) || state.gaps?.[0];
-  const searched = typeof state.searchedQueries === 'function' ? state.searchedQueries() : [];
-  const evidenceScope = state.evidenceScope || inferEvidenceScope(state.settings);
-  const angles = collectSearchAngleCandidates(
-    state.query || focus?.question || '',
-    state.gaps || [],
-    searched,
-    { evidenceScope },
-  );
-  if (!angles.length) return null;
+  if (!focus && !state.query) return null;
   return {
     action: 'search',
-    query: angles[0],
-    queries: angles.slice(0, 3),
     gapId: focus?.id || 'gap-1',
+    plannerMode: 'angle_change',
+    needsPlanner: true,
     reasonCode,
   };
 }
@@ -145,6 +143,10 @@ export function fallbackAdaptiveAction(state, options = {}) {
   if (gatePass && !belowMin) {
     return { action: 'answer', reasonCode: 'fallback_evidence_sufficient' };
   }
+  if (readiness && !gatePass) {
+    const repair = nextSlotRepairAction(state, { readiness, reasonCode: 'fallback_slot_repair' });
+    if (repair) return repair;
+  }
   const focusId = state.focusGap?.()?.id || 'gap-1';
   const picks = pickUnreadCandidates(state, 2, focusId);
   if (picks.length) {
@@ -157,35 +159,33 @@ export function fallbackAdaptiveAction(state, options = {}) {
   }
   const searchedOriginal = state.searchedQueries().includes(state.query);
   if ((state.candidates.size === 0 || !searchedOriginal) && state.lastAction !== 'search') {
-    return { action: 'search', query: state.query, gapId: 'gap-1', reasonCode: 'fallback_initial_search' };
+    return {
+      action: 'search',
+      query: state.query,
+      queries: [state.query],
+      gapId: 'gap-1',
+      queryOrigin: 'user_query',
+      reasonCode: 'fallback_initial_search',
+    };
   }
   const uncovered = (state.gaps || []).find((gap) => (
     !state.gapCovered(gap.id) && !state.searchedQueries().includes(gap.question)
   ));
-  const evidenceScope = state.evidenceScope || inferEvidenceScope(state.settings);
   if (uncovered && state.lastAction !== 'search') {
-    const angles = collectSearchAngleCandidates(
-      uncovered.question || state.query,
-      [uncovered],
-      state.searchedQueries(),
-      { evidenceScope },
-    );
-    if (angles.length) {
-      return {
-        action: 'search',
-        query: angles[0],
-        queries: angles.slice(0, 3),
-        gapId: uncovered.id,
-        reasonCode: belowMin ? 'fallback_explore_below_min' : 'fallback_search_open_gap',
-      };
-    }
+    return {
+      action: 'search',
+      gapId: uncovered.id,
+      plannerMode: belowMin ? 'initial' : 'repair',
+      needsPlanner: true,
+      reasonCode: belowMin ? 'fallback_explore_below_min' : 'fallback_search_open_gap',
+    };
   }
   if (!gatePass && !belowHardCap) {
     return { action: 'answer', reasonCode: 'budget_exhausted' };
   }
   return buildAngleChangeSearch(state, {
     reasonCode: belowMin ? 'fallback_explore_below_min' : 'fallback_angle_change',
-  }) || { action: 'answer', reasonCode: 'budget_exhausted' };
+  }) || { action: 'reflect', reasonCode: 'repair_angles_exhausted' };
 }
 
 export function canReflectNewGap(state, gapQuestion) {

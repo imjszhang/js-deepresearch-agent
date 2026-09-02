@@ -7,6 +7,7 @@ import {
   runStrategy,
   strategyMetadata,
 } from '../src/index.mjs';
+import { defaultSearchQueryPlan } from './helpers/search-query-planner-mock.mjs';
 
 function validReport(marker = 'test report') {
   return `# Research Report\n\n## Summary\n\nThis ${marker} summarizes the collected evidence and clearly distinguishes verified observations from unresolved limitations. It provides enough structured prose to validate the report output contract without relying on an empty or placeholder response.\n\n## Caveats\n\nThe test evidence is intentionally limited.`;
@@ -48,9 +49,14 @@ describe('ResearchRunner', () => {
         },
       },
       llm: {
-        async complete({ messages }) {
-          if (messages[0].content.includes('research planner')) {
-            return JSON.stringify(['follow up one', 'follow up two']);
+        async complete({ purpose }) {
+          if (purpose === 'search_query_planning') {
+            return JSON.stringify({
+              queries: [
+                { query: 'follow up one' },
+                { query: 'follow up two' },
+              ],
+            });
           }
           return validReport('test report [1.1]');
         },
@@ -59,6 +65,10 @@ describe('ResearchRunner', () => {
 
     assert.match(result.report, /test report/);
     assert.deepEqual(searchedQuestions, ['test topic', 'follow up one', 'follow up two']);
+    assert.ok(result.trace.some((entry) => (
+      entry.action === 'search_query_planned'
+      && entry.plannedQueries?.every((item) => ['user_query', 'llm_planner'].includes(item.queryOrigin))
+    )));
     assert.equal(result.sources.length, 3);
     assert.equal(events[0].message, 'Research started');
     assert.ok(events.some((event) => event.message === 'Generating quick follow-up questions'));
@@ -104,6 +114,7 @@ describe('ResearchRunner', () => {
       },
       llm: {
         async complete({ purpose, messages }) {
+          if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
           if (purpose === 'research_profile') {
             return JSON.stringify({
               requiredAnswerSlots: [
@@ -124,7 +135,7 @@ describe('ResearchRunner', () => {
 
     assert.ok(searchedQuestions.includes('deep topic'));
     assert.ok(searchedQuestions.includes('first iteration question'));
-    assert.ok(searchedQuestions.some((question) => question.includes('primary source evidence')));
+    assert.ok(!searchedQuestions.some((question) => question.includes('primary source evidence')));
     assert.ok(result.findings.some((finding) => finding.wave === 'discovery'));
     assert.ok(result.findings.some((finding) => finding.wave === 'repair'));
     assert.ok(result.gaps.length >= 2);
@@ -162,6 +173,7 @@ describe('ResearchRunner', () => {
       search: { async search(question) { return [{ title: question, url: `https://example.com/${encodeURIComponent(question)}`, snippet: 'evidence', content: 'usable evidence', fetchStatus: 'ok' }]; } },
       llm: {
         async complete({ purpose, messages }) {
+          if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
           if (purpose === 'agent_decision') return JSON.stringify(decisions.shift());
           if (purpose === 'gap_decomposition') return '{"subQuestions":["gap two"]}';
           if (purpose === 'research_profile') {
@@ -191,7 +203,12 @@ describe('ResearchRunner', () => {
       query: 'budgeted topic',
       settings: { llm: {}, search: {}, research: { strategy: 'quick', iterations: 1, questionsPerIteration: 2, concurrency: 2, budget: { maxSearchRequests: 1 } } },
       search: { async search(question) { calls += 1; return [{ title: question, url: 'https://example.test', snippet: 'x' }]; } },
-      llm: { async complete({ messages }) { return messages[0].content.includes('research planner') ? JSON.stringify(['q1', 'q2']) : validReport('budgeted report'); } },
+      llm: { async complete({ purpose }) {
+        if (purpose === 'search_query_planning') {
+          return JSON.stringify({ queries: [{ query: 'q1' }, { query: 'q2' }] });
+        }
+        return validReport('budgeted report');
+      } },
     });
     assert.equal(calls, 1);
     assert.equal(result.quality.budget.usage.searchRequests, 1);
@@ -206,7 +223,7 @@ describe('ResearchRunner', () => {
       settings: { llm: {}, search: {}, research: { strategy: 'quick', iterations: 1, questionsPerIteration: 0 } },
       search: { async search() { return [{ title: 'S', url: 'https://example.test', snippet: 'evidence' }]; } },
       llm: { async complete({ purpose }) {
-        if (purpose === 'question_generation') return '[]';
+        if (purpose === 'search_query_planning') return JSON.stringify({ queries: [] });
         reportAttempts += 1;
         return reportAttempts === 1 ? '' : validReport('retried report');
       } },
@@ -225,7 +242,7 @@ describe('ResearchRunner', () => {
         query: 'empty report topic',
         settings: { llm: {}, search: {}, research: { strategy: 'quick', iterations: 1, questionsPerIteration: 0 } },
         search: { async search() { return [{ title: 'S', url: 'https://example.test', snippet: 'evidence' }]; } },
-        llm: { async complete({ purpose }) { return purpose === 'question_generation' ? '[]' : ''; } },
+        llm: { async complete({ purpose }) { return purpose === 'search_query_planning' ? JSON.stringify({ queries: [] }) : ''; } },
       }),
       (error) => error.name === 'ReportGenerationError' && error.code === 'REPORT_OUTPUT_INVALID' && error.attempts === 2,
     );
@@ -243,7 +260,8 @@ describe('ResearchRunner', () => {
           ? []
           : [{ title: 'Secondary article', url: 'https://blog.csdn.net/secondary', snippet: 'overview' }];
       } },
-      llm: { async complete({ purpose }) {
+      llm: { async complete({ purpose, messages }) {
+        if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
         if (purpose === 'research_profile') {
           return JSON.stringify({
             requiredAnswerSlots: [
@@ -281,7 +299,8 @@ describe('ResearchRunner', () => {
         focused: { fetchMode: 'disabled', iterationControl: { enabled: false } },
       } },
       search: { async search() { return []; } },
-      llm: { async complete({ purpose }) {
+      llm: { async complete({ purpose, messages }) {
+        if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
         if (purpose === 'research_profile') {
           return JSON.stringify({
             requiredAnswerSlots: [{ answerSlot: 'same unresolved question', question: 'same unresolved question' }],
@@ -332,7 +351,8 @@ describe('ResearchRunner', () => {
           },
         },
         llm: {
-          async complete({ purpose }) {
+          async complete({ purpose, messages }) {
+            if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
             if (purpose === 'research_profile') {
               return JSON.stringify({
                 requiredAnswerSlots: [{
@@ -405,7 +425,8 @@ describe('ResearchRunner', () => {
           },
         },
         llm: {
-          async complete({ purpose }) {
+          async complete({ purpose, messages }) {
+            if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
             if (purpose === 'research_profile') {
               return JSON.stringify({
                 requiredAnswerSlots: [
@@ -444,5 +465,42 @@ describe('ResearchRunner', () => {
     } finally {
       resetContentFetchHandlers();
     }
+  });
+
+  it('skips focused search waves when the planner fails and does not splice a fallback query', async () => {
+    const searched = [];
+    const result = await new ResearchRunner().run({
+      query: 'planner failure topic',
+      settings: {
+        llm: {},
+        search: {},
+        research: {
+          strategy: 'focused',
+          iterations: 1,
+          questionsPerIteration: 1,
+          focused: { fetchMode: 'disabled', challenge: { enabled: false }, iterationControl: { enabled: false } },
+        },
+      },
+      search: {
+        async search(question) {
+          searched.push(question);
+          return [{ title: question, url: 'https://example.test/a', snippet: 'x' }];
+        },
+      },
+      llm: {
+        async complete({ purpose }) {
+          if (purpose === 'search_query_planning') return JSON.stringify({ queries: [] });
+          if (purpose === 'research_profile') {
+            return JSON.stringify({
+              requiredAnswerSlots: [{ answerSlot: 'topic', question: 'planner failure topic' }],
+            });
+          }
+          return validReport('planner failure report');
+        },
+      },
+    });
+    assert.deepEqual(searched, []);
+    assert.ok(!result.trace.some((entry) => /primary source evidence/.test(String(entry.query || ''))));
+    assert.ok(result.trace.some((entry) => entry.skipped === 'query_planner_failed' || entry.failure));
   });
 });

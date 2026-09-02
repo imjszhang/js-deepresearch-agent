@@ -47,4 +47,15 @@ describe('normalizeSearchConfig', () => {
     assert.equal(engine.config.baseUrl, 'http://legacy.local:8080');
     assert.equal(engine.config.searxngUrl, undefined);
   });
+
+  it('copies top-level language and safeSearch into options', () => {
+    const normalized = normalizeSearchConfig({
+      language: 'zh',
+      safeSearch: false,
+      options: { engines: 'brave' },
+    });
+    assert.equal(normalized.options.language, 'zh');
+    assert.equal(normalized.options.safesearch, '0');
+    assert.equal(normalized.options.engines, 'brave');
+  });
 });

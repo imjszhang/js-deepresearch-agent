@@ -6,6 +6,61 @@ import { ResearchState } from '../src/research/adaptive/research-state.mjs';
 import { evaluateAnswerReadiness } from '../src/research/adaptive/agent-policy.mjs';
 
 describe('deterministic readiness gate', () => {
+  it('fails closed when a brief slot is missing from materialized gaps', () => {
+    const gate = evaluateReadinessGate({
+      profile: {
+        flags: {},
+        minIndependentSources: 1,
+        brief: {
+          requiredAnswerSlots: [
+            { id: 'mlx', answerSlot: 'MLX' },
+            { id: 'ollama', answerSlot: 'Ollama' },
+          ],
+        },
+      },
+      gaps: [{
+        id: 'gap-slot-mlx',
+        contractSlotId: 'mlx',
+        answerSlot: 'MLX',
+        requiredSlot: true,
+        priority: 'normal',
+        status: 'verified',
+      }],
+      findings: [{
+        gapId: 'gap-slot-mlx',
+        sources: [{ url: 'https://example.com/mlx', content: 'Fetched MLX evidence body.', fetchStatus: 'ok' }],
+      }],
+    });
+    assert.equal(gate.pass, false);
+    assert.ok(gate.failures.some((failure) => failure.code === 'contract_slot_missing' && failure.slotId === 'ollama'));
+  });
+
+  it('implements explicit any and all required host coverage', () => {
+    const findings = [{
+      gapId: 'gap-slot-hosts',
+      sources: [{ url: 'https://docs.example.com/a', content: 'Fetched official evidence body.', fetchStatus: 'ok' }],
+    }];
+    const gap = {
+      id: 'gap-slot-hosts',
+      requiredSlot: true,
+      priority: 'normal',
+      status: 'verified',
+      requiredHosts: ['docs.example.com', 'api.example.net'],
+    };
+    const anyGate = evaluateReadinessGate({
+      profile: { flags: {}, minIndependentSources: 1 },
+      gaps: [{ ...gap, requiredHostMode: 'any' }],
+      findings,
+    });
+    const allGate = evaluateReadinessGate({
+      profile: { flags: {}, minIndependentSources: 1 },
+      gaps: [{ ...gap, requiredHostMode: 'all' }],
+      findings,
+    });
+    assert.equal(anyGate.failures.some((failure) => failure.code === 'required_host_missing'), false);
+    assert.equal(allGate.failures.some((failure) => failure.code === 'required_host_missing'), true);
+  });
+
   it('keeps required or critical gaps from becoming evidence_sufficient', () => {
     const query = '智谱 港交所 招股书 营收 控股股东';
     const inferred = inferResearchProfile(query);

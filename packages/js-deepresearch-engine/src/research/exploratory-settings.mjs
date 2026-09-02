@@ -57,6 +57,8 @@ export function resolveExploratorySettings(settings = {}) {
     autoReadTopK: raw.autoReadTopK,
     maxCandidateEvaluationTokens: countBound(raw.maxCandidateEvaluationTokens, 0),
     maxPostReportEvaluationTokens: countBound(raw.maxPostReportEvaluationTokens, 0),
+    maxRepairFailuresPerGap: countBound(raw.maxRepairFailuresPerGap, 3) || 3,
+    maxConsecutiveInvalidSteps: countBound(raw.maxConsecutiveInvalidSteps, 6) || 6,
   };
 }
 

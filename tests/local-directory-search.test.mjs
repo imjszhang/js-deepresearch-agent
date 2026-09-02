@@ -22,6 +22,7 @@ import {
   parseCorpusDirList,
   toFileUrl,
 } from '../src/search-providers/local/public.mjs';
+import { defaultSearchQueryPlan } from '../packages/js-deepresearch-engine/tests/helpers/search-query-planner-mock.mjs';
 
 const tempDirs = [];
 
@@ -350,8 +351,16 @@ describe('local path helpers', () => {
 describe('local focused integration', () => {
   it('runs focused search → enrich → findings with local file bodies', async () => {
     const root = makeTempDir();
-    writeFile(root, 'penalty.md', 'The regulator issued 监管处罚 against the issuer in 2024 with a published decision.');
-    writeFile(root, 'notes.md', 'Background notes about 监管处罚 and the related annual filing language.');
+    writeFile(root, 'penalty.md', [
+      'The regulator issued 监管处罚 against the issuer in 2024 with a published decision and a cited case number.',
+      'The remainder of this local filing note expands the factual background so the fetched body is longer than a search snippet.',
+      'It records the penalty amount, the responsible bureau, and the document identifier for later citation checks.',
+    ].join(' '));
+    writeFile(root, 'notes.md', [
+      'Background notes about 监管处罚 and the related annual filing language from the local corpus.',
+      'These notes stay available as a second independent local file after the primary decision text is read.',
+      'They also mention the same issuer, the year of the decision, and a cross-reference to the annual report appendix.',
+    ].join(' '));
 
     const search = createSearchEngine({
       search: {
@@ -384,6 +393,7 @@ describe('local focused integration', () => {
       search,
       llm: {
         async complete({ purpose, messages }) {
+          if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
           if (purpose === 'research_profile') return localContractProfile('监管处罚');
           if (purpose === 'gap_support') return localGapSupport(messages);
           if (purpose === 'question_generation' || messages[0].content.includes('research planner')) {
@@ -400,7 +410,8 @@ describe('local focused integration', () => {
     assert.ok(localBodies.every((source) => source.url.startsWith('file://')));
     assert.ok(result.quality.budget.usage.searchRequests >= 1);
     assert.ok(result.quality.budget.usage.sourceReads >= 1);
-    assert.ok(!JSON.stringify(result.trace).includes('The regulator issued'));
+    const traceText = JSON.stringify(result.trace);
+    assert.ok(localBodies.every((source) => !traceText.includes(source.content)));
   });
 });
 
@@ -464,6 +475,7 @@ describe('local exploratory integration', () => {
       search,
       llm: {
         async complete({ purpose, messages }) {
+          if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
           if (purpose === 'research_profile') {
             return JSON.stringify({
               flags: { primary_source: true },
@@ -508,6 +520,145 @@ describe('local exploratory integration', () => {
     const caveatBlock = result.report.split('## Caveats')[1] || '';
     const insufficient = [...caveatBlock.matchAll(/Insufficient direct evidence for:/g)];
     assert.ok(insufficient.length <= 1);
+  });
+
+  it('runs exploratory Search-Read-Reason on a local penalty corpus', async () => {
+    const filings = makeTempDir('jdr-local-filings-');
+    const notes = makeTempDir('jdr-local-notes-');
+    writeFile(filings, 'penalty-2024.md', [
+      '星河智算股份有限公司 2024 年监管处罚决定书。',
+      '监管机构认定公司未按规定披露关联交易，决定处以罚款 1200 万元，并于 2024 年 8 月 16 日送达决定。',
+      '决定书列明违法事实、处罚依据、缴纳期限，以及当事人陈述申辩的采纳情况。',
+      '该文件是本地语料中的一手处罚正文，而不是网页搜索摘要。',
+    ].join(''));
+    writeFile(notes, 'rectification.md', [
+      '星河智算 2024 年监管处罚整改报告。',
+      '公司已补披露关联交易、修订关联交易管理制度，并由审计委员会复核 2023 至 2024 年同类交易。',
+      '整改措施还包括对信息披露负责人问责、增加季度合规检查，以及向监管机构报送整改进展。',
+      '这份本地备忘录记录了整改责任人和完成时点，足以作为第二个独立语料通道的正文证据。',
+    ].join(''));
+    writeFile(notes, 'annual-excerpt.md', [
+      '星河智算 2024 年年度报告摘录提到，公司因信息披露违规被处以 1200 万元罚款，并已完成整改。',
+      '年报同时披露该处罚不影响持续经营，相关或有负债已在当期损益中确认。',
+      '摘录还说明董事会已审阅整改报告，并要求内审部门持续跟踪关联交易披露。',
+    ].join(''));
+
+    const inner = createSearchEngine({
+      search: { engine: 'local', maxResults: 8, local: { dirs: [filings, notes] } },
+    });
+    const queries = [];
+    const plannerUsers = [];
+    let agentStep = 0;
+    const search = {
+      async search(query, options) {
+        queries.push(query);
+        return inner.search(query, options);
+      },
+    };
+
+    const result = await new ResearchRunner().run({
+      query: '星河智算 2024 年监管处罚的金额、事由和整改措施是什么？',
+      settings: {
+        llm: {},
+        search: { engine: 'local', local: { dirs: [filings, notes] } },
+        research: {
+          strategy: 'exploratory',
+          exploratory: {
+            minLlmTokens: 0,
+            maxLlmTokens: 0,
+            maxSteps: 8,
+            maxEvaluationRetries: 0,
+            autoReadTopK: 3,
+          },
+          focused: { fetchMode: 'full' },
+          budget: { maxSearchRequests: 4, maxSourceReads: 6, maxLlmTokens: 0 },
+          quality: { entailment: 'rules' },
+        },
+      },
+      search,
+      llm: {
+        async complete({ purpose, messages }) {
+          if (purpose === 'search_query_planning') {
+            plannerUsers.push(messages.find((item) => item.role === 'user')?.content || '');
+            return defaultSearchQueryPlan(messages);
+          }
+          if (purpose === 'research_profile') {
+            return JSON.stringify({
+              requiredAnswerSlots: [
+                {
+                  answerSlot: '处罚金额与事由',
+                  question: '星河智算 2024 年监管处罚的金额和事由是什么？',
+                  priority: 'critical',
+                },
+                {
+                  answerSlot: '整改措施',
+                  question: '星河智算对 2024 年监管处罚采取了哪些整改措施？',
+                  priority: 'normal',
+                },
+              ],
+              minIndependentSources: 1,
+            });
+          }
+          if (purpose === 'gap_support') return localGapSupport(messages);
+          if (purpose === 'agent_decision') {
+            agentStep += 1;
+            if (agentStep === 1) {
+              return JSON.stringify({
+                action: 'search',
+                query: '星河智算 2024 监管处罚',
+                gapId: 'gap-1',
+                reasonCode: 'search',
+              });
+            }
+            return JSON.stringify({ action: 'answer', reasonCode: 'done' });
+          }
+          if (purpose === 'gap_decomposition') return '{"subQuestions":[]}';
+          return `# Research Report
+
+## Summary
+本地处罚决定书写明星河智算因未按规定披露关联交易被罚款 1200 万元，整改报告则记录了补披露、制度修订和持续合规检查。报告区分了已从本地正文核实的事实与仍需外部核对的限制。 [1.1]
+
+## Key Findings
+- 2024 年 8 月 16 日送达的决定对星河智算处以 1200 万元罚款，事由为未按规定披露关联交易。 [1.1]
+- 公司已补披露关联交易、修订管理制度，并由审计委员会复核同类交易。 [1.2]
+`;
+        },
+      },
+    });
+
+    const sources = result.findings.flatMap((finding) => finding.sources || []);
+    const localBodies = sources.filter((source) => (
+      source.fetchStatus === 'ok'
+      && String(source.url || '').startsWith('file://')
+      && /星河智算/.test(source.content || '')
+    ));
+    assert.ok(localBodies.length >= 1, 'expected at least one successful local body');
+    assert.ok(localBodies.some((source) => /1200\s*万/.test(source.content || '')));
+    assert.ok(queries.length >= 1);
+    assert.ok(queries.every((query) => !/\bsite:/.test(query)));
+
+    const executedSearches = result.trace.filter((entry) => (
+      entry.action === 'search' && entry.query && !entry.decisionStep
+    ));
+    assert.ok(executedSearches.length >= 1);
+    assert.ok(executedSearches.every((entry) => entry.queryOrigin === 'user_query' || entry.queryOrigin === 'llm_planner'));
+    assert.ok(executedSearches.every((entry) => entry.outcome));
+
+    const observability = result.quality?.metrics?.observability || {};
+    assert.ok(observability.queryOutcomes);
+    assert.ok((result.quality.budget.usage.searchRequests || 0) >= 1);
+    assert.ok((result.quality.budget.usage.sourceReads || 0) >= 1);
+    assert.ok(result.trace.some((entry) => entry.profile?.evidenceScope === 'local' || entry.reasonCode === 'exploratory_loop'));
+
+    if (plannerUsers.length >= 2) {
+      const later = JSON.parse(plannerUsers.at(-1));
+      assert.ok(Array.isArray(later.recentSearchOutcomes));
+      assert.ok(later.recentSearchOutcomes.some((item) => item.query && item.outcome));
+    }
+
+    assert.equal(emptyBulletLines(result.report).length, 0);
+    assert.match(result.report, /## Summary/);
+    assert.match(result.report, /## Key Findings/);
   });
 });
 

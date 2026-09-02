@@ -16,7 +16,7 @@
  * @property {number} [maxResults]
  * @property {string} [language]
  * @property {boolean} [safeSearch]
- * @property {Record<string, unknown>} [options]
+ * @property {{ engines?: string, categories?: string, language?: string, pageno?: number, safesearch?: string }} [options]
  * @property {Record<string, unknown>} [provider]
  * @property {{ dirs?: string[], ignore?: string[], extensions?: string[] }} [local]
  */
@@ -43,7 +43,7 @@
  * @property {number} [questionsPerIteration]
  * @property {number} [concurrency]
  * @property {string} [workDir]
- * @property {{ fetchMode?: string, maxContentChars?: number, enrichConcurrency?: number }} [read]
+ * @property {{ fetchMode?: string, maxContentChars?: number, enrichConcurrency?: number, sourceAssessment?: { enabled?: boolean } }} [read]
  * @property {FocusedSettings} [focused]
  * @property {Record<string, number>} [budget]
  * @property {Record<string, unknown>} [exploratory]
@@ -123,7 +123,7 @@
 
 /**
  * @typedef {Object} SearchEngine
- * @property {(query: string, options?: { signal?: AbortSignal }) => Promise<Source[]>} search
+ * @property {(query: string, options?: { signal?: AbortSignal, searchOptions?: Record<string, unknown> }) => Promise<Source[]>} search
  * @property {SearchCapabilities} [capabilities]
  */
 

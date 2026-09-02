@@ -7,8 +7,29 @@ import { evaluateExploratorySufficiency, classifyResearchQuery, similarQuestions
 import { buildBudgetView, estimateReportPromptTokens } from '../src/research/adaptive/budget-view.mjs';
 import { applyExploratoryBudget, effectiveExploratoryMaxSteps, EXPLORATORY_SAFETY_MAX_STEPS, resolveExploratorySettings } from '../src/research/exploratory-settings.mjs';
 import { mapStructuredProgressEvent } from '../src/research/progress-events.mjs';
+import { resolveNewRunStopReason } from '../src/research/adaptive/stop-reasons.mjs';
 
 describe('exploratory budget snapshot and sufficiency', () => {
+  it('does not manufacture budget_exhausted when no finite cap was reached', () => {
+    const unlimited = new BudgetManager({
+      research: { budget: {}, exploratory: { minLlmTokens: 600000, maxLlmTokens: 0 } },
+    });
+    unlimited.usage.llmTokens = 40000;
+    unlimited.usage.explorationTokens = 40000;
+    assert.equal(resolveNewRunStopReason('duplicate_query', { step: 4, maxSteps: 0, budget: unlimited }), null);
+    assert.equal(resolveNewRunStopReason('budget_exhausted', { step: 4, maxSteps: 0, budget: unlimited }), null);
+    assert.equal(unlimited.exhaustionDetail(), null);
+  });
+
+  it('reports the concrete finite cap that prevents another action', () => {
+    const budget = new BudgetManager({
+      research: { budget: { maxSearchRequests: 2, maxSourceReads: 3, maxLlmTokens: 1000 } },
+    });
+    budget.usage.searchRequests = 2;
+    assert.equal(budget.exhaustionDetail(), 'search_request_cap');
+    assert.equal(resolveNewRunStopReason(null, { budget }), 'budget_exhausted');
+  });
+
   it('includes remaining tokens and report reserve when maxLlmTokens is finite', () => {
     const budget = new BudgetManager({
       research: {

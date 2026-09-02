@@ -77,6 +77,7 @@ function attachRankedPassages({
         evidenceOrigin: 'source_content',
         observedAt: new Date().toISOString(),
         contentHash,
+        assessment: source.assessment || null,
         provenance: pickSourceProvenance(source),
       });
     }

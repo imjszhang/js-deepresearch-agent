@@ -73,9 +73,11 @@ describe('research profile does not invent venue policy', () => {
         },
       },
     });
-    assert.deepEqual(profile.requiredHosts, ['hkexnews.hk']);
+    assert.deepEqual(profile.requiredHosts, []);
+    assert.deepEqual(profile.preferredHosts, ['hkexnews.hk']);
     assert.deepEqual(profile.requiredSourceTypes, ['primary_filing']);
-    assert.equal(profile.plannedGaps[0].requiredHosts[0], 'hkexnews.hk');
+    assert.deepEqual(profile.plannedGaps[0].requiredHosts, []);
+    assert.equal(profile.plannedGaps[0].preferredHosts[0], 'hkexnews.hk');
   });
 
   it('strips invented web hosts from local-only profiles', async () => {

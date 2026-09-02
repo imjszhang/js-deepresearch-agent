@@ -47,6 +47,7 @@ export function applyContractGaps(state, contract = {}, { maxGaps } = {}) {
     state.gaps[0] = {
       ...state.gaps[0],
       requiredHosts: profile.requiredHosts ?? state.gaps[0].requiredHosts,
+      requiredHostMode: profile.requiredHostMode ?? state.gaps[0].requiredHostMode,
       preferredHosts: profile.preferredHosts ?? state.gaps[0].preferredHosts,
       requiredSourceTypes: profile.requiredSourceTypes ?? state.gaps[0].requiredSourceTypes,
       minIndependentSources: profile.minIndependentSources || state.gaps[0].minIndependentSources || 1,
@@ -58,18 +59,26 @@ export function applyContractGaps(state, contract = {}, { maxGaps } = {}) {
     state.gaps[0].rollup = true;
     state.gaps[0].kind = 'root';
     state.gaps[0].requiredSlot = false;
+    state.gaps[0].requiredHosts = [];
+    state.gaps[0].requiredSourceTypes = [];
   }
   for (const slot of slots) {
-    if (maxGaps && state.gaps.length >= maxGaps) break;
+    if (state.gaps.some((gap) => gap.contractSlotId === slot.id)) continue;
     state.addGap(slot.question || slot.answerSlot, slot.priority || 'normal', {
+      contractSlotId: slot.id,
       answerSlot: slot.answerSlot,
       claimFamily: slot.claimFamily,
       requiredHosts: slot.requiredHosts,
+      requiredHostMode: slot.requiredHostMode,
+      preferredHosts: slot.preferredHosts,
       requiredSourceTypes: slot.requiredSourceTypes,
       evidenceCriteria: slot.evidenceCriteria,
       requiredSlot: slot.requiredSlot !== false && explicitSlots,
       kind: explicitSlots ? 'slot' : 'followup',
+      deduplicate: !explicitSlots,
     });
   }
+  state.maxContractGaps = slots.length + 1;
+  state.maxDynamicGaps = maxGaps ? Math.max(0, maxGaps - 1) : 0;
   return state.gaps;
 }

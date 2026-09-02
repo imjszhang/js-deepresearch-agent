@@ -100,6 +100,14 @@ export class ResearchRunner {
     const blockedHostLimitation = exploratoryLoop?.blockedHosts?.length
       ? `Blocked or unread required hosts: ${exploratoryLoop.blockedHosts.join(', ')}.`
       : null;
+    const blockedSlotLimitation = exploratoryLoop?.recovery?.blockedGaps?.length
+      ? `Blocked slots: ${exploratoryLoop.recovery.blockedGaps.map((gap) => (
+        `${gap.gapId}${gap.answerSlot ? ` (${gap.answerSlot})` : ''}: ${gap.blockedReason}`
+      )).join('; ')}.`
+      : null;
+    const plannerExhaustedLimitation = exploratoryLoop?.stopDetail === 'query_planner_exhausted'
+      ? 'The search query planner could not produce a valid query; remaining gaps were skipped or blocked.'
+      : null;
     const secondaryLimitation = exploratoryLoop?.secondaryOnlyClaims?.length
       ? 'Some conclusions rest only on secondary or reprint sources and cannot be treated as primary-source verified.'
       : null;
@@ -132,6 +140,8 @@ export class ResearchRunner {
       ...(snippetLimitation ? [snippetLimitation] : []),
       ...(unresolvedLimitation ? [unresolvedLimitation] : []),
       ...(blockedHostLimitation ? [blockedHostLimitation] : []),
+      ...(blockedSlotLimitation ? [blockedSlotLimitation] : []),
+      ...(plannerExhaustedLimitation ? [plannerExhaustedLimitation] : []),
       ...(secondaryLimitation ? [secondaryLimitation] : []),
       ...(unsupportedLimitation ? [unsupportedLimitation] : []),
     ];
@@ -286,6 +296,7 @@ export class ResearchRunner {
     const quality = {
       schemaVersion: 3,
       stopReason: budget.controllerStopReason || null,
+      stopDetail: budget.controllerStopDetail || exploratoryLoop?.stopDetail || null,
       qualityMetricsVersion: qualityMetrics.metricsVersion,
       claimExtractionVersion: qualityMetrics.claimExtractionVersion,
       claimEvaluationVersion: qualityMetrics.claimEvaluationVersion,
@@ -307,6 +318,8 @@ export class ResearchRunner {
       ...(contractLimitation ? [contractLimitation] : []),
       ...(unresolvedLimitation ? [unresolvedLimitation] : []),
         ...(blockedHostLimitation ? [blockedHostLimitation] : []),
+        ...(blockedSlotLimitation ? [blockedSlotLimitation] : []),
+        ...(plannerExhaustedLimitation ? [plannerExhaustedLimitation] : []),
         ...(secondaryLimitation ? [secondaryLimitation] : []),
         ...(unsupportedLimitation ? [unsupportedLimitation] : []),
         ...(noClaims ? ['No evaluable claims could be extracted from the report.'] : []),
@@ -319,6 +332,10 @@ export class ResearchRunner {
         ...preReport.metrics,
         ...qualityMetrics,
         marginal: focusedControl?.marginal || exploratoryLoop?.marginal || null,
+        relevance: exploratoryLoop?.relevance || null,
+        recovery: exploratoryLoop?.recovery || focusedControl?.recovery || null,
+        queryProvenance: focusedControl?.queryProvenance || exploratoryLoop?.recovery || null,
+        observability: focusedControl?.observability || exploratoryLoop?.observability || null,
       },
       budget: budget.snapshot(),
     };

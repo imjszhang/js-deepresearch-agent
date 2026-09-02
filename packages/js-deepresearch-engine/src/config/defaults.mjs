@@ -76,6 +76,17 @@ export const defaultSettings = Object.freeze({
       fetchMode: 'summary',
       maxContentChars: 8000,
       enrichConcurrency: 2,
+      sourceAssessment: {
+        enabled: false,
+      },
+      relevance: {
+        enabled: true,
+        siteConstraint: true,
+        entityGuard: true,
+        bodyValidation: true,
+        minRerankScore: 0.01,
+        siteQueryMode: 'confirmed',
+      },
     },
     focused: {
       fetchMode: 'summary',
@@ -144,6 +155,8 @@ export const defaultSettings = Object.freeze({
       answerGate: true,
       maxCandidateEvaluationTokens: 0,
       maxPostReportEvaluationTokens: 0,
+      maxRepairFailuresPerGap: 3,
+      maxConsecutiveInvalidSteps: 6,
     },
   },
 });
@@ -163,6 +176,10 @@ export function mergeSettings(overrides = {}) {
     search: {
       ...defaultSettings.search,
       ...searchOverrides,
+      options: {
+        ...defaultSettings.search.options,
+        ...(searchOverrides.options || {}),
+      },
       local: {
         ...defaultSettings.search.local,
         ...(searchOverrides.local || {}),
@@ -202,6 +219,14 @@ export function mergeSettings(overrides = {}) {
       read: {
         ...defaultSettings.research.read,
         ...(researchOverrides.read || {}),
+        relevance: {
+          ...defaultSettings.research.read.relevance,
+          ...(researchOverrides.read?.relevance || {}),
+        },
+        sourceAssessment: {
+          ...defaultSettings.research.read.sourceAssessment,
+          ...(researchOverrides.read?.sourceAssessment || {}),
+        },
       },
       focused: {
         ...defaultSettings.research.focused,

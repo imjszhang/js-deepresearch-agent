@@ -17,6 +17,9 @@ import { QueryMemory } from '../src/research/query-memory.mjs';
 import { renderSourcesSection } from '../src/research/report-assembler.mjs';
 import { buildStrategyContext } from '../src/research/strategy-context.mjs';
 import { rollupRootGap } from '../src/research/gap-state.mjs';
+import { ResearchState } from '../src/research/adaptive/research-state.mjs';
+import { applyContractGaps } from '../src/research/research-contract.mjs';
+import { defaultSearchQueryPlan } from './helpers/search-query-planner-mock.mjs';
 
 const BODY_QUOTE = 'A sufficiently detailed fetched source body containing direct evidence for this alpha and beta answer slot.';
 
@@ -72,6 +75,25 @@ function context(overrides = {}) {
 }
 
 describe('Issue #27 structured research control', () => {
+  it('materializes every required slot despite duplicate planner questions and the default gap cap', () => {
+    const requiredAnswerSlots = Array.from({ length: 10 }, (_, index) => ({
+      id: `apple-slot-${index + 1}`,
+      answerSlot: index === 9 ? 'Ollama compatibility' : `Apple slot ${index + 1}`,
+      question: 'Compare Apple local inference options',
+      priority: 'normal',
+    }));
+    const brief = sanitizeResearchBrief({
+      query: 'Compare Apple local inference options',
+      requiredAnswerSlots,
+    }, { allowExplicitHosts: true });
+    const state = new ResearchState({ query: brief.query, brief });
+    applyContractGaps(state, { brief, profile: state.profile, slots: brief.requiredAnswerSlots }, { maxGaps: 8 });
+    const slotGaps = state.gaps.filter((gap) => gap.requiredSlot);
+    assert.equal(slotGaps.length, 10);
+    assert.equal(new Set(slotGaps.map((gap) => gap.contractSlotId)).size, 10);
+    assert.ok(slotGaps.some((gap) => gap.answerSlot === 'Ollama compatibility'));
+  });
+
   it('sanitizes and versions ResearchBrief without inventing planner hosts', () => {
     const brief = sanitizeResearchBrief({
       query: 'Read docs.example.com for product status',
@@ -184,7 +206,8 @@ describe('Issue #27 structured research control', () => {
       },
       search: { async search() { return [{ title: 'S', url: 'https://example.com/a', snippet: 's' }]; } },
       llm: {
-        async complete({ purpose }) {
+        async complete({ purpose, messages }) {
+          if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
           if (purpose === 'research_profile') {
             return JSON.stringify({
               exclusions: ['planner'],
@@ -265,6 +288,7 @@ describe('Issue #27 structured research control', () => {
     const ctx = context({
       llm: {
         async complete({ purpose, messages }) {
+          if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
           if (purpose === 'research_profile') {
             return JSON.stringify({
               minIndependentSources: 1,
@@ -292,7 +316,8 @@ describe('Issue #27 structured research control', () => {
     assert.deepEqual(repair.targetGapIds, [
       findings.researchControl.gaps.find((gap) => gap.answerSlot === 'beta').id,
     ]);
-    assert.ok(calls.some((query) => query.startsWith('beta evidence') && query.includes('successful_body')));
+    assert.ok(calls.some((query) => query.includes('beta evidence')));
+    assert.ok(!calls.some((query) => /primary source evidence|successful_body/.test(query)));
     assert.ok(!repair.queries.some((query) => query.startsWith('alpha evidence')));
     assert.ok(ctx.trace.some((entry) => entry.action === 'plateau_evaluated' && entry.plateau));
   });
@@ -314,7 +339,8 @@ describe('Issue #27 structured research control', () => {
         },
       },
       llm: {
-        async complete({ purpose }) {
+        async complete({ purpose, messages }) {
+          if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
           if (purpose === 'research_profile') {
             return JSON.stringify({
               minIndependentSources: 1,
@@ -358,14 +384,56 @@ describe('Issue #27 structured research control', () => {
         },
       },
       llm: {
-        async complete() {
-          return JSON.stringify(['alpha deployment guide details', 'alpha deployment guide']);
+        async complete({ purpose }) {
+          if (purpose === 'search_query_planning') {
+            return JSON.stringify({
+              queries: [
+                { query: 'alpha deployment guide details' },
+                { query: 'alpha deployment guide' },
+              ],
+            });
+          }
+          return JSON.stringify({ queries: [] });
         },
       },
     });
     assert.equal(calls, 1);
     assert.equal(findings.length, 1);
     assert.equal(memory.snapshot().length, 1);
+  });
+
+  it('batches and caches semantic query dedup without suppressing another contract slot', async () => {
+    const calls = [];
+    const embedding = {
+      async embedDocuments(texts) {
+        calls.push([...texts]);
+        return texts.map((text) => {
+          const normalized = text.toLowerCase();
+          if (normalized.includes('ollama')) return [0, 1];
+          if (normalized.includes('performance')) return [0.7, 0.7];
+          return [1, 0];
+        });
+      },
+    };
+    const memory = new QueryMemory({ enabled: true });
+    const first = await memory.filterDuplicates(['MLX official support', 'MLX performance evidence'], {
+      gapId: 'slot-mlx',
+      embedding,
+    });
+    assert.equal(first.accepted.length, 2);
+    memory.record({ query: first.accepted[0], gapId: 'slot-mlx', status: 'useful' });
+    const repeated = await memory.filterDuplicates(['MLX official support'], {
+      gapId: 'slot-mlx',
+      embedding,
+    });
+    assert.equal(repeated.accepted.length, 0);
+    const otherSlot = await memory.filterDuplicates(['Ollama official support'], {
+      gapId: 'slot-ollama',
+      embedding,
+    });
+    assert.deepEqual(otherSlot.accepted, ['ollama official support']);
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].length, 2);
   });
 
   it('round-trips observed provenance through evidence and report sources', () => {
@@ -402,6 +470,7 @@ describe('Issue #27 structured research control', () => {
       }),
       llm: {
         async complete({ purpose, messages }) {
+          if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
           if (purpose === 'gap_support') return gapSupportResponse(messages);
           return '{}';
         },
@@ -445,7 +514,8 @@ describe('Issue #27 structured research control', () => {
         },
       },
       llm: {
-        async complete({ purpose }) {
+        async complete({ purpose, messages }) {
+          if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
           if (purpose === 'research_profile') {
             return JSON.stringify({
               minIndependentSources: 1,
@@ -461,9 +531,11 @@ describe('Issue #27 structured research control', () => {
       search: {
         id: 'test',
         async search(query) {
-          if (query.includes('counterexample')) {
+          const seen = this._seen || (this._seen = new Set());
+          if (seen.has(query) || /limitations and criticism|follow-up research/.test(query)) {
             return [{ title: query, url: `https://example.com/${encodeURIComponent(query)}`, snippet: 'no body' }];
           }
+          seen.add(query);
           return [body(`https://example.com/${encodeURIComponent(query)}`)];
         },
       },
@@ -496,7 +568,10 @@ describe('Issue #27 structured research control', () => {
           },
         },
       },
-      llm: { async complete() { return '{}'; } },
+      llm: { async complete({ purpose, messages }) {
+        if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
+        return '{}';
+      } },
       search: {
         async search(query) {
           calls.push(query);
@@ -532,7 +607,10 @@ describe('Issue #27 structured research control', () => {
           },
         },
       },
-      llm: { async complete() { return '{}'; } },
+      llm: { async complete({ purpose, messages }) {
+        if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
+        return '{}';
+      } },
       search: {
         async search(query) {
           return [{ title: query, url: `https://example.com/${encodeURIComponent(query)}`, snippet: 's' }];
@@ -561,6 +639,7 @@ describe('Issue #27 structured research control', () => {
       },
       llm: {
         async complete({ purpose, messages }) {
+          if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
           if (purpose === 'gap_support') return gapSupportResponse(messages);
           return '{}';
         },
@@ -595,7 +674,10 @@ describe('Issue #27 structured research control', () => {
           },
         },
       },
-      llm: { async complete() { return '{}'; } },
+      llm: { async complete({ purpose, messages }) {
+        if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
+        return '{}';
+      } },
       search: {
         async search(query) {
           return [{ title: query, url: `https://example.com/${encodeURIComponent(query)}`, snippet: 's' }];
@@ -637,7 +719,10 @@ describe('Issue #27 structured research control', () => {
           },
         },
       },
-      llm: { async complete() { return '{}'; } },
+      llm: { async complete({ purpose, messages }) {
+        if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
+        return '{}';
+      } },
       search: {
         capabilities: { maxQuestionConcurrency: 1 },
         async search(query) {
@@ -662,7 +747,10 @@ describe('Issue #27 structured research control', () => {
         query: 'compare alpha and beta',
         requiredAnswerSlots: [{ answerSlot: 'alpha', question: 'alpha evidence' }],
       }),
-      llm: { async complete() { return '{}'; } },
+      llm: { async complete({ purpose, messages }) {
+        if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
+        return '{}';
+      } },
       search: {
         async search() {
           const error = new Error('aborted');
@@ -678,12 +766,12 @@ describe('Issue #27 structured research control', () => {
     const decisions = [
       {
         action: 'search',
-        query: 'fresh unique query',
-        queries: ['repeat-url one', 'repeat-url two'],
+        query: 'exploratory novelty topic',
+        queries: ['exploratory novelty topic', 'exploratory novelty repeat-url one', 'exploratory novelty repeat-url two'],
         gapId: 'gap-1',
         reasonCode: 'search',
       },
-      { action: 'read', sourceIds: ['https://unique.example.com/fresh%20unique%20query'], gapId: 'gap-1', reasonCode: 'read' },
+      { action: 'read', sourceIds: ['https://unique.example.com/exploratory%20novelty%20topic'], gapId: 'gap-1', reasonCode: 'read' },
       { action: 'answer', reasonCode: 'done' },
     ];
     const result = await new ResearchRunner().run({
@@ -725,7 +813,8 @@ describe('Issue #27 structured research control', () => {
         },
       },
       llm: {
-        async complete({ purpose }) {
+        async complete({ purpose, messages }) {
+          if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
           if (purpose === 'agent_decision') return JSON.stringify(decisions.shift());
           if (purpose === 'research_profile') {
             return JSON.stringify({
@@ -768,7 +857,8 @@ describe('Issue #27 structured research control', () => {
         },
       },
       llm: {
-        async complete({ purpose }) {
+        async complete({ purpose, messages }) {
+          if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
           if (purpose === 'gap_support') {
             return JSON.stringify({
               judgments: [{
@@ -816,7 +906,10 @@ describe('Issue #27 structured research control', () => {
       llm: {
         async complete({ purpose }) {
           purposes.push(purpose);
-          return JSON.stringify(['follow-up']);
+          if (purpose === 'search_query_planning') {
+            return JSON.stringify({ queries: [{ query: 'follow-up' }] });
+          }
+          return JSON.stringify({ queries: [] });
         },
       },
     });

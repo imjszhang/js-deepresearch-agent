@@ -1,6 +1,6 @@
 [
   {
-    "schemaVersion": 3,
+    "schemaVersion": 4,
     "id": "gap-1",
     "question": "compare alpha and beta safety",
     "kind": "root",
@@ -14,10 +14,13 @@
     "resolutionReason": "All required answer slots were verified."
   },
   {
-    "schemaVersion": 3,
+    "schemaVersion": 4,
     "id": "gap-2",
     "question": "alpha safety",
     "answerSlot": "alpha safety",
+    "contractSlotId": "alpha-safety",
+    "requiredHostMode": "any",
+    "preferredHosts": [],
     "kind": "slot",
     "rollup": false,
     "requiredSlot": true,
@@ -29,10 +32,13 @@
     "resolutionReason": "Required slot is quote-anchored supported and provenance passed."
   },
   {
-    "schemaVersion": 3,
+    "schemaVersion": 4,
     "id": "gap-3",
     "question": "beta safety",
     "answerSlot": "beta safety",
+    "contractSlotId": "beta-safety",
+    "requiredHostMode": "any",
+    "preferredHosts": [],
     "kind": "slot",
     "rollup": false,
     "requiredSlot": true,

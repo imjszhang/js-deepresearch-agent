@@ -2,6 +2,8 @@ import { resolveUrlContent } from './content-resolver.mjs';
 import { focusedSourceSelection } from './focused-settings.mjs';
 import { selectRelevantPassages } from './passage-selector.mjs';
 import { withSourceProvenance } from './source-provenance.mjs';
+import { evaluateSourceRelevance } from './adaptive/source-policy.mjs';
+import { assessSourceBody, assessmentBlocksSuccessfulBody } from './source-assessment.mjs';
 
 function relatedLinksFromFetch(fetched, settings) {
   const selection = focusedSourceSelection(settings);
@@ -13,25 +15,40 @@ function isAbortError(error) {
   return error?.name === 'AbortError';
 }
 
-function buildSummaryPrompt({ query, question, title, url, content }) {
-  return [
-    {
-      role: 'system',
-      content: 'Extract only facts relevant to the research query. Return plain text, no markdown.',
-    },
-    {
-      role: 'user',
-      content: [
-        `Research query: ${query}`,
-        question ? `Focus question: ${question}` : '',
-        `Source title: ${title}`,
-        `Source URL: ${url}`,
-        '',
-        'Page content:',
-        content,
-      ].filter(Boolean).join('\n'),
-    },
-  ];
+function blockedAssessmentResult(fetchedSource, assessment) {
+  return {
+    ...fetchedSource,
+    summary: '',
+    assessment,
+    fetchStatus: 'failed',
+    bodyQuality: 'waf',
+    skipReason: assessment?.reason || 'assessment_unreadable',
+  };
+}
+
+async function maybeAssessSource(source, fetched, {
+  llm,
+  signal,
+  query,
+  question,
+  entities,
+  relevanceGap,
+  observedHosts,
+}) {
+  if (!llm?.complete) return null;
+  const { assessment } = await assessSourceBody({
+    llm,
+    signal,
+    query,
+    question,
+    title: source.title || fetched.title,
+    url: String(source.url || '').trim(),
+    content: fetched.content,
+    entities,
+    preferredHosts: relevanceGap?.preferredHosts || [],
+    observedHosts: observedHosts || [],
+  });
+  return assessment;
 }
 
 async function enrichOneSource(source, {
@@ -44,6 +61,10 @@ async function enrichOneSource(source, {
   settings,
   budget,
   embedding,
+  relevance,
+  relevanceGap,
+  entities,
+  observedHosts,
 }) {
   const url = String(source.url || '').trim();
   if (!url) {
@@ -71,12 +92,55 @@ async function enrichOneSource(source, {
     };
   }
 
+  const fetchedSource = {
+    ...withSourceProvenance(source, fetched),
+    title: source.title || fetched.title,
+    content: fetched.content,
+    contentOrigin: 'fetched',
+  };
+  if (relevance && relevance.bodyValidation !== false) {
+    const relevanceDecision = evaluateSourceRelevance(fetchedSource, {
+      ...relevance,
+      gap: relevanceGap || { question },
+      query: question || query,
+      entities,
+      enforceEntity: relevance.entityGuard !== false,
+      rerankProvider: 'disabled',
+      allowRequiredHostProbe: false,
+    });
+    if (!relevanceDecision.accepted) {
+      return {
+        ...fetchedSource,
+        fetchStatus: 'irrelevant',
+        bodyQuality: 'irrelevant',
+        relevanceDecision,
+        skipReason: relevanceDecision.reasonCode,
+      };
+    }
+  }
+
+  const assessmentEnabled = settings?.research?.read?.sourceAssessment?.enabled === true;
+  const extraAssessment = async () => {
+    if (!assessmentEnabled) return null;
+    return maybeAssessSource(source, fetched, {
+      llm,
+      signal,
+      query,
+      question,
+      entities,
+      relevanceGap,
+      observedHosts,
+    });
+  };
+
   if (fetchMode === 'full') {
+    const assessment = await extraAssessment();
+    if (assessmentBlocksSuccessfulBody(assessment)) {
+      return blockedAssessmentResult(fetchedSource, assessment);
+    }
     return {
-      ...withSourceProvenance(source, fetched),
-      title: source.title || fetched.title,
-      content: fetched.content,
-      contentOrigin: 'fetched',
+      ...fetchedSource,
+      assessment,
       fetchStatus: 'ok',
       relatedLinks: relatedLinksFromFetch(fetched, settings),
     };
@@ -91,38 +155,45 @@ async function enrichOneSource(source, {
       embedding,
       signal,
     });
+    const assessment = await extraAssessment();
+    if (assessmentBlocksSuccessfulBody(assessment)) {
+      return blockedAssessmentResult(fetchedSource, assessment);
+    }
     return {
-      ...withSourceProvenance(source, fetched),
-      title: source.title || fetched.title,
-      content: fetched.content,
-      contentOrigin: 'fetched',
+      ...fetchedSource,
       summary: String(summary || '').trim() || source.snippet,
       extractionMethod: embedding ? 'embedding' : 'overlap',
+      assessment,
       fetchStatus: 'ok',
       relatedLinks: relatedLinksFromFetch(fetched, settings),
     };
   }
 
-  const summary = await llm.complete({
-    messages: buildSummaryPrompt({
-      query,
-      question,
-      title: source.title || fetched.title,
-      url,
-      content: fetched.content,
-    }),
+  const assessment = await maybeAssessSource(source, fetched, {
+    llm,
     signal,
-    temperature: 0,
-    maxTokens: 600,
-    purpose: 'source_summary',
+    query,
+    question,
+    entities,
+    relevanceGap,
+    observedHosts,
   });
+  if (assessment && assessmentBlocksSuccessfulBody(assessment)) {
+    return blockedAssessmentResult(fetchedSource, assessment);
+  }
+  if (!assessment) {
+    return {
+      ...fetchedSource,
+      summary: source.snippet,
+      fetchStatus: 'ok',
+      relatedLinks: relatedLinksFromFetch(fetched, settings),
+    };
+  }
 
   return {
-    ...withSourceProvenance(source, fetched),
-    title: source.title || fetched.title,
-    content: fetched.content,
-    contentOrigin: 'fetched',
-    summary: String(summary || '').trim() || source.snippet,
+    ...fetchedSource,
+    summary: assessment.summary || source.snippet,
+    assessment,
     fetchStatus: 'ok',
     relatedLinks: relatedLinksFromFetch(fetched, settings),
   };
@@ -141,6 +212,10 @@ export async function enrichFindingSources(finding, options = {}) {
     settings,
     budget,
     embedding,
+    relevance,
+    relevanceGap,
+    entities,
+    observedHosts,
     seenUrls = new Set(),
     enrichedCount = { value: 0 },
   } = options;
@@ -196,6 +271,10 @@ export async function enrichFindingSources(finding, options = {}) {
           settings,
           budget,
           embedding,
+          relevance,
+          relevanceGap,
+          entities,
+          observedHosts,
         });
         enrichedByUrl.set(source.url, enriched);
         if (enriched.fetchStatus === 'ok') {

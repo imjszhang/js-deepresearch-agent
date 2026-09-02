@@ -56,6 +56,16 @@ describe('body quality helper', () => {
       title: 'No date field',
       content: 'The filing published 2026-03-31 includes revenue and shareholder tables.',
     }), true);
+    assert.equal(isSuccessfulBody({
+      fetchStatus: 'ok',
+      content: 'Official annual report revenue and controlling shareholder disclosure with enough text.',
+      assessment: { method: 'fail_closed', readability: 'unreadable' },
+    }), false);
+    assert.equal(classifyFetchedBody({
+      fetchStatus: 'ok',
+      content: 'Official annual report revenue and controlling shareholder disclosure with enough text.',
+      assessment: { method: 'llm', readability: 'unreadable', reason: 'obfuscated' },
+    }).reason, 'assessment_unreadable');
     assert.equal(sourceHasObservableDate({
       title: 'Undated note',
       content: 'A successful body without any calendar date.',

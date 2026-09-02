@@ -15,6 +15,29 @@ function formatPass(value) {
   return value ? 'pass' : 'fail';
 }
 
+function formatList(values) {
+  if (!Array.isArray(values) || values.length === 0) return 'n/a';
+  return values.join(', ');
+}
+
+function formatOutcomes(outcomes) {
+  if (!outcomes || typeof outcomes !== 'object' || !Object.keys(outcomes).length) return 'n/a';
+  return Object.entries(outcomes).map(([key, count]) => `${key}:${count}`).join(', ');
+}
+
+function formatAssessment(assessment) {
+  if (!assessment) return 'n/a';
+  const readability = assessment.readability
+    ? Object.entries(assessment.readability).map(([key, count]) => `${key}:${count}`).join(', ')
+    : '';
+  return assessment.count != null ? `${assessment.count}${readability ? ` (${readability})` : ''}` : 'n/a';
+}
+
+function formatCache(cache) {
+  if (!cache) return 'n/a';
+  return `hits ${cache.hits ?? 0} / misses ${cache.misses ?? 0}`;
+}
+
 function slotSummary(audit) {
   const counts = slotStatusCounts(audit);
   return counts.total ? `${counts.completed}/${counts.total}` : 'n/a';
@@ -121,6 +144,22 @@ export function formatStrategyCompareMarkdown(comparison) {
       const slots = slotStatusCounts(audit);
       lines.push(
         `| ${run.strategyLabel} | ${slots.completed} | ${slots.blocked} | ${slots.missing} | ${audit.reportIntegrity?.counts?.emptyBulletCount ?? 0} | ${audit.evidenceProvenance?.counts?.realBodies ?? 0} | ${audit.evidenceProvenance?.counts?.wafRejected ?? 0} | ${audit.citationIntegrity?.counts?.resolved ?? 0} |`,
+      );
+    }
+
+    lines.push(
+      '',
+      '### Descriptive observability',
+      '',
+      'These fields explain search, assessment, and cache behavior. They are not official audit gates and do not change `status`.',
+      '',
+      '| Strategy | Query outcomes | Responded engines | Unresponsive engines | Assessment | Slot-support cache | Agent snapshot |',
+      '| --- | --- | --- | --- | --- | --- | ---: |',
+    );
+    for (const run of comparison.runs) {
+      const obs = run.observability || {};
+      lines.push(
+        `| ${run.strategyLabel} | ${formatOutcomes(obs.queryOutcomes)} | ${formatList(obs.respondedEngines)} | ${formatList(obs.unresponsiveEngines)} | ${formatAssessment(obs.sourceAssessment)} | ${formatCache(obs.slotSupportCache)} | ${obs.agentSnapshotChars ?? 'n/a'} |`,
       );
     }
 

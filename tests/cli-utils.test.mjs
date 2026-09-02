@@ -165,9 +165,15 @@ describe('CLI utilities', () => {
       'rerank-base-url': 'https://rerank.example/v1',
       'rerank-api-key': 'one-run-key',
       'rerank-timeout-ms': '1234',
+      'read-relevance-enabled': 'true',
+      'read-relevance-min-score': '0.04',
+      'read-body-relevance': 'false',
       'exploratory-max-steps': '12',
       'exploratory-min-llm-tokens': '18000',
       'exploratory-max-llm-tokens': '72000',
+      'site-query-mode': 'confirmed',
+      'max-repair-failures-per-gap': '3',
+      'max-consecutive-invalid-steps': '6',
     });
     assert.equal(settings.research.budget.maxRerankRequests, 3);
     assert.equal(settings.research.budget.maxRerankTokens, 900);
@@ -182,6 +188,14 @@ describe('CLI utilities', () => {
     assert.equal(settings.research.exploratory.minLlmTokens, 18000);
     assert.equal(settings.research.exploratory.maxLlmTokens, 72000);
     assert.equal(settings.research.exploratory.targetLlmTokens, 18000);
+    assert.equal(settings.research.exploratory.maxRepairFailuresPerGap, 3);
+    assert.equal(settings.research.exploratory.maxConsecutiveInvalidSteps, 6);
+    assert.deepEqual(settings.research.read.relevance, {
+      enabled: true,
+      minRerankScore: 0.04,
+      bodyValidation: false,
+      siteQueryMode: 'confirmed',
+    });
   });
 
   it('maps deprecated reserve-report-tokens onto report.maxOutputTokens', () => {
@@ -240,6 +254,19 @@ describe('CLI utilities', () => {
     });
     assert.equal(settings.research.exploratory.minLlmTokens, 15000);
     assert.equal(settings.research.exploratory.targetLlmTokens, 15000);
+  });
+
+  it('maps search option and source assessment flags', () => {
+    const settings = applyResearchFlags({ search: {}, research: {} }, {
+      'search-language': 'zh',
+      'search-engines': 'brave,google',
+      'search-categories': 'general',
+      'source-assessment': 'true',
+    });
+    assert.equal(settings.search.language, 'zh');
+    assert.equal(settings.search.options.engines, 'brave,google');
+    assert.equal(settings.search.options.categories, 'general');
+    assert.equal(settings.research.read.sourceAssessment.enabled, true);
   });
 
   it('maps embedding and extract fetch mode flags', () => {

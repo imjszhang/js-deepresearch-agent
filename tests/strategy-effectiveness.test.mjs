@@ -13,8 +13,13 @@ import {
 import { isWafOrErrorBody } from '../scripts/benchmark/source-policy.mjs';
 import {
   auditClaim,
+  auditContractMaterialization,
+  auditRelevanceIntegrity,
+  auditQueryProvenance,
   auditStrategyRun,
   completeSlots,
+  evaluateProcessContract,
+  hasHardStop,
 } from '../scripts/benchmark/strategy-effectiveness.mjs';
 
 const QUERY = '截至2026年8月，llama.cpp、MLX 与 Ollama 在 Apple Silicon 上做本地 LLM 推理的官方定位、性能取舍与推荐用法是什么？';
@@ -63,6 +68,51 @@ const OFFICIAL_BODIES = [
     contentOrigin: 'fetched',
   },
 ];
+
+describe('relevance integrity', () => {
+  it('fails when a relevance-rejected source is still counted as a body', () => {
+    const audit = auditRelevanceIntegrity([{
+      url: 'https://apps.microsoft.com/kakao',
+      content: 'KakaoTalk messaging application body.',
+      fetchStatus: 'ok',
+      bodyQuality: 'read',
+      relevanceDecision: { accepted: false, reasonCode: 'entity_mismatch' },
+    }], {
+      metrics: {
+        relevance: {
+          returnedCandidates: 2,
+          siteRejected: 1,
+          admittedCandidates: 1,
+          rerankEvaluated: 1,
+          rerankAccepted: 0,
+          rerankRejected: 1,
+        },
+      },
+    });
+    assert.equal(audit.pass, false);
+    assert.equal(audit.counts.rejectedSourceBodies, 1);
+  });
+
+  it('passes legacy artifacts without relevance telemetry', () => {
+    assert.equal(auditRelevanceIntegrity(OFFICIAL_BODIES, {}).pass, true);
+  });
+
+  it('rejects rerank-below-threshold decisions without an evaluated score', () => {
+    const audit = auditRelevanceIntegrity([{
+      url: 'https://example.com/zhipu',
+      relevanceDecisionByGap: {
+        'gap-2': {
+          accepted: false,
+          reasonCode: 'rerank_below_threshold',
+          rerankScore: null,
+          gapId: 'gap-2',
+        },
+      },
+    }], {});
+    assert.equal(audit.pass, false);
+    assert.equal(audit.checks.find((item) => item.id === 'no_unevaluated_rerank_rejection').pass, false);
+  });
+});
 
 function findingsFrom(sources, query = QUERY) {
   return [{ question: query, sources }];
@@ -141,6 +191,69 @@ describe('host policy', () => {
 });
 
 describe('strategy audit', () => {
+  it('checks the zero-evidence exploration tail ratio', () => {
+    const base = {
+      usage: { sourceReads: 1 },
+      cost: { explorationTokens: 1000, llmTokens: 1000, sourceReads: 1 },
+      quality: { budget: {}, metrics: { recovery: { blockedGaps: [] } } },
+      reportIntegrity: { pass: true },
+      provenance: { counts: { realBodies: 1, summaries: 0 } },
+      slots: { applicable: false, slots: [] },
+      contractMaterialization: { pass: true },
+      labeledNarrative: 'summary',
+      report: '# Report\n\n## Limitations\nNone.',
+    };
+    const pass = evaluateProcessContract('exploratory', {
+      ...base,
+      trace: [{ action: 'read', successfulBodies: 1, budgetAfter: { usage: { llmTokens: 800 } } }],
+    });
+    assert.equal(pass.checks.find((item) => item.id === 'no_zero_evidence_spin').pass, true);
+    const fail = evaluateProcessContract('exploratory', {
+      ...base,
+      trace: [{ action: 'read', successfulBodies: 1, budgetAfter: { usage: { llmTokens: 500 } } }],
+    });
+    assert.equal(fail.checks.find((item) => item.id === 'no_zero_evidence_spin').pass, false);
+  });
+  it('does not treat an unbacked budget_exhausted string as a hard stop', () => {
+    const quality = {
+      stopReason: 'budget_exhausted',
+      flags: ['budget_exhausted'],
+      budget: {
+        usage: { llmTokens: 40000, searchRequests: 8, sourceReads: 4 },
+        limits: { llmTokens: 1000000, searchRequests: 0, sourceReads: 0 },
+      },
+    };
+    assert.equal(hasHardStop(quality), false);
+  });
+
+  it('accepts a near-cap stop when the next required claim would exceed the cap', () => {
+    assert.equal(hasHardStop({
+      stopReason: 'budget_exhausted',
+      budget: {
+        controllerStopDetail: 'llm_hard_cap',
+        controllerStopRequiredAmount: 600,
+        usage: { explorationTokens: 999925 },
+        limits: { llmTokens: 1000000 },
+      },
+    }), true);
+  });
+
+  it('audits required brief slots against materialized gaps', () => {
+    const audit = auditContractMaterialization({
+      requiredAnswerSlots: [
+        { id: 'mlx', answerSlot: 'MLX' },
+        { id: 'ollama', answerSlot: 'Ollama' },
+      ],
+    }, [{
+      id: 'gap-slot-mlx',
+      contractSlotId: 'mlx',
+      answerSlot: 'MLX',
+      requiredSlot: true,
+    }]);
+    assert.equal(audit.pass, false);
+    assert.deepEqual(audit.missing, ['ollama']);
+  });
+
   it('does not complete a slot from name-dropping when numbers or official hosts are required', () => {
     const report = `# Report
 
@@ -448,6 +561,44 @@ llama.cpp 定位为跨平台底层引擎 [1.1]。这篇补充文字用于超过�
     }));
     assert.equal(audit.reportIntegrity.pass, false);
     assert.equal(audit.status, 'not_ready');
+  });
+});
+
+describe('query provenance audit', () => {
+  it('marks legacy traces as not applicable', () => {
+    const audit = auditQueryProvenance([{ action: 'search', query: 'old run' }]);
+    assert.equal(audit.applicable, false);
+    assert.equal(audit.pass, true);
+  });
+
+  it('fails new runs that execute rule templates or missing origins', () => {
+    const audit = auditQueryProvenance([
+      { action: 'search', query: 'alpha primary source evidence', queryOrigin: 'llm_planner' },
+      {
+        action: 'search',
+        query: 'beta',
+        reasonCode: 'site_fallback_query',
+        queryOrigin: 'user_query',
+        siteFallbackOf: 'site:x.com beta',
+      },
+    ], { metrics: { queryProvenance: {} } });
+    assert.equal(audit.applicable, true);
+    assert.equal(audit.pass, false);
+  });
+
+  it('passes planner-authored site fallbacks', () => {
+    const audit = auditQueryProvenance([
+      { action: 'search', query: 'topic', queryOrigin: 'user_query' },
+      {
+        action: 'search',
+        query: 'topic official',
+        queryOrigin: 'llm_planner',
+        reasonCode: 'site_fallback_query',
+        siteFallbackOf: 'site:gov.cn topic',
+      },
+    ]);
+    assert.equal(audit.applicable, true);
+    assert.equal(audit.pass, true);
   });
 });
 

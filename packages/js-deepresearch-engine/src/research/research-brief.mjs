@@ -1,6 +1,7 @@
-export const RESEARCH_BRIEF_SCHEMA_VERSION = 1;
+export const RESEARCH_BRIEF_SCHEMA_VERSION = 2;
 export const RESEARCH_BRIEF_DEPTHS = Object.freeze(['quick', 'focused', 'exploratory']);
 export const ANSWER_SLOT_PRIORITIES = Object.freeze(['critical', 'normal']);
+export const REQUIRED_HOST_MODES = Object.freeze(['any', 'all']);
 const HOST_IN_QUERY = /\b(?:[a-z0-9-]+\.)+(?:com|org|net|edu|gov|io|hk|cn|uk|jp|ai|info)\b/gi;
 const HOSTNAME_SHAPE = /^(?:[a-z0-9-]+\.)+[a-z]{2,}$/;
 const KNOWN_SOURCE_TYPES = new Set(['primary_filing', 'numeric']);
@@ -21,6 +22,10 @@ function sanitizeHosts(values) {
 
 function sanitizeSourceTypes(values) {
   return uniqueText(values).filter((value) => KNOWN_SOURCE_TYPES.has(value));
+}
+
+function requiredHostMode(value) {
+  return REQUIRED_HOST_MODES.includes(value) ? value : 'any';
 }
 
 function extractLiteralHosts(query) {
@@ -55,13 +60,24 @@ export function sanitizeAnswerSlots(slots, {
     if (seen.has(id)) id = `${id}-${index + 1}`;
     seen.add(id);
     const hosts = sanitizeHosts(source.requiredHosts);
+    const permittedRequiredHosts = allowExplicitHosts
+      ? hosts
+      : hosts.filter((host) => allowedHosts.has(host));
+    const inferredPreferredHosts = allowExplicitHosts
+      ? []
+      : hosts.filter((host) => !allowedHosts.has(host));
     result.push({
       id,
       answerSlot: answerSlot || question,
       question: question || query,
       claimFamily: text(source.claimFamily || source.claimType, 120) || null,
       priority: ANSWER_SLOT_PRIORITIES.includes(source.priority) ? source.priority : 'normal',
-      requiredHosts: allowExplicitHosts ? hosts : hosts.filter((host) => allowedHosts.has(host)),
+      requiredHosts: permittedRequiredHosts,
+      requiredHostMode: requiredHostMode(source.requiredHostMode),
+      preferredHosts: uniqueText([
+        ...sanitizeHosts(source.preferredHosts),
+        ...inferredPreferredHosts,
+      ]),
       requiredSourceTypes: sanitizeSourceTypes(source.requiredSourceTypes),
       successCriteria: uniqueText(source.successCriteria, 8),
       evidenceCriteria: uniqueText(source.evidenceCriteria, 8),
@@ -116,6 +132,8 @@ export function slotsFromPlannerGaps(gaps = [], { query = '' } = {}) {
     claimFamily: gap.claimFamily,
     priority: gap.priority,
     requiredHosts: gap.requiredHosts,
+    requiredHostMode: gap.requiredHostMode,
+    preferredHosts: gap.preferredHosts,
     requiredSourceTypes: gap.requiredSourceTypes,
     successCriteria: gap.successCriteria,
     evidenceCriteria: gap.evidenceCriteria,

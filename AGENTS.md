@@ -129,6 +129,14 @@ npm exec --package=. -- jdr research "Explain the current state of local-first A
 | `--rerank-base-url` | `research.providers.rerank.baseUrl` | 可选 rerank API 地址 |
 | `--rerank-api-key` | `research.providers.rerank.apiKey` | 单次运行密钥；优先使用环境变量 |
 | `--rerank-timeout-ms` | `research.providers.rerank.timeoutMs` | 可选 rerank 请求超时 |
+| `--read-relevance-enabled` | `research.read.relevance.enabled` | 是否启用共享相关性准入门（默认 true） |
+| `--read-relevance-min-score` | `research.read.relevance.minRerankScore` | 外部 rerank 普通来源最低准入分数（默认 0.01） |
+| `--read-body-relevance` | `research.read.relevance.bodyValidation` | 摘要前是否校验正文主体相关性（默认 true） |
+| `--site-query-mode` | `research.read.relevance.siteQueryMode` | `confirmed`（默认，仅 required/已观察 host）\| `always` \| `never` |
+| `--search-language` | `search.language` | 透传给搜索提供方的语言，不做语言检测或引擎路由 |
+| `--search-engines` | `search.options.engines` | 透传 SearXNG `engines` |
+| `--search-categories` | `search.options.categories` | 透传 SearXNG `categories` |
+| `--source-assessment` | `research.read.sourceAssessment.enabled` | 仅 `full`/`extract` 额外调用结构化来源评估（默认 false）。`summary` 模式本身已是一次 `source_assessment` |
 | `--http-proxy` | `http.proxy` | SOCKS5/HTTP 代理 URL；仅 LLM / embedding / rerank 走代理，搜索与正文抓取直连 |
 | `--max-rerank-requests` | `research.budget.maxRerankRequests` | 外部 rerank 请求上限，`0` 不限制 |
 | `--max-rerank-tokens` | `research.budget.maxRerankTokens` | provider 可观测 rerank token 上限，`0` 不限制 |
@@ -138,6 +146,8 @@ npm exec --package=. -- jdr research "Explain the current state of local-first A
 | `--exploratory-max-reads-per-step` | `research.exploratory.maxReadsPerStep` | 探索性调研每步阅读数 |
 | `--exploratory-max-search-requests` | `research.exploratory.maxSearchRequests` | 探索性搜索次数上限，`0` 不限制（默认）。不继承全局 `research.budget` |
 | `--exploratory-max-source-reads` | `research.exploratory.maxSourceReads` | 探索性阅读次数上限，`0` 不限制（默认）。不继承全局 `research.budget` |
+| `--max-repair-failures-per-gap` | `research.exploratory.maxRepairFailuresPerGap` | 每个 gap 恢复失败上限（默认 3） |
+| `--max-consecutive-invalid-steps` | `research.exploratory.maxConsecutiveInvalidSteps` | 连续无有效动作的安全阀（默认 6） |
 | `--exploratory-min-llm-tokens` | `research.exploratory.minLlmTokens` | 探索性调研 LLM token 下限（默认 600000）；未达到前继续探索，不允许因证据充分而早停。`--exploratory-target-llm-tokens` 仍是该键的兼容别名 |
 | `--exploratory-max-llm-tokens` | `research.exploratory.maxLlmTokens` | 探索性调研 LLM token 上限（默认 1000000），只约束探索，不含最终报告。`--max-llm-tokens` 若更小则取更紧的硬上限 |
 | `--report-max-output-tokens` | `research.report.maxOutputTokens` | 报告输出上限，`0` 不设应用层限制（默认）。`--reserve-report-tokens` 是已废弃别名 |
@@ -626,6 +636,16 @@ npm run benchmark:strategies -- \
 | `JINA_API_KEY` | `research.providers.rerank.apiKey`；单独设置不会启用 Jina |
 | `JDR_RERANK_MODEL` | `research.providers.rerank.model` |
 | `JDR_SEMANTIC_TIMEOUT_MS` | `research.providers.rerank.timeoutMs` |
+| `JDR_RELEVANCE_ENABLED` | `research.read.relevance.enabled` |
+| `JDR_RELEVANCE_MIN_RERANK_SCORE` | `research.read.relevance.minRerankScore` |
+| `JDR_BODY_RELEVANCE_ENABLED` | `research.read.relevance.bodyValidation` |
+| `JDR_SITE_QUERY_MODE` | `research.read.relevance.siteQueryMode` |
+| `SEARCH_LANGUAGE` | `search.language`（仅透传，不触发引擎选择） |
+| `SEARCH_ENGINES` | `search.options.engines` |
+| `SEARCH_CATEGORIES` | `search.options.categories` |
+| `JDR_SOURCE_ASSESSMENT` | `research.read.sourceAssessment.enabled` |
+| `JDR_MAX_REPAIR_FAILURES_PER_GAP` | `research.exploratory.maxRepairFailuresPerGap` |
+| `JDR_MAX_CONSECUTIVE_INVALID_STEPS` | `research.exploratory.maxConsecutiveInvalidSteps` |
 | `JDR_INTEL_STORE_DIR` | intel store 根目录（非 settings 对象；默认 `data/intel`） |
 
 ---
@@ -642,17 +662,19 @@ Agent 选型建议：
 
 - 用户要**快速答案** → `--strategy quick`（默认单轮；`--iterations` 未指定时不会沿用专题调研的轮次）
 - 用户要**引用与深度** → `--strategy focused`（默认；discovery 为首轮，repair 受 `iterations` 或 `iterationControl` 约束；只对 `consequentialClaims` 精确匹配的 slot 做有界 challenge 与 spot-check）
-- 用户要**开放探索** → `--strategy exploratory`；用 `--exploratory-min-llm-tokens` 设下限、`--exploratory-max-llm-tokens` 或 `--max-llm-tokens` 设上限。下限不是停点：未到下限前必须继续 Search-Read-Reason。gate 未通过且探索额度还在时，失败的 finalize 是再探索，不是收工。只有确定性 readiness gate 通过才能输出 `evidence_sufficient`；LLM / rerank / embedding 不能把失败门槛改成通过。`requiredHosts` / `primary_filing` 只来自 LLM planner 对本题的承诺，或问句里字面出现的 hostname；规则层不会把「官方 / official」映射成港交所或 SEC 年报。额度或步数用尽时仍写长报告，但必须列出未关闭 gap、未兑现的 host 承诺和仅有二手证据的结论。次数和步数上限默认关闭；若要限制用 `--max-source-reads` / `--exploratory-max-steps`（用尽后立刻写报告）
+- 用户要**开放探索** → `--strategy exploratory`；用 `--exploratory-min-llm-tokens` 设下限、`--exploratory-max-llm-tokens` 或 `--max-llm-tokens` 设上限。下限不是停点：未到下限前必须继续 Search-Read-Reason。gate 未通过且探索额度还在时，失败的 finalize 是再探索，不是收工。只有确定性 readiness gate 通过才能输出 `evidence_sufficient`；LLM / rerank / embedding 不能把失败门槛改成通过。用户结构化 host 与问句里字面出现的 hostname 可成为 `requiredHosts`；Planner 推断的非字面域名只能成为 `preferredHosts` 搜索提示。多 hard host 用 `requiredHostMode: any | all`，旧产物默认 `any`。规则层不会把「官方 / official」映射成港交所或 SEC 年报。额度或步数用尽时仍写长报告，但必须列出未关闭 gap、未兑现的 host 承诺和仅有二手证据的结论。次数和步数上限默认关闭；若要限制用 `--max-source-reads` / `--exploratory-max-steps`（用尽后立刻写报告）
 
 旧 ID（`rapid`、`parallel`、`source-based`、`adaptive`）不再注册。CLI 传入旧值会报迁移错误。历史 `work_dir` / Intel / SQLite 记录仍可读取。
 
 ### 研究控制与 Schema v3
 
-预算、查询记忆、来源聚类、passage/claim 证据链与自适应停轮**默认已开启**（质量优先预设）。快速摸底可用 `--focused-fetch-mode disabled`、`--focused-evidence-passages false` 等 flag 单次关闭。`preReportGate` 与 LLM 相关性过滤仍默认关闭。专题/快速的次数预算是 `research.budget.maxSearchRequests`（默认 18）和 `maxSourceReads`（默认 16），可用 `--max-search-requests` / `--max-source-reads` 覆盖。探索性调研以 `research.exploratory.minLlmTokens`（默认 600000）为探索下限、`research.exploratory.maxLlmTokens`（默认 1000000）为上限；这两项只约束探索循环（search/read/reason），不含候选答案评估、最终报告和报告后蕴含判定。下限不是停点，也不能因为“已经有一些正文”就输出 `evidence_sufficient`。`evidence_sufficient` 是硬门槛：required/critical gap 仍为 `open`/`missing`、必需一手来源未读、或本轮 search 后尚未成功读到真实正文时，不得结束。允许的新停因只有 `evidence_sufficient`、`budget_exhausted`、`safety_cap`、`user_cancelled`（旧的 `max_budget_exhausted` / `target_budget_reached` 会映射为 `budget_exhausted`；历史产物里的 `source_blocked` 仍可显示，新 run 不再产出）。gate 失败且硬上限未到时必须继续换角度搜索或阅读，WAF / 空 `site:` / 未读官方 host 只记在 gap 与 Caveats。搜索/阅读次数和 `maxSteps` 默认 `0`（不限制）。显式设了探索性次数上限时，用尽后立刻写报告，并列出未关闭 gap、未读官方 host 和仅有二手证据的结论。仅当探索性与全局 token 硬上限都关闭时，才用 64 步安全阀防止廉价死循环。报告默认不截断；`research.budget.reserveReportTokens` 不再预留探索额度。
+预算、查询记忆、来源聚类、passage/claim 证据链与自适应停轮**默认已开启**（质量优先预设）。快速摸底可用 `--focused-fetch-mode disabled`、`--focused-evidence-passages false` 等 flag 单次关闭。`preReportGate` 与 LLM 相关性过滤仍默认关闭。专题/快速的次数预算是 `research.budget.maxSearchRequests`（默认 18）和 `maxSourceReads`（默认 16），可用 `--max-search-requests` / `--max-source-reads` 覆盖。探索性调研以 `research.exploratory.minLlmTokens`（默认 600000）为探索下限、`research.exploratory.maxLlmTokens`（默认 1000000）为上限；这两项只约束探索循环（search/read/reason），不含候选答案评估、最终报告和报告后蕴含判定。下限不是停点，也不能因为“已经有一些正文”就输出 `evidence_sufficient`。`evidence_sufficient` 是硬门槛：required/critical gap 仍为 `open`/`missing`、必需一手来源未读、或本轮 search 后尚未成功读到真实正文时，不得结束。允许的新停因只有 `evidence_sufficient`、`budget_exhausted`、`safety_cap`、`user_cancelled`（旧的 `max_budget_exhausted` / `target_budget_reached` 会映射为 `budget_exhausted`；历史产物里的 `source_blocked` 仍可显示，新 run 不再产出）。搜索词只能来自用户原始 query 或统一 LLM Search Query Planner。确定性代码只做调度、去重、`site:` 合法性、来源准入和证据门；校验失败时要求 Planner 重写或停止，不得拼接、锚定、截断或删除 `site:` 后改写查询。恢复路径按未读候选、Planner repair/recovery、有限重写逐级升级；单 gap 默认失败 3 次后标记 `blocked`，全部 unresolved gap 被阻塞或连续 6 步无有效动作时以 `safety_cap` / `quality.stopDetail=repair_exhausted` 或 `query_planner_exhausted` 退出，并在报告 Caveats/Limitations 披露 blocked slot。搜索/阅读次数和 `maxSteps` 默认 `0`（不限制）。显式设了探索性次数上限时，用尽后立刻写报告，并列出未关闭 gap、未读官方 host 和仅有二手证据的结论。仅当探索性与全局 token 硬上限都关闭时，才用 64 步安全阀防止廉价死循环。报告默认不截断；`research.budget.reserveReportTokens` 不再预留探索额度。
 
 Schema v3 在旧四件套之外写入 `gaps.json`、`passages.json`、`claims.json`、`quality.json`、`trace.json`。Intel Store 继续读取 v2；`intel import --upgrade-existing` 可从有正文的旧产物派生 passage/claim，不能从 snippet 伪造正文证据。Wiki 会为 v3 生成 `Evidence/` 与 `Open Questions/` 页面。`report.md` 的 Evidence 是精选 passage 展示层：每个 citation 最多展示 1 段、长度不超过 `research.focused.evidencePassages.maxPassageChars`；完整正文以 `sources.json` 为准，完整候选证据以 `passages.json` 为准。主支持率 `supportedRate` 只统计 Summary / Key Findings 的原子事实（完全 supported / 全部分母）；`supportedOrPartialRate` 把 partial 也算进分子。Evidence / Sources / Caveats 不进这个分母。claim extraction v5 起，未知一级标题会开启新的文档根并重置为 `supporting_claim`，不再继承前面的 Key Findings。对比旧 run 时看 `qualityMetricsVersion` 与 `claimExtractionVersion`，不要直接比口径变更前后的百分比。已引用且有正文、规则尚未明确 supported/unsupported 的 key claim，默认再走 `research.quality.entailment=rules_then_llm` 做蕴含判定；设为 `rules` 可关掉。snippet-only 与无引用不能靠 LLM 洗白。
 
-Issue #27 起还写入 `brief.json`：ResearchBrief schema v1 兼容原字符串 query；gap schema v2 表达 answer slot / claim family、supporting/contradicting passage、missing evidence 与 resolution reason。用户结构化输入优先，planner 只能补空；用户显式 slot host 经 hostname 清洗后保留，planner 新增 slot host 仍要求 query 字面出现。有 explicit slots 时 root gap 只做 roll-up，不重复搜索、不独立阻断 readiness。focused 与 exploratory 共用确定性 readiness primitive，normal required slot 也不能被忽略；plateau 只能让 focused 停止追加 repair 或让 exploratory 换角度，不能越过 readiness failure 或 exploratory token floor。共享读取配置为 `research.read.*`，旧 `research.focused.*` 仍作为兼容 fallback；无效的 `plannerParallelism`、`enableCoding` 已移除。`intel import` / archive 会 round-trip `brief`。
+探索式读取使用共享相关性闭环：`siteQueryMode` 默认 `confirmed`，Planner 仅可对 required host 或本 run SERP 已观察到的 host 生成 `site:`；preferred host 默认只参与排序加权。生成查询中的 `site:` 仍会在结果返回后按真实 hostname 强制校验；若结果 100% 被 site 过滤，该查询只记入 `exhaustedAngles`，不计入 `searchedQueries`，并由 Planner 的 `site_fallback` 模式重写，不得用规则删掉 `site:` 后重搜。新行为只能来自用户显式搜索配置、搜索提供方原始观测、或结构化 LLM 输出；不得新增规则造词、语言检测、静态引擎路由或内容分类域名表。Planner 查询可带可选 `searchOptions` 并原样透传。`summary` 读取改为一次 `source_assessment`（`readability`/`contentKind`/`publisherType`/`firstParty`/`evidenceTier`）；无效 JSON 失败关闭，不能当成功正文。成功搜索 trace 必须带 `queryOrigin`（`user_query` | `llm_planner`）。离线审计字段为 `queriesMissingProvenance`、`ruleGeneratedQueryCount`、`plannerRejectedQueries`、`plannerRetryCount`、`siteFallbackWithoutPlanner`；新 run 缺失 provenance、规则造词或非 Planner 的 site fallback 均判失败，旧 schema 产物标为 not-applicable。候选按目标 gap 分别保存 rerank 分数和准入决策；未执行 rerank 时分数保持 `null`，以 `rerank_not_evaluated` 准入，不得误判为 `rerank_below_threshold`。普通来源低于已执行外部模型的阈值时不得读取，authority tier 只在已准入集合内排序。exact required host 允许记录式低分 probe，但抓取正文仍须命中 ResearchBrief 实体，否则标为 `irrelevant`，不生成 summary/passage/finding、不增加 novelty。`quality.metrics.relevance` 保存 returned/site-rejected/admitted/rerank-accepted/rerank-rejected/body-irrelevant/read-accepted 漏斗；`quality.metrics.recovery` 保存 invalid/recovery/duplicate/site fallback/blocked gap 统计。HTTP endpoint 不返回 token usage 时 `budget.unknown.rerankTokens=true`。
+
+Issue #27 起还写入 `brief.json`：ResearchBrief schema v2 兼容 v1 与原字符串 query；gap schema v4 兼容旧 gap，并增加 `contractSlotId`、`preferredHosts`、`requiredHostMode`。每个 required slot 一对一物化，模糊问题去重与动态 gap 上限不能吞掉契约槽；required slot 也不能借用其他槽的正文。用户结构化输入优先，planner 只能补空；用户显式或 query 字面 slot host 可保持 required，Planner 非字面 host 降为 preferred hint。`budget_exhausted` 只表示真实有限 token/search/read cap 阻止继续，具体原因写入 `quality.stopDetail`；重复查询、plateau 与无新角度不再伪装成预算耗尽。有 explicit slots 时 root gap 只做 roll-up，不重复搜索、不独立阻断 readiness。focused 与 exploratory 共用确定性 readiness primitive，normal required slot 也不能被忽略；plateau 只能让 focused 停止追加 repair 或让 exploratory 换角度，不能越过 readiness failure 或 exploratory token floor。共享读取配置为 `research.read.*`，旧 `research.focused.*` 仍作为兼容 fallback；无效的 `plannerParallelism`、`enableCoding` 已移除。`intel import` / archive 会 round-trip `brief`。
 
 ### Focused 深度阅读（可选）
 

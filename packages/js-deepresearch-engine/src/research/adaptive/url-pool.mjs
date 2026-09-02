@@ -10,6 +10,7 @@ export const URL_POOL_STATUSES = Object.freeze([
   'read',
   'failed',
   'waf',
+  'irrelevant',
   'duplicate',
 ]);
 
@@ -25,6 +26,7 @@ export function buildUrlRecord(source = {}, {
 } = {}) {
   const url = source.url || source.id;
   const id = source.id || url;
+  const gapKey = gapId || 'gap-1';
   return {
     id,
     url,
@@ -32,14 +34,23 @@ export function buildUrlRecord(source = {}, {
     hostname: hostnameOf(url),
     diversityKey: sourceDiversityKey(source, url),
     registrableDomain: registrableDomainFromUrl(url),
-    gapId,
+    gapId: gapKey,
+    gapIds: [gapKey],
+    gapMatches: {
+      [gapKey]: {
+        queries: query ? [query] : [],
+        tier: source.tier || classifySourceTier(source, gap),
+        rerank: source.rerank || null,
+        rerankScore: source.rerank?.score ?? source.rerankScore ?? null,
+      },
+    },
     query,
     title: source.title || '',
     snippet: source.snippet || '',
     date: source.publishedAt || source.date || source.updatedAt || null,
     sourceType: source.sourceType || null,
     tier: source.tier || classifySourceTier(source, gap),
-    rerankScore: Number(source.rerank?.score ?? source.rerankScore ?? 0) || 0,
+    rerankScore: source.rerank?.score ?? source.rerankScore ?? null,
     clusterId: clusterId || source.clusterId || null,
     status: source.status || 'unread',
     skipReason: source.skipReason || null,
@@ -71,6 +82,17 @@ export class UrlPool {
       existing.title ||= record.title;
       existing.snippet ||= record.snippet;
       existing.gapId ||= record.gapId;
+      existing.gapIds = [...new Set([...(existing.gapIds || [existing.gapId]), record.gapId].filter(Boolean))];
+      const priorMatch = existing.gapMatches?.[record.gapId] || {};
+      const nextMatch = record.gapMatches?.[record.gapId] || {};
+      existing.gapMatches = {
+        ...(existing.gapMatches || {}),
+        [record.gapId]: {
+          ...priorMatch,
+          ...nextMatch,
+          queries: [...new Set([...(priorMatch.queries || []), ...(nextMatch.queries || [])])],
+        },
+      };
       if (record.clusterId) existing.clusterId = record.clusterId;
       if (record.tier && existing.tier !== 'required_primary') existing.tier = record.tier;
       return { record: existing, added: false };

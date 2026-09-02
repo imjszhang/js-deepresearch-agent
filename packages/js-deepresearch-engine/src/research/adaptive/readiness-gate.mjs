@@ -1,5 +1,9 @@
 import { isSuccessfulBody, sourceHasObservableDate } from '../body-quality.mjs';
-import { classifySourceTier, hostnamesMatch, independentEvidenceKeysFromSources, hostnameOf } from './source-policy.mjs';
+import {
+  classifySourceTier,
+  independentEvidenceKeysFromSources,
+  requiredHostCoverage,
+} from './source-policy.mjs';
 import { hasUsableResearchContract } from './research-profile.mjs';
 import { collectGapSources, isRequiredSlot } from '../gap-state.mjs';
 
@@ -25,14 +29,7 @@ function requiredHostsRead(gap, findings) {
     }
     return { missing: [], read: [] };
   }
-  const read = [];
-  const missing = [];
-  for (const host of hosts) {
-    const hit = pool.some((source) => hostnamesMatch(hostnameOf(source.url || source.id), host));
-    if (hit) read.push(host);
-    else missing.push(host);
-  }
-  return { missing, read };
+  return requiredHostCoverage(pool, gap);
 }
 
 function gapNeedsRequiredHost(gap) {
@@ -52,6 +49,30 @@ export function evaluateReadinessGate({
     : (state?.profile || {});
   const failures = [];
   const flags = [];
+  const brief = resolvedProfile.brief || state?.brief || {};
+  for (const slot of brief.requiredAnswerSlots || []) {
+    const matches = resolvedGaps.filter((gap) => (
+      isRequiredSlot(gap)
+      && (gap.contractSlotId === slot.id
+        || (!gap.contractSlotId && gap.answerSlot === slot.answerSlot))
+    ));
+    if (!matches.length) {
+      failures.push({
+        code: 'contract_slot_missing',
+        message: `Required contract slot was not materialized: ${slot.id}.`,
+        slotId: slot.id,
+      });
+      flags.push('contract_slot_missing');
+    } else if (matches.length > 1) {
+      failures.push({
+        code: 'contract_slot_duplicate',
+        message: `Required contract slot was materialized more than once: ${slot.id}.`,
+        slotId: slot.id,
+        gapIds: matches.map((gap) => gap.id),
+      });
+      flags.push('contract_slot_duplicate');
+    }
+  }
 
   if (resolvedProfile.contractUnavailable) {
     failures.push({
@@ -110,9 +131,16 @@ export function evaluateReadinessGate({
   const missingRequired = [];
   for (const gap of resolvedGaps) {
     if (gap.rollup || !gapNeedsRequiredHost(gap)) continue;
-    const { missing, read } = requiredHostsRead(gap, resolvedFindings);
-    if (missing.length && !read.length) {
+    const coverage = requiredHostsRead(gap, resolvedFindings);
+    if (coverage.missing.length && !coverage.satisfied) {
+      const { missing } = coverage;
       missingRequired.push({ gapId: gap.id, hosts: missing });
+    }
+  }
+  if ((resolvedProfile.requiredHosts || []).length) {
+    const globalCoverage = requiredHostCoverage(bodies, resolvedProfile);
+    if (!globalCoverage.satisfied) {
+      missingRequired.push({ gapId: 'profile', hosts: globalCoverage.missing });
     }
   }
   if (missingRequired.length) {

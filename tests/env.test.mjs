@@ -68,6 +68,19 @@ EXISTING=from-file
     assert.equal(overrides.search.apiKey, 'search-key');
   });
 
+  it('maps SEARCH_LANGUAGE, SEARCH_ENGINES, and JDR_SOURCE_ASSESSMENT', () => {
+    const overrides = settingsFromEnv({
+      SEARCH_LANGUAGE: 'zh',
+      SEARCH_ENGINES: 'brave,google',
+      SEARCH_CATEGORIES: 'general',
+      JDR_SOURCE_ASSESSMENT: 'true',
+    });
+    assert.equal(overrides.search.language, 'zh');
+    assert.equal(overrides.search.options.engines, 'brave,google');
+    assert.equal(overrides.search.options.categories, 'general');
+    assert.equal(overrides.research.read.sourceAssessment.enabled, true);
+  });
+
   it('maps JS Eyes env vars to settings overrides', () => {
     const overrides = settingsFromEnv({
       SEARCH_ENGINE: 'js-eyes',
@@ -170,6 +183,27 @@ EXISTING=from-file
     assert.equal(enabled.research.providers.rerank.provider, 'jina');
     assert.equal(enabled.research.providers.rerank.model, 'rerank-model');
     assert.equal(enabled.research.providers.rerank.timeoutMs, 4567);
+  });
+
+  it('maps relevance admission overrides without enabling a rerank provider', () => {
+    const settings = settingsFromEnv({
+      JDR_RELEVANCE_ENABLED: 'true',
+      JDR_RELEVANCE_MIN_RERANK_SCORE: '0.07',
+      JDR_BODY_RELEVANCE_ENABLED: 'false',
+      JDR_SITE_QUERY_MODE: 'confirmed',
+      JDR_MAX_REPAIR_FAILURES_PER_GAP: '3',
+      JDR_MAX_CONSECUTIVE_INVALID_STEPS: '6',
+      JINA_API_KEY: 'key-only',
+    });
+    assert.deepEqual(settings.research.read.relevance, {
+      enabled: true,
+      minRerankScore: 0.07,
+      bodyValidation: false,
+      siteQueryMode: 'confirmed',
+    });
+    assert.equal(settings.research.exploratory.maxRepairFailuresPerGap, 3);
+    assert.equal(settings.research.exploratory.maxConsecutiveInvalidSteps, 6);
+    assert.equal(settings.research.providers.rerank.provider, undefined);
   });
 
   it('maps optional embedding settings and falls back to OPENCLAW_GATEWAY_TOKEN', () => {

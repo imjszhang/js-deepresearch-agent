@@ -80,4 +80,27 @@ describe('searchQuestions', () => {
     await assert.rejects(promise, { name: 'AbortError' });
     assert.deepEqual(seen, ['a']);
   });
+
+  it('forwards per-query searchOptions and reports searchMeta via onResult', async () => {
+    const seen = [];
+    const results = await searchQuestions({
+      questions: [{ question: '智谱', searchOptions: { engines: 'brave', language: 'zh' } }],
+      search: {
+        async search(query, options) {
+          seen.push({ query, options });
+          const sources = [{ title: query, url: 'https://example.com', snippet: query }];
+          Object.defineProperty(sources, Symbol.for('jdr.searchMeta'), {
+            value: { respondedEngines: ['brave'], requestParams: options.searchOptions },
+          });
+          return sources;
+        },
+      },
+      onResult(result) {
+        seen.push({ meta: result.searchMeta, options: result.searchOptions });
+      },
+    });
+    assert.equal(seen[0].options.searchOptions.engines, 'brave');
+    assert.deepEqual(results[0].searchMeta.respondedEngines, ['brave']);
+    assert.equal(results[0].searchQuery, '智谱');
+  });
 });

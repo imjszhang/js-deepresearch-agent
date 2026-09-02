@@ -57,7 +57,16 @@ describe('work output', () => {
   it('writes report and search artifacts into the session directory', () => {
     const cwd = makeTempRoot();
     const settings = {
-      research: { workDir: 'work_dir', iterations: 1, questionsPerIteration: 2 },
+      research: {
+        workDir: 'work_dir',
+        iterations: 1,
+        questionsPerIteration: 2,
+        providers: {
+          rerank: { provider: 'http', model: 'jina-reranker-v3', apiKey: 'secret-rerank-key' },
+          embedding: { provider: 'openai-compatible', model: 'embed-model', apiKey: 'secret-embedding-key' },
+        },
+        read: { relevance: { enabled: true, minRerankScore: 0.01 } },
+      },
       search: { engine: 'local', local: { dirs: ['/tmp/notes', '/tmp/notes'] }, apiKey: 'should-not-appear' },
     };
     const date = new Date('2026-05-25T17:38:28.455Z');
@@ -102,6 +111,10 @@ describe('work output', () => {
     assert.equal(meta.settings.searchEngine, 'local');
     assert.deepEqual(meta.settings.corpusDirs, ['/tmp/notes']);
     assert.equal(JSON.stringify(meta).includes('should-not-appear'), false);
+    assert.equal(JSON.stringify(meta).includes('secret-rerank-key'), false);
+    assert.equal(JSON.stringify(meta).includes('secret-embedding-key'), false);
+    assert.deepEqual(meta.settings.providers.rerank, { provider: 'http', model: 'jina-reranker-v3' });
+    assert.equal(meta.settings.relevance.minRerankScore, 0.01);
     assert.equal(meta.artifactSchemaVersion, 3);
     assert.equal(meta.qualityMetricsVersion, 3);
     assert.equal(meta.claimExtractionVersion, 5);

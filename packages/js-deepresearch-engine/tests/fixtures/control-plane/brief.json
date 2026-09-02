@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "query": "compare alpha and beta safety",
   "audience": "engineering leads",
   "decision": null,
@@ -19,6 +19,8 @@
       "claimFamily": "safety",
       "priority": "critical",
       "requiredHosts": ["docs.example.com"],
+      "requiredHostMode": "any",
+      "preferredHosts": [],
       "requiredSourceTypes": [],
       "successCriteria": [],
       "requiredSlot": true
@@ -30,6 +32,8 @@
       "claimFamily": "safety",
       "priority": "normal",
       "requiredHosts": [],
+      "requiredHostMode": "any",
+      "preferredHosts": [],
       "requiredSourceTypes": [],
       "successCriteria": [],
       "requiredSlot": true

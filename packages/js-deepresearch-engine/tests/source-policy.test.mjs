@@ -1,21 +1,26 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import {
   classifySourceTier,
-  collectSearchAngleCandidates,
   evidenceIndependenceKey,
+  evaluateSourceRelevance,
   independentEvidenceKeysFromSources,
   inferEvidenceScope,
   selectReadsByPolicy,
-  buildSiteHostQueries,
-  nextUnusedSiteQueries,
   registrableDomainFromUrl,
-  shortSearchTerms,
-  siteQueryTermVariants,
+  queryMatchesGapScope,
+  sourceMatchesSiteQuery,
+  sourceMatchesEntities,
 } from '../src/research/adaptive/source-policy.mjs';
 
+const relevanceFixture = JSON.parse(readFileSync(
+  new URL('./fixtures/relevance-serp.json', import.meta.url),
+  'utf8',
+));
+
 describe('source policy before rerank', () => {
-  it('ranks required hosts above media reprints and builds site queries', () => {
+  it('ranks required hosts above media reprints', () => {
     const gap = {
       question: 'controlling shareholder and audited revenue',
       requiredHosts: ['hkexnews.hk'],
@@ -32,24 +37,7 @@ describe('source policy before rerank', () => {
     });
     assert.equal(picks[0].id, 'filing');
     assert.equal(picks[0].selectReason, 'required_host');
-    assert.ok(buildSiteHostQueries(gap).some((query) => query.startsWith('site:hkexnews.hk')));
-    assert.ok(!buildSiteHostQueries(gap, shortSearchTerms('智谱 02513')).some((query) => query.includes(gap.question)));
     assert.equal(registrableDomainFromUrl('https://www.news.example.com/a'), 'example.com');
-  });
-
-  it('retries empty site queries with a different short term instead of reusing the same host query', () => {
-    const gap = {
-      question: 'a very long unmatched gap about controlling shareholders and audited revenue',
-      requiredHosts: ['hkexnews.hk'],
-      preferredHosts: ['sse.com.cn'],
-    };
-    const first = nextUnusedSiteQueries(gap, '智谱 02513', [], { limit: 1 });
-    assert.equal(first.length, 1);
-    assert.match(first[0], /^site:hkexnews\.hk /);
-    const retry = nextUnusedSiteQueries(gap, '智谱 02513', first, { limit: 1 });
-    assert.equal(retry.length, 1);
-    assert.notEqual(retry[0], first[0]);
-    assert.ok(!retry[0].includes('sse.com.cn'));
   });
 
   it('does not drop file:// candidates when mixing them with web hosts', () => {
@@ -68,14 +56,6 @@ describe('source policy before rerank', () => {
     assert.ok(ids.includes('local-1') || ids.includes('local-3'));
     assert.ok(!ids.includes('local-1') || !ids.includes('local-2'));
     assert.equal(classifySourceTier({ url: 'file:///notes/a.md', title: 'Local notes' }), 'unknown');
-  });
-
-  it('does not inject filing angles into official-docs queries', () => {
-    const variants = siteQueryTermVariants('Compare official docs of llama.cpp and Ollama');
-    assert.ok(!variants.some((item) => /年报|招股|prospectus|filing|公告/i.test(item)));
-    const gap = { question: 'official docs', preferredHosts: ['hkexnews.hk', 'sec.gov'] };
-    assert.deepEqual(nextUnusedSiteQueries(gap, 'official docs', []), []);
-    assert.deepEqual(buildSiteHostQueries(gap), []);
   });
 
   it('counts local independence by corpus channel, not file count', () => {
@@ -106,9 +86,146 @@ describe('source policy before rerank', () => {
     assert.equal(inferEvidenceScope({ search: { engine: 'searxng', local: { dirs: ['/notes'] } } }), 'mixed');
   });
 
-  it('does not invent numeric suffix search angles', () => {
-    const angles = collectSearchAngleCandidates('房产操作攻略', [], ['房产操作攻略'], { evidenceScope: 'local' });
-    assert.ok(!angles.some((item) => /\s+\d+(-\d+)?$/.test(item)));
-    assert.ok(!angles.some((item) => item.includes('site:')));
+  it('fails closed on site violations, entity mismatches, and low rerank scores', () => {
+    const gap = { question: '智谱AI的监管合规情况', requiredHosts: [] };
+    const relevant = {
+      url: 'https://caixin.com/zhipu',
+      title: '智谱AI监管合规进展',
+      rerank: { provider: 'http', score: 0.42 },
+    };
+    assert.equal(sourceMatchesSiteQuery(relevant, 'site:caixin.com 智谱 监管'), true);
+    assert.equal(sourceMatchesSiteQuery(relevant, 'site:zhipuai.cn 智谱 监管'), false);
+    assert.equal(evaluateSourceRelevance(relevant, {
+      gap,
+      query: 'site:zhipuai.cn 智谱 监管',
+      entities: ['智谱AI'],
+      rerankProvider: 'http',
+    }).reasonCode, 'site_constraint_violation');
+    assert.equal(evaluateSourceRelevance({
+      url: 'https://apps.microsoft.com/kakao',
+      title: 'KakaoTalk for Windows',
+      rerank: { provider: 'http', score: 0.004 },
+    }, {
+      gap,
+      query: '智谱 监管',
+      entities: ['智谱AI', '智谱'],
+      rerankProvider: 'http',
+    }).reasonCode, 'entity_mismatch');
+    assert.equal(evaluateSourceRelevance({
+      ...relevant,
+      rerank: { provider: 'http', score: -0.12 },
+    }, {
+      gap,
+      query: '智谱 监管',
+      entities: ['智谱AI'],
+      rerankProvider: 'http',
+    }).reasonCode, 'rerank_below_threshold');
+    assert.equal(sourceMatchesEntities({
+      title: '智谱丨BigModel 平台',
+      snippet: '智谱大模型开放平台',
+    }, ['智谱AI', 'Zhipu AI']), true);
+  });
+
+  it('accepts an unevaluated rerank candidate without applying the threshold', () => {
+    const decision = evaluateSourceRelevance({
+      url: 'https://en.wikipedia.org/wiki/Zhipu_AI',
+      title: '智谱AI',
+      rerank: null,
+    }, {
+      gap: { question: '智谱AI公司信息' },
+      query: '智谱AI 公司信息',
+      entities: ['智谱AI'],
+      rerankProvider: null,
+      minRerankScore: 0.5,
+    });
+    assert.equal(decision.accepted, true);
+    assert.equal(decision.rerankScore, null);
+    assert.equal(decision.reasonCode, 'rerank_not_evaluated');
+  });
+
+  it('filters rejected candidates before authority and diversity ranking', () => {
+    const picks = selectReadsByPolicy({
+      candidates: [
+        {
+          id: 'irrelevant-edu',
+          url: 'https://guides.lib.cua.edu/manuscripts',
+          title: 'Manuscript collections',
+          rerank: { provider: 'http', score: -0.126 },
+        },
+        {
+          id: 'relevant-media',
+          url: 'https://caixin.com/zhipu',
+          title: '智谱AI监管合规进展',
+          rerank: { provider: 'http', score: 0.42 },
+        },
+      ],
+      gap: { question: '智谱AI监管情况' },
+      relevance: {
+        query: '智谱 监管',
+        entities: ['智谱AI', '智谱'],
+        rerankProvider: 'http',
+        minRerankScore: 0.01,
+      },
+      minCount: 1,
+      maxCount: 2,
+    });
+    assert.deepEqual(picks.map((item) => item.id), ['relevant-media']);
+  });
+
+  it('rejects every recorded off-topic SERP result before reading', () => {
+    const decisions = relevanceFixture.results.map((source) => ({
+      id: source.id,
+      decision: evaluateSourceRelevance({
+        ...source,
+        rerank: { provider: 'http', score: source.rerankScore },
+      }, {
+        gap: { question: '智谱AI监管合规', requiredHosts: [] },
+        query: relevanceFixture.query,
+        entities: relevanceFixture.entities,
+        rerankProvider: 'http',
+      }),
+    }));
+    assert.equal(decisions.find((item) => item.id === 'official').decision.accepted, true);
+    assert.deepEqual(
+      decisions.filter((item) => item.id !== 'official').map((item) => item.decision.reasonCode),
+      relevanceFixture.results.slice(1).map((item) => item.expected),
+    );
+  });
+
+  it('validates query scope without rewriting the query', () => {
+    assert.equal(queryMatchesGapScope('智谱AI 营收 利润 现金流', {
+      question: '智谱AI的营收、利润及现金流状况如何?',
+      claimFamily: 'financials',
+    }, ['智谱AI']), true);
+    assert.equal(queryMatchesGapScope('智谱AI 模型 专利 技术壁垒', {
+      question: '智谱AI的营收、利润及现金流状况如何?',
+      claimFamily: 'financials',
+    }, ['智谱AI']), false);
+  });
+
+  it('uses the original research question when a slot is written in another language', () => {
+    const englishSlot = {
+      question: 'What was the monetary amount of the regulatory penalty imposed on 星河智算 in 2024?',
+      answerSlot: 'penalty_amount',
+      claimFamily: 'financial_penalty',
+    };
+    const researchQuery = '星河智算 2024 年监管处罚的金额、事由和整改措施是什么？';
+    assert.equal(queryMatchesGapScope(
+      '星河智算 2024 行政处罚 金额 事由 整改',
+      englishSlot,
+      ['星河智算'],
+    ), false);
+    assert.equal(queryMatchesGapScope(
+      '星河智算 2024 行政处罚 金额 事由 整改',
+      englishSlot,
+      ['星河智算'],
+      researchQuery,
+    ), true);
+    assert.equal(queryMatchesGapScope(
+      '星河智算 模型 专利 技术壁垒',
+      englishSlot,
+      ['星河智算'],
+      researchQuery,
+    ), false);
   });
 });

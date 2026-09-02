@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { isSuccessfulBody } from './body-quality.mjs';
 import { passageContainsQuote } from './claim-entailment.mjs';
 import { isRequiredSlot, needsSemanticClose } from './gap-state.mjs';
@@ -25,8 +26,19 @@ function sourceIdentity(source) {
   return source?.id || source?.url || null;
 }
 
-export function collectSuccessfulPassages(findings = [], { gapId = null, allowFallback = true } = {}) {
-  const dedicatedFindings = findings.filter((finding) => !gapId || finding.gapId === gapId);
+export function collectSuccessfulPassages(findings = [], {
+  gapId = null,
+  contractSlotId = null,
+  answerSlot = null,
+  allowFallback = true,
+} = {}) {
+  const targeted = Boolean(gapId || contractSlotId || answerSlot);
+  const dedicatedFindings = findings.filter((finding) => (
+    !targeted
+    || finding.gapId === gapId
+    || (contractSlotId && finding.contractSlotId === contractSlotId)
+    || (!finding.gapId && !finding.contractSlotId && answerSlot && finding.answerSlot === answerSlot)
+  ));
   const toPassages = (items) => items.flatMap((finding) => (
     (finding.sources || []).filter(isSuccessfulBody).map((source) => {
       const text = String(source.content || source.summary || '').trim();
@@ -36,11 +48,12 @@ export function collectSuccessfulPassages(findings = [], { gapId = null, allowFa
         sourceId: sourceIdentity(source),
         text,
         gapId: finding.gapId || null,
+        assessment: source.assessment || null,
       };
     }).filter(Boolean)
   ));
   const dedicated = toPassages(dedicatedFindings);
-  if (dedicatedFindings.length && gapId) return dedicated;
+  if (targeted && dedicatedFindings.length) return dedicated;
   if (!allowFallback) return dedicated;
   return dedicated.length ? dedicated : toPassages(findings);
 }
@@ -50,7 +63,12 @@ export function selectSlotPassages(gap, findings = [], {
   chunkChars = DEFAULT_CHUNK_CHARS,
 } = {}) {
   const focus = [gap.question, gap.answerSlot, ...(gap.evidenceCriteria || [])].filter(Boolean).join(' ');
-  return collectSuccessfulPassages(findings, { gapId: gap.id, allowFallback: true })
+  return collectSuccessfulPassages(findings, {
+    gapId: gap.id,
+    contractSlotId: gap.contractSlotId,
+    answerSlot: gap.answerSlot,
+    allowFallback: !isRequiredSlot(gap),
+  })
     .flatMap((passage) => {
       const chunks = splitContentForPassages(passage.text, chunkChars);
       const fallback = {
@@ -69,6 +87,22 @@ export function selectSlotPassages(gap, findings = [], {
     })
     .sort((left, right) => (right.retrievalScore || 0) - (left.retrievalScore || 0))
     .slice(0, topK);
+}
+
+export function slotSupportFingerprint(gap, passages = []) {
+  const payload = JSON.stringify({
+    gapId: gap?.id || '',
+    question: gap?.question || '',
+    answerSlot: gap?.answerSlot || '',
+    contractSlotId: gap?.contractSlotId || '',
+    passages: (passages || []).map((passage) => ({
+      id: passage.id,
+      startChar: passage.startChar ?? 0,
+      endChar: passage.endChar ?? 0,
+      hash: createHash('sha256').update(String(passage.text || '')).digest('hex'),
+    })),
+  });
+  return createHash('sha256').update(payload).digest('hex');
 }
 
 export function slotsNeedingSupport(gaps = []) {
@@ -265,25 +299,69 @@ export async function judgeOpenSlotSupport({
   findings = [],
   topK = 3,
   batchSize = DEFAULT_BATCH_SIZE,
+  cache = null,
 } = {}) {
   const targets = [];
   for (const gap of slotsNeedingSupport(gaps)) {
     const passages = selectSlotPassages(gap, findings, { topK });
     if (!passages.length) continue;
-    targets.push({ gap, passages });
+    targets.push({ gap, passages, cacheKey: slotSupportFingerprint(gap, passages) });
   }
   if (!targets.length) {
-    return { judgments: [], unknown: false, retried: false, attempts: 0, batches: 0, splitRetries: 0 };
+    return {
+      judgments: [],
+      unknown: false,
+      retried: false,
+      attempts: 0,
+      batches: 0,
+      splitRetries: 0,
+      cacheHits: 0,
+      cacheMisses: 0,
+    };
+  }
+
+  const cachedJudgments = [];
+  const pending = [];
+  let cacheHits = 0;
+  let cacheMisses = 0;
+  for (const target of targets) {
+    if (cache?.has(target.cacheKey)) {
+      cacheHits += 1;
+      cachedJudgments.push({
+        ...cache.get(target.cacheKey),
+        gapId: target.gap.id,
+        answerSlot: target.gap.answerSlot || null,
+        question: target.gap.question || null,
+      });
+    } else {
+      cacheMisses += 1;
+      pending.push(target);
+    }
+  }
+
+  if (!pending.length) {
+    return {
+      judgments: cachedJudgments,
+      unknown: cachedJudgments.some((item) => item.method === 'fail_closed'),
+      retried: false,
+      attempts: 0,
+      batches: 0,
+      splitRetries: 0,
+      cacheHits,
+      cacheMisses,
+    };
   }
 
   if (!llm?.complete) {
     return {
-      judgments: failClosedTargets(targets, 'no_llm'),
+      judgments: [...cachedJudgments, ...failClosedTargets(pending, 'no_llm')],
       unknown: true,
       retried: false,
       attempts: 0,
       batches: 0,
       splitRetries: 0,
+      cacheHits,
+      cacheMisses,
     };
   }
 
@@ -292,20 +370,30 @@ export async function judgeOpenSlotSupport({
     ? Math.floor(requestedSize)
     : DEFAULT_BATCH_SIZE;
   const outcomes = [];
-  for (let start = 0; start < targets.length; start += size) {
+  for (let start = 0; start < pending.length; start += size) {
     outcomes.push(await judgeTargetBatch({
       llm,
       signal,
       query,
-      targets: targets.slice(start, start + size),
+      targets: pending.slice(start, start + size),
     }));
   }
+  const judged = outcomes.flatMap((outcome) => outcome.judgments);
+  if (cache) {
+    for (const target of pending) {
+      const judgment = judged.find((item) => item.gapId === target.gap.id);
+      if (judgment) cache.set(target.cacheKey, judgment);
+    }
+  }
   return {
-    judgments: outcomes.flatMap((outcome) => outcome.judgments),
-    unknown: outcomes.some((outcome) => outcome.unknown),
+    judgments: [...cachedJudgments, ...judged],
+    unknown: outcomes.some((outcome) => outcome.unknown)
+      || cachedJudgments.some((item) => item.method === 'fail_closed'),
     retried: outcomes.some((outcome) => outcome.retried),
     attempts: outcomes.reduce((sum, outcome) => sum + outcome.attempts, 0),
-    batches: Math.ceil(targets.length / size),
+    batches: Math.ceil(pending.length / size),
     splitRetries: outcomes.reduce((sum, outcome) => sum + outcome.splitRetries, 0),
+    cacheHits,
+    cacheMisses,
   };
 }

@@ -12,12 +12,15 @@ import {
   hostnameOf as policyHostnameOf,
   hostnamesMatch,
   inferEvidenceScope,
+  requiredHostCoverage,
   registrableDomainFromUrl,
   selectReadsByPolicy,
 } from './source-policy.mjs';
 import { sourceDiversityKey } from '../source-candidates.mjs';
 import { UrlPool } from './url-pool.mjs';
 import { collectGapSources, evaluateGapEvidence, rollupRootGap } from '../gap-state.mjs';
+import { compactSearchSnippets, getSearchMeta } from '../../search/search-result.mjs';
+import { inferSearchOutcome } from '../search-trace.mjs';
 
 export { hostnameOf } from './source-policy.mjs';
 
@@ -100,6 +103,7 @@ export class ResearchState {
     this.candidates = new Map();
     this.urlPool = new UrlPool({ maxPerHostname: MAX_CANDIDATES_PER_HOSTNAME });
     this.readSourceIds = new Set();
+    this.observedHosts = new Set();
     this.knowledge = [];
     this.observations = [];
     this.diary = [];
@@ -116,12 +120,37 @@ export class ResearchState {
       recentMaterialGapsClosed: 0,
       plateau: false,
     };
+    this.relevance = {
+      returnedCandidates: 0,
+      siteRejected: 0,
+      admittedCandidates: 0,
+      rerankEvaluated: 0,
+      rerankAccepted: 0,
+      rerankRejected: 0,
+      bodyIrrelevant: 0,
+      readAccepted: 0,
+    };
+    this.recovery = {
+      invalidSteps: 0,
+      recoveryRounds: 0,
+      duplicateQueryRejections: 0,
+      siteFilteredAllQueries: 0,
+      siteFallbackQueries: 0,
+      plannerRejectedQueries: 0,
+      plannerRetryCount: 0,
+      plannerFailures: 0,
+      lastPlannerFailure: null,
+    };
     this.cycle = {
       afterSearch: false,
       successfulBodyReads: 0,
       newUrlCount: 0,
       lastSearchQuery: null,
     };
+    this.searchOutcomes = [];
+    this.plannerRejections = [];
+    this.slotSupportCache = new Map();
+    this.lastAgentSnapshotChars = null;
   }
 
   addDiary(line) {
@@ -133,19 +162,22 @@ export class ResearchState {
   addGap(question, priority = 'normal', options = {}) {
     const text = String(question || '').trim();
     if (!text) return null;
-    if (this.gaps.some((gap) => !gap.rollup && similarQuestions(gap.question, text))) return null;
+    if (options.deduplicate !== false
+      && this.gaps.some((gap) => !gap.rollup && similarQuestions(gap.question, text))) return null;
     const nextDepth = options.depth ?? 1;
     if (this.maxGapDepth > 0 && nextDepth > this.maxGapDepth) return null;
     const gap = createGapRecord({
-      id: `gap-${this.gaps.length + 1}`,
+      id: options.id || `gap-${this.gaps.length + 1}`,
       question: text,
       priority,
       depth: nextDepth,
       profile: this.profile,
       requiredHosts: options.requiredHosts,
+      requiredHostMode: options.requiredHostMode,
       preferredHosts: options.preferredHosts,
       requiredSourceTypes: options.requiredSourceTypes,
       minIndependentSources: options.minIndependentSources,
+      contractSlotId: options.contractSlotId,
       answerSlot: options.answerSlot,
       claimFamily: options.claimFamily,
       requiredSlot: options.requiredSlot,
@@ -191,10 +223,13 @@ export class ResearchState {
   gapHasRequiredHostBody(gapId) {
     const gap = this.getGap(gapId);
     if (!this.gapNeedsPrimaryEvidence(gap)) return true;
-    return this.findings.some((finding) => (
-      finding.gapId === gapId
-      && (finding.sources || []).some((source) => this.sourceSatisfiesPrimary(source, gap))
-    ));
+    const sources = this.findings
+      .filter((finding) => finding.gapId === gapId)
+      .flatMap((finding) => (finding.sources || []).filter(sourceHasBody));
+    const hostsSatisfied = requiredHostCoverage(sources, gap).satisfied;
+    const primarySatisfied = !(gap.requiredSourceTypes || []).includes('primary_filing')
+      || sources.some((source) => this.sourceSatisfiesPrimary(source, { ...gap, requiredHosts: [] }));
+    return hostsSatisfied && primarySatisfied;
   }
 
   hasBodyEvidence() {
@@ -241,6 +276,7 @@ export class ResearchState {
 
   noteDuplicateQuery() {
     this.marginal.duplicateQueryCount += 1;
+    this.recovery.duplicateQueryRejections += 1;
   }
 
   syncGapCoverage() {
@@ -278,6 +314,83 @@ export class ResearchState {
     if (!gap || !query) return;
     if (!gap.searchedQueries.includes(query)) gap.searchedQueries.push(query);
     if (gap.status === 'open') gap.status = 'searched';
+  }
+
+  recordPlannerRejections(rejected = [], extra = {}) {
+    for (const item of rejected || []) {
+      const query = String(item?.query || item || '').trim();
+      if (!query) continue;
+      this.plannerRejections.push({
+        query,
+        reason: item.reason || 'rejected',
+        duplicateOf: item.duplicateOf || null,
+        step: this.step,
+        plannerMode: extra.plannerMode || item.plannerMode || null,
+      });
+    }
+  }
+
+  recordSearchOutcome(partial = {}) {
+    const meta = partial.searchMeta || getSearchMeta(partial.sources) || {};
+    const accepted = partial.resultCount == null ? (partial.sources?.length || 0) : partial.resultCount;
+    const returned = partial.returnedResultCount == null ? (partial.sources?.length || 0) : partial.returnedResultCount;
+    const record = {
+      query: String(partial.query || '').trim(),
+      queryOrigin: partial.queryOrigin || null,
+      plannerMode: partial.plannerMode || null,
+      gapId: partial.gapId || null,
+      searchOptions: partial.searchOptions || meta.requestParams || null,
+      requestParams: meta.requestParams || null,
+      respondedEngines: partial.respondedEngines || meta.respondedEngines || [],
+      unresponsiveEngines: partial.unresponsiveEngines || meta.unresponsiveEngines || [],
+      numberOfResults: meta.numberOfResults ?? null,
+      suggestions: meta.suggestions || [],
+      corrections: meta.corrections || [],
+      resultCount: accepted,
+      returnedResultCount: returned,
+      siteRejectedCount: partial.siteRejectedCount ?? 0,
+      newUrlCount: partial.newUrlCount ?? 0,
+      memoryStatus: partial.memoryStatus || null,
+      snippets: Array.isArray(partial.snippets)
+        ? partial.snippets.slice(0, 3)
+        : compactSearchSnippets(partial.sources),
+      outcome: inferSearchOutcome({
+        error: partial.error,
+        skipped: partial.skipped,
+        memoryStatus: partial.memoryStatus,
+        resultCount: accepted,
+        siteRejectedCount: partial.siteRejectedCount ?? 0,
+      }),
+      error: partial.error
+        ? { name: partial.error.name || 'Error', message: partial.error.message || String(partial.error) }
+        : null,
+      skipped: partial.skipped || null,
+      step: this.step,
+    };
+    this.searchOutcomes.push(record);
+    return record;
+  }
+
+  recentSearchOutcomes(limit = 12) {
+    return this.searchOutcomes.slice(-Math.max(1, Number(limit) || 12));
+  }
+
+  recordFilteredQuery(gapId, query, reason = 'filtered') {
+    const gap = this.getGap(gapId);
+    if (!gap || !query) return;
+    gap.exhaustedAngles = [...new Set([...(gap.exhaustedAngles || []), query])];
+    gap.filteredQueries = [
+      ...(gap.filteredQueries || []),
+      { query, reason, step: this.step },
+    ];
+    if (reason === 'site_filtered_all') this.recovery.siteFilteredAllQueries += 1;
+  }
+
+  observeHosts(sources = []) {
+    for (const source of sources) {
+      const hostname = policyHostnameOf(source?.url || source?.id);
+      if (hostname) this.observedHosts.add(hostname);
+    }
   }
 
   refreshBudgetView({ budget, minLlmTokens, targetLlmTokens, actionCosts } = {}) {
@@ -327,7 +440,7 @@ export class ResearchState {
     const actionable = this.gaps.filter((gap) => (
       ['open', 'searched', 'missing'].includes(gap.status)
       || (gap.status === 'body_read' && this.gapNeedsPrimaryEvidence(gap))
-    ));
+    ) && gap.status !== 'blocked');
     const pool = actionable.length ? actionable : this.gaps;
     if (!pool.length) return this.gaps[0];
     return pool[this.step % pool.length];
@@ -351,7 +464,12 @@ export class ResearchState {
 
   candidateScore(candidate) {
     const tierBoost = candidate.tier === 'required_primary' ? 1 : 0;
-    return (candidate.rerank?.score || candidate.rerankScore || 0) + (candidate.freq || 0) * 0.1 + hostnameWeight(candidate.url) + tierBoost;
+    const host = policyHostnameOf(candidate.url || candidate.id);
+    const preferredBoost = this.gaps.some((gap) => (
+      (gap.preferredHosts || []).some((preferred) => hostnamesMatch(host, preferred))
+    )) ? 0.15 : 0;
+    return (candidate.rerank?.score ?? candidate.rerankScore ?? 0) + (candidate.freq || 0) * 0.1
+      + hostnameWeight(candidate.url) + tierBoost + preferredBoost;
   }
 
   rankedCandidates() {
@@ -431,6 +549,81 @@ export class ResearchState {
           ? this.marginal.duplicateResultCount / this.marginal.searchCount
           : 0,
       },
+      relevance: { ...this.relevance },
+      recovery: {
+        ...this.recovery,
+        blockedGaps: gaps.filter((gap) => gap.status === 'blocked').map((gap) => ({
+          gapId: gap.id,
+          answerSlot: gap.answerSlot || null,
+          blockedReason: gap.blockedReason || 'repair_exhausted',
+          failures: Number(gap.repairFailures) || 0,
+        })),
+      },
+    };
+  }
+
+  snapshotForAgent() {
+    const gaps = this.gaps.filter((gap) => !gap.rollup).map((gap) => ({
+      id: gap.id,
+      question: gap.question,
+      status: gap.status,
+      priority: gap.priority || null,
+      requiredHosts: gap.requiredHosts || [],
+      preferredHosts: gap.preferredHosts || [],
+      requiredSlot: Boolean(gap.requiredSlot),
+      slotSupport: gap.slotSupport?.verdict || null,
+      blockedReason: gap.blockedReason || null,
+    }));
+    const unread = this.rankedCandidates()
+      .filter((candidate) => !this.readSourceIds.has(candidate.id) && candidate.status === 'unread')
+      .slice(0, SNAPSHOT_CANDIDATE_LIMIT)
+      .map((candidate) => ({
+        id: candidate.id,
+        title: candidate.title,
+        score: Math.round(this.candidateScore(candidate) * 1000) / 1000,
+        gapId: candidate.gapId,
+      }));
+    const readiness = this.readiness;
+    return {
+      query: this.query,
+      step: this.step,
+      maxSteps: this.maxSteps,
+      lastAction: this.lastAction,
+      focusGapId: this.focusGap()?.id || 'gap-1',
+      budget: this.budgetView,
+      readiness: readiness ? {
+        pass: readiness.pass,
+        failures: (readiness.failures || []).slice(0, 8).map((failure) => ({
+          code: failure.code || failure.reason || null,
+          message: failure.message || null,
+          gapId: failure.gapId || null,
+        })),
+      } : null,
+      gaps,
+      unreadCandidates: unread,
+      recentSearchOutcomes: this.recentSearchOutcomes(8).map((item) => ({
+        query: item.query,
+        outcome: item.outcome,
+        gapId: item.gapId,
+        resultCount: item.resultCount,
+        siteRejectedCount: item.siteRejectedCount,
+        respondedEngines: item.respondedEngines,
+        unresponsiveEngines: item.unresponsiveEngines,
+        snippets: item.snippets,
+      })),
+      knowledge: this.knowledge.slice(-6),
+      diary: this.diary.slice(-8),
+      cycle: { ...this.cycle },
+      marginal: { ...this.marginal },
+      recovery: {
+        invalidSteps: this.recovery.invalidSteps,
+        recoveryRounds: this.recovery.recoveryRounds,
+        duplicateQueryRejections: this.recovery.duplicateQueryRejections,
+        siteFilteredAllQueries: this.recovery.siteFilteredAllQueries,
+        plannerRejectedQueries: this.recovery.plannerRejectedQueries,
+        plannerRetryCount: this.recovery.plannerRetryCount,
+        lastPlannerFailure: this.recovery.lastPlannerFailure,
+      },
     };
   }
 
@@ -441,20 +634,42 @@ export class ResearchState {
       const id = source.id || source.url;
       if (!id) continue;
       const existing = this.candidates.get(id) || {};
+      const priorMatch = existing.gapMatches?.[gapId] || {};
+      const nextTier = classifySourceTier(source, gap);
+      const gapMatch = {
+        ...priorMatch,
+        queries: [...new Set([...(priorMatch.queries || []), query].filter(Boolean))],
+        tier: nextTier,
+        rerank: source.rerank || priorMatch.rerank || null,
+        rerankScore: source.rerank?.score ?? source.rerankScore ?? priorMatch.rerankScore ?? null,
+      };
       const record = {
         ...existing,
         ...source,
         id,
-        gapId: gapId || existing.gapId || 'gap-1',
+        gapId: existing.gapId || gapId || 'gap-1',
+        gapIds: [...new Set([...(existing.gapIds || [existing.gapId]), gapId].filter(Boolean))],
+        gapMatches: {
+          ...(existing.gapMatches || {}),
+          [gapId]: gapMatch,
+        },
+        relevanceDecisionByGap: {
+          ...(existing.relevanceDecisionByGap || {}),
+          [gapId]: gapMatch.relevanceDecision || null,
+        },
         hostname: existing.hostname || policyHostnameOf(source.url || id),
         diversityKey: existing.diversityKey || sourceDiversityKey({ ...existing, ...source }, source.url || id),
         registrableDomain: existing.registrableDomain || registrableDomainFromUrl(source.url || id),
-        tier: classifySourceTier(source, gap),
+        tier: existing.tier || nextTier,
         clusterId: clusterById[id] || existing.clusterId || source.clusterId || null,
         status: existing.status || 'unread',
         freq: (existing.freq || 0) + 1,
       };
-      const pooled = this.urlPool.add(record, { gapId, query, gap, clusterId: record.clusterId });
+      const pooled = this.urlPool.add({
+        ...record,
+        rerank: source.rerank ?? null,
+        rerankScore: source.rerank?.score ?? source.rerankScore ?? null,
+      }, { gapId, query, gap, clusterId: record.clusterId });
       if (pooled?.record?.status === 'duplicate') record.status = 'duplicate';
       if (pooled?.added) added += 1;
       this.candidates.set(id, { ...record, ...(pooled?.record || {}) });
@@ -480,23 +695,60 @@ export class ResearchState {
       && candidate.status !== 'read'
       && candidate.status !== 'failed'
       && candidate.status !== 'waf'
+      && candidate.status !== 'irrelevant'
       && candidate.status !== 'duplicate'
-      && (!gapId || candidate.gapId === gap.id)
-    ));
+      && (!gapId || candidate.gapId === gap.id || candidate.gapIds?.includes(gap.id))
+    )).map((candidate) => {
+      const match = candidate.gapMatches?.[gap.id];
+      const primaryGapCandidate = candidate.gapId === gap.id;
+      const scopedRerank = match?.rerank ?? (primaryGapCandidate ? candidate.rerank : null);
+      const scopedRerankScore = match?.rerank?.score
+        ?? match?.rerankScore
+        ?? (primaryGapCandidate ? (candidate.rerank?.score ?? candidate.rerankScore) : null);
+      return match ? {
+        ...candidate,
+        gapId: gap.id,
+        tier: match.tier || candidate.tier,
+        rerank: scopedRerank,
+        rerankScore: scopedRerankScore,
+        relevanceDecision: match.relevanceDecision || candidate.relevanceDecision,
+      } : candidate;
+    });
     const alreadyRead = new Set(
       [...this.readSourceIds].map((id) => {
         const candidate = this.candidates.get(id);
         return sourceDiversityKey(candidate || { url: id }, candidate?.url || id);
       }).filter(Boolean),
     );
-    return selectReadsByPolicy({
+    const selected = selectReadsByPolicy({
       candidates: unread,
       gap,
       alreadyReadHostnames: alreadyRead,
       maxPerHostname: MAX_CANDIDATES_PER_HOSTNAME,
       minCount: Math.min(2, count),
       maxCount: count,
+      relevance: this.settings?.research?.read?.relevance ? {
+        ...this.settings.research.read.relevance,
+        enforceEntity: this.settings.research.read.relevance.entityGuard !== false,
+        query: gap.question || this.query,
+        entities: this.brief?.entities || this.profile?.brief?.entities || [],
+      } : null,
     });
+    for (const picked of selected) {
+      const candidate = this.candidates.get(picked.id);
+      if (!candidate || !picked.relevanceDecision) continue;
+      const match = candidate.gapMatches?.[gap.id] || {};
+      candidate.gapMatches = {
+        ...(candidate.gapMatches || {}),
+        [gap.id]: { ...match, relevanceDecision: picked.relevanceDecision },
+      };
+      candidate.relevanceDecisionByGap = {
+        ...(candidate.relevanceDecisionByGap || {}),
+        [gap.id]: picked.relevanceDecision,
+      };
+      if (candidate.gapId === gap.id) candidate.relevanceDecision = picked.relevanceDecision;
+    }
+    return selected;
   }
 
   validate(action) {
@@ -506,6 +758,11 @@ export class ResearchState {
     if (action.action === 'read') {
       if (!action.sourceIds?.length) return 'missing_source_ids';
       if (action.sourceIds.some((id) => !this.candidates.has(id))) return 'unknown_source';
+      const targetGapId = action.gapId || this.focusGap()?.id;
+      const rejected = action.sourceIds
+        .map((id) => this.candidates.get(id)?.gapMatches?.[targetGapId]?.relevanceDecision)
+        .find((decision) => decision?.accepted === false);
+      if (rejected) return rejected.reasonCode || 'relevance_rejected';
       if (this.lastAction === 'read') {
         const unread = action.sourceIds.filter((id) => !this.readSourceIds.has(id));
         if (!unread.length) return 'repeat_action';

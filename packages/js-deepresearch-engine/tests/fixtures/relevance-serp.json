@@ -1,0 +1,46 @@
+{
+  "query": "site:zhipuai.cn 智谱AI 监管合规",
+  "entities": ["智谱AI", "智谱", "Zhipu AI"],
+  "results": [
+    {
+      "id": "official",
+      "title": "智谱AI公司动态",
+      "url": "https://www.zhipuai.cn/news",
+      "snippet": "智谱AI发布合规与产品动态。",
+      "rerankScore": 0.42,
+      "expected": "accepted"
+    },
+    {
+      "id": "catholic-manuscripts",
+      "title": "Manuscript List - Catholic University",
+      "url": "https://guides.lib.cua.edu/msscoll/manuscript-list",
+      "snippet": "A list of manuscript collections.",
+      "rerankScore": -0.126,
+      "expected": "site_constraint_violation"
+    },
+    {
+      "id": "kakaotalk",
+      "title": "KakaoTalk for Windows",
+      "url": "https://apps.microsoft.com/detail/kakaotalk",
+      "snippet": "A Korean messaging application.",
+      "rerankScore": 0.004,
+      "expected": "site_constraint_violation"
+    },
+    {
+      "id": "outlook",
+      "title": "Microsoft Outlook",
+      "url": "https://outlook.office.com/mail",
+      "snippet": "Email and calendar.",
+      "rerankScore": -0.095,
+      "expected": "site_constraint_violation"
+    },
+    {
+      "id": "google-india",
+      "title": "Google Translate",
+      "url": "https://translate.google.co.in/",
+      "snippet": "Translate text between languages.",
+      "rerankScore": -0.092,
+      "expected": "site_constraint_violation"
+    }
+  ]
+}

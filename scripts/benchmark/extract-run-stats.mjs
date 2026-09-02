@@ -1,4 +1,4 @@
-import { mapHistoricalStrategy } from 'js-deepresearch-engine';
+import { collectObservabilityMetrics, mapHistoricalStrategy } from 'js-deepresearch-engine';
 
 export function resolveStrategyLabel(artifacts) {
   const strategy = artifacts.meta?.strategy || 'unknown';
@@ -48,7 +48,8 @@ export function countLlmPurposeCalls(trace = []) {
 
   return {
     purposes,
-    sourceSummaryCalls: purposes.source_summary || 0,
+    sourceSummaryCalls: (purposes.source_summary || 0) + (purposes.source_assessment || 0),
+    sourceAssessmentCalls: purposes.source_assessment || 0,
     totalCompletedLlmCalls: Object.values(purposes).reduce((sum, count) => sum + count, 0),
   };
 }
@@ -136,6 +137,61 @@ export function extractRunStats(artifacts, { wallClockDurationMs = null } = {}) 
   const durationMs = Number.isFinite(wallClockDurationMs) ? wallClockDurationMs : traceDurationMs;
   const llmPurposes = countLlmPurposeCalls(artifacts.trace);
   const tokenSplit = splitLlmCost({ usage, trace: artifacts.trace });
+  const expectedSlots = artifacts.brief?.requiredAnswerSlots || [];
+  const materializedSlotIds = new Set((artifacts.gaps || []).map((gap) => gap.contractSlotId).filter(Boolean));
+  const dedupTraces = (artifacts.trace || []).filter((entry) => (
+    entry.purpose === 'query_dedup_batch' || entry.reasonCode === 'query_dedup_batch'
+  ));
+  const relevance = quality.metrics?.relevance || {};
+  const recovery = quality.metrics?.recovery || {
+    invalidSteps: 0,
+    recoveryRounds: 0,
+    duplicateQueryRejections: 0,
+    siteFilteredAllQueries: 0,
+    siteFallbackQueries: 0,
+    blockedGaps: [],
+  };
+  const searchTraces = (artifacts.trace || []).filter((entry) => entry.action === 'search');
+  const executedSearches = searchTraces.filter((entry) => (
+    !['rejected', 'skipped'].includes(entry.status)
+  ));
+  const queriesMissingProvenance = executedSearches.filter((entry) => !entry.queryOrigin && !entry.plannedQueries).length;
+  const ruleGeneratedQueryCount = executedSearches.filter((entry) => (
+    entry.queryOrigin && !['user_query', 'llm_planner'].includes(entry.queryOrigin)
+  )).length + executedSearches.filter((entry) => (
+    /primary source evidence|conflicting evidence correction|counterexample failure/i.test(String(entry.query || (entry.queries || []).join(' ')))
+  )).length;
+  const siteFallbackWithoutPlanner = searchTraces.filter((entry) => (
+    (entry.reasonCode === 'site_fallback_query' || entry.siteFallbackOf)
+    && entry.queryOrigin !== 'llm_planner'
+  )).length;
+  const queryProvenance = quality.metrics?.queryProvenance || {
+    queriesMissingProvenance,
+    ruleGeneratedQueryCount,
+    plannerRejectedQueries: Number(recovery.plannerRejectedQueries) || 0,
+    plannerRetryCount: Number(recovery.plannerRetryCount) || 0,
+    siteFallbackWithoutPlanner,
+  };
+  const successfulEvidenceEntries = (artifacts.trace || []).filter((entry) => (
+    (entry.action === 'read' && Number(entry.successfulBodies) > 0)
+    || (entry.action === 'search' && (Number(entry.newUrlCount) > 0 || Number(entry.resultCount) > 0))
+  ));
+  const lastEvidenceTokens = successfulEvidenceEntries.length
+    ? Number(successfulEvidenceEntries.at(-1)?.budgetAfter?.usage?.llmTokens) || 0
+    : 0;
+  const zeroEvidenceTailTokens = tokenSplit.explorationTokens == null
+    ? null
+    : Math.max(0, Number(tokenSplit.explorationTokens) - lastEvidenceTokens);
+  const relevanceFunnel = {
+    returnedCandidates: Number(relevance.returnedCandidates) || 0,
+    siteRejected: Number(relevance.siteRejected) || 0,
+    admittedCandidates: Number(relevance.admittedCandidates) || 0,
+    rerankEvaluated: Number(relevance.rerankEvaluated) || 0,
+    rerankAccepted: Number(relevance.rerankAccepted) || 0,
+    rerankRejected: Number(relevance.rerankRejected) || 0,
+    bodyIrrelevant: Number(relevance.bodyIrrelevant) || 0,
+    readAccepted: Number(relevance.readAccepted) || 0,
+  };
 
   return {
     workDir: artifacts.workDir,
@@ -149,9 +205,12 @@ export function extractRunStats(artifacts, { wallClockDurationMs = null } = {}) 
     gate: quality.gate || null,
     qualityFlags: Array.isArray(quality.flags) ? quality.flags : [],
     stopReason: quality.stopReason || budget.controllerStopReason || budget.stopReason || null,
+    stopDetail: quality.stopDetail || budget.controllerStopDetail || null,
     minLlmTokens: budget.minLlmTokens || budget.targetLlmTokens || null,
     targetLlmTokens: budget.minLlmTokens || budget.targetLlmTokens || null,
     actualLlmTokens: usage.llmTokens ?? 0,
+    unusedFloorTokens: budget.unusedMinTokens ?? null,
+    unusedHardCapTokens: budget.unusedHardCapTokens ?? null,
     unusedBudgetTokens: budget.unusedBudgetTokens
       ?? (budget.targetLlmTokens > 0 && Number.isFinite(usage.llmTokens)
         ? Math.max(0, budget.targetLlmTokens - usage.llmTokens)
@@ -168,9 +227,37 @@ export function extractRunStats(artifacts, { wallClockDurationMs = null } = {}) 
       sourceReads: usage.sourceReads ?? 0,
       rerankRequests: usage.rerankRequests ?? 0,
       rerankTokens: usage.rerankTokens ?? 0,
+      rerankTokensUnknown: budget.unknown?.rerankTokens ?? false,
       estimatedCost: usage.estimatedCost ?? null,
       estimatedCostUnknown: budget.unknown?.estimatedCost ?? true,
     },
+    slotMaterialization: {
+      expected: expectedSlots.length,
+      materialized: expectedSlots.filter((slot) => materializedSlotIds.has(slot.id)).length,
+      missing: expectedSlots.filter((slot) => !materializedSlotIds.has(slot.id)).map((slot) => slot.id),
+    },
+    queryDedup: {
+      batchCalls: dedupTraces.length,
+      embeddedQueries: dedupTraces.reduce((sum, entry) => sum + (Number(entry.inputCount) || 0), 0),
+      cacheHits: dedupTraces.reduce((sum, entry) => sum + (Number(entry.cacheHits) || 0), 0),
+    },
+    relevanceFunnel: {
+      ...relevanceFunnel,
+      siteBalanced: relevanceFunnel.returnedCandidates
+        === relevanceFunnel.siteRejected + relevanceFunnel.admittedCandidates,
+      rerankBalanced: relevanceFunnel.rerankEvaluated
+        === relevanceFunnel.rerankAccepted + relevanceFunnel.rerankRejected,
+    },
+    recovery,
+    queryProvenance: {
+      ...queryProvenance,
+      queriesMissingProvenance,
+      ruleGeneratedQueryCount,
+      plannerRejectedQueries: Number(queryProvenance.plannerRejectedQueries || recovery.plannerRejectedQueries) || 0,
+      plannerRetryCount: Number(queryProvenance.plannerRetryCount || recovery.plannerRetryCount) || 0,
+      siteFallbackWithoutPlanner,
+    },
+    zeroEvidenceTailTokens,
     counts: {
       sourceCount: artifacts.sources?.length || 0,
       findingCount: artifacts.findings?.length || 0,
@@ -180,5 +267,49 @@ export function extractRunStats(artifacts, { wallClockDurationMs = null } = {}) 
       reportChars: artifacts.report?.length || 0,
     },
     llmPurposes,
+    observability: extractDescriptiveObservability(artifacts),
+  };
+}
+
+export function extractDescriptiveObservability(artifacts = {}) {
+  const stored = artifacts.quality?.metrics?.observability;
+  const traces = artifacts.trace || [];
+  const searches = traces.filter((entry) => entry.action === 'search');
+  const hasNew = Boolean(stored)
+    || searches.some((entry) => (
+      (entry.respondedEngines || []).length
+      || (entry.unresponsiveEngines || []).length
+      || entry.outcome
+      || entry.searchOptions
+    ))
+    || traces.some((entry) => (
+      entry.action === 'slot_support' && (entry.cacheHits != null || entry.cacheMisses != null)
+    ))
+    || (artifacts.findings || []).some((finding) => (
+      (finding.sources || []).some((source) => source.assessment)
+    ));
+  if (!hasNew) {
+    return {
+      available: false,
+      respondedEngines: null,
+      unresponsiveEngines: null,
+      queryOutcomes: null,
+      sourceAssessment: null,
+      slotSupportCache: null,
+      agentSnapshotChars: null,
+    };
+  }
+  const computed = stored || collectObservabilityMetrics({
+    findings: artifacts.findings,
+    trace: traces,
+  });
+  return {
+    available: true,
+    respondedEngines: computed.respondedEngines ?? null,
+    unresponsiveEngines: computed.unresponsiveEngines ?? null,
+    queryOutcomes: computed.queryOutcomes ?? null,
+    sourceAssessment: computed.sourceAssessment ?? null,
+    slotSupportCache: computed.slotSupportCache ?? null,
+    agentSnapshotChars: computed.agentSnapshotChars ?? null,
   };
 }

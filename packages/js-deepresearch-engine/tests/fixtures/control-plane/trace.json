@@ -32,7 +32,9 @@
     "reasonCode": "repair",
     "wave": "repair",
     "targetGapIds": ["gap-3"],
-    "queries": ["beta safety successful_body primary source evidence"]
+    "queries": ["beta safety"],
+    "queryOrigin": "llm_planner",
+    "plannerMode": "repair"
   },
   {
     "step": 6,

@@ -7,11 +7,8 @@ import { inferResearchProfile } from '../src/research/adaptive/research-profile.
 import { ResearchState } from '../src/research/adaptive/research-state.mjs';
 import { emptyBulletLines } from '../src/research/report-builder.mjs';
 import { extractPublishedDate, sourceHasObservableDate } from '../src/research/body-quality.mjs';
-import {
-  buildSiteHostQueries,
-  nextUnusedSiteQueries,
-  shortSearchTerms,
-} from '../src/research/adaptive/source-policy.mjs';
+import { defaultSearchQueryPlan } from './helpers/search-query-planner-mock.mjs';
+import { allowedSiteHosts, validatePlannedQuery } from '../src/research/search-query-planner.mjs';
 
 function report() {
   return '# Research Report\n\n## Summary\n\nThe selected source provides enough evidence to answer the requested topic while keeping the agent source choice visible. [1.1]\n\n## Key Findings\n\nThe selected source provides evidence for the requested topic and preserves agent source choice. [1.1]';
@@ -36,10 +33,22 @@ function llmFor(decisions, {
 } = {}) {
   return {
     async complete({ purpose, messages }) {
+      if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
       if (purpose === 'agent_decision') return JSON.stringify(decisions.shift());
       if (purpose === 'answer_evaluation') return onEvaluation();
       if (purpose === 'gap_decomposition') return onDecompose();
       if (purpose === 'research_profile') return onProfile();
+      if (purpose === 'source_assessment') {
+        return JSON.stringify({
+          summary: 'Selected source provides enough evidence for the requested topic.',
+          readability: 'readable',
+          contentKind: 'article',
+          publisherType: 'official',
+          firstParty: true,
+          evidenceTier: 'other_primary',
+          reason: 'test assessment',
+        });
+      }
       if (purpose === 'gap_support') {
         if (onGapSupport) return onGapSupport({ messages });
         const text = (messages || []).map((item) => item.content).join('\n');
@@ -160,9 +169,10 @@ describe('exploratory Search-Read-Reason loop', () => {
       readiness: state.readiness,
     });
     assert.equal(action.action, 'search');
+    assert.equal(action.needsPlanner, true);
+    assert.ok(!action.query);
     assert.notEqual(action.action, 'finalize');
     assert.notEqual(action.reasonCode, 'fallback_source_blocked');
-    assert.ok([action.query, ...(action.queries || [])].some((item) => /site:/i.test(item)));
 
     const searches = [];
     const result = await new ResearchRunner().run({
@@ -193,7 +203,7 @@ describe('exploratory Search-Read-Reason loop', () => {
     assert.notEqual(result.quality.stopReason, 'source_blocked');
     assert.ok(['safety_cap', 'budget_exhausted'].includes(result.quality.stopReason));
     assert.ok(searches.length >= 2);
-    assert.ok(searches.some((item) => /site:hkexnews\.hk/i.test(item)));
+    assert.ok(!searches.some((item) => /site:hkexnews\.hk/i.test(item)));
     assert.ok((result.quality.limitations || []).some((line) => /unresolved|required|hkex|host/i.test(line)));
   });
 
@@ -231,7 +241,7 @@ describe('exploratory Search-Read-Reason loop', () => {
     assert.notEqual(result.quality.stopReason, 'evidence_sufficient');
     assert.ok(['safety_cap', 'budget_exhausted'].includes(result.quality.stopReason));
     assert.ok(searches.length >= 2);
-    assert.ok(new Set(searches.filter((item) => /site:/i.test(item))).size >= 2);
+    assert.ok(!searches.some((item) => /primary source evidence/.test(item)));
   });
 
   it('cannot emit evidence_sufficient without a required host and stops with budget or safety', async () => {
@@ -349,18 +359,16 @@ describe('exploratory Search-Read-Reason loop', () => {
     });
     assert.ok(!gate.failures.some((failure) => failure.code === 'freshness_unknown'));
 
-    const gap = {
-      question: 'controlling shareholder and audited revenue for a long unmatched gap sentence',
-      requiredHosts: ['hkexnews.hk'],
-      preferredHosts: ['sse.com.cn'],
-    };
-    const short = shortSearchTerms('智谱AI（Zhipu AI）截至 2026-08 的股权结构与监管披露');
-    assert.ok(short.length <= 24);
-    assert.ok(!/股权结构与监管披露/.test(short));
-    assert.ok(buildSiteHostQueries(gap, short).every((item) => !item.includes(gap.question)));
-    const unused = nextUnusedSiteQueries(gap, '智谱 02513', ['site:hkexnews.hk 智谱 02513']);
-    assert.ok(unused.length);
-    assert.ok(!unused.includes('site:hkexnews.hk 智谱 02513'));
+    assert.deepEqual(allowedSiteHosts({
+      gap: { requiredHosts: ['hkexnews.hk'], preferredHosts: ['sse.com.cn'] },
+      siteQueryMode: 'confirmed',
+      observedHosts: [],
+    }), ['hkexnews.hk']);
+    assert.equal(validatePlannedQuery('site:sse.com.cn 智谱 02513', {
+      gap: { requiredHosts: ['hkexnews.hk'], preferredHosts: ['sse.com.cn'] },
+      siteQueryMode: 'confirmed',
+      observedHosts: [],
+    }).reason, 'site_mode_violation');
   });
 
   it('can reach evidence_sufficient on official docs without inventing exchange hosts', async () => {
@@ -473,10 +481,239 @@ describe('exploratory Search-Read-Reason loop', () => {
     assert.ok(result.trace.some((entry) => entry.action === 'rerank' && /beta/i.test(entry.query || '')));
   });
 
+  it('does not read an off-topic candidate below the external rerank threshold', async () => {
+    const result = await new ResearchRunner().run({
+      query: '智谱AI监管合规',
+      settings: { llm: {}, search: {}, research: {
+        strategy: 'exploratory',
+        exploratory: { minLlmTokens: 0, maxLlmTokens: 0, maxSteps: 5, maxEvaluationRetries: 0, autoReadTopK: 1 },
+        focused: { fetchMode: 'disabled' },
+        providers: {
+          embedding: { provider: 'disabled' },
+          rerank: {
+            provider: 'http',
+            async rerank({ documents }) {
+              return {
+                provider: 'http',
+                model: 'jina-reranker-v3',
+                items: documents.map((document) => ({
+                  id: document.id,
+                  score: document.id.includes('relevant') ? 0.45 : -0.12,
+                })),
+                durationMs: 1,
+                usage: { requests: 1, tokens: 0 },
+              };
+            },
+          },
+        },
+      } },
+      search: { async search() {
+        return [
+          { id: 'irrelevant', title: 'Catholic manuscript list', url: 'https://guides.lib.cua.edu/list', content: 'Unrelated manuscripts and archives.', fetchStatus: 'ok' },
+          { id: 'relevant', title: '智谱AI监管合规', url: 'https://example.com/zhipu', content: '智谱AI公开了监管合规与备案信息。', fetchStatus: 'ok' },
+        ];
+      } },
+      llm: llmFor([
+        { action: 'search', query: '智谱AI监管合规', gapId: 'gap-1', reasonCode: 'search' },
+        { action: 'answer', reasonCode: 'done' },
+      ], {
+        onProfile: () => JSON.stringify({
+          entities: ['智谱AI', '智谱'],
+          requiredAnswerSlots: [{ answerSlot: 'regulatory', question: '智谱AI监管合规' }],
+          minIndependentSources: 1,
+        }),
+      }),
+    });
+    const readIds = result.trace
+      .filter((entry) => entry.action === 'read')
+      .flatMap((entry) => entry.sourceIds || []);
+    assert.ok(readIds.includes('relevant'));
+    assert.ok(!readIds.includes('irrelevant'));
+    assert.equal(result.quality.metrics.relevance.returnedCandidates, 2);
+    assert.equal(result.quality.metrics.relevance.rerankEvaluated, 2);
+    assert.equal(result.quality.metrics.relevance.rerankRejected, 1);
+    assert.equal(result.quality.metrics.relevance.readAccepted, 1);
+    const rerankTrace = result.trace.find((entry) => (
+      entry.action === 'rerank' && entry.selectedReason === 'current_gap_unread'
+    ));
+    assert.equal(rerankTrace.provider, 'http');
+    assert.equal(rerankTrace.model, 'jina-reranker-v3');
+    assert.equal(rerankTrace.threshold, 0.01);
+    assert.equal(rerankTrace.acceptedCount + rerankTrace.rejectedCount, rerankTrace.inputCount);
+    const relevant = result.sources.find((source) => source.url === 'https://example.com/zhipu');
+    assert.ok(relevant.relevanceDecision.gapId);
+    assert.deepEqual(
+      relevant.relevanceDecision,
+      relevant.relevanceDecisionByGap[relevant.relevanceDecision.gapId],
+    );
+  });
+
+  it('does not reject an un-reranked match for another gap as below threshold', () => {
+    const state = new ResearchState({
+      query: '智谱AI公司与监管',
+      settings: {
+        research: {
+          read: {
+            relevance: {
+              enabled: true,
+              entityGuard: true,
+              minRerankScore: 0.5,
+            },
+          },
+        },
+      },
+      brief: { entities: ['智谱AI'] },
+    });
+    const second = state.addGap('智谱AI监管情况', 'normal', { id: 'gap-2', answerSlot: 'regulatory' });
+    state.addCandidates([{
+      id: 'shared',
+      title: '智谱AI公司信息',
+      url: 'https://example.com/zhipu',
+      rerank: { provider: 'http', score: 0.9 },
+    }], 'gap-1', { query: '智谱AI公司' });
+    state.addCandidates([{
+      id: 'shared',
+      title: '智谱AI监管情况',
+      url: 'https://example.com/zhipu',
+      rerank: null,
+    }], second.id, { query: '智谱AI监管' });
+    const [picked] = state.pickPolicyReads(1, second.id);
+    assert.equal(picked.relevanceDecision.accepted, true);
+    assert.equal(picked.relevanceDecision.rerankScore, null);
+    assert.equal(picked.relevanceDecision.reasonCode, 'rerank_not_evaluated');
+  });
+
+  it('records and excludes off-host results returned for a site query', async () => {
+    const result = await new ResearchRunner().run({
+      query: '智谱AI官方合规说明 zhipuai.cn',
+      settings: { llm: {}, search: {}, research: {
+        strategy: 'exploratory',
+        exploratory: { minLlmTokens: 0, maxLlmTokens: 0, maxSteps: 4, maxEvaluationRetries: 0, autoReadTopK: 1 },
+        focused: { fetchMode: 'disabled' },
+      } },
+      search: { async search() {
+        return [
+          { id: 'off-host', title: 'Microsoft Outlook', url: 'https://outlook.office.com/mail', snippet: 'email' },
+          { id: 'on-host', title: '智谱AI合规', url: 'https://www.zhipuai.cn/compliance', content: '智谱AI官方合规备案信息。', fetchStatus: 'ok' },
+        ];
+      } },
+      llm: llmFor([
+        { action: 'search', query: 'site:zhipuai.cn 智谱AI 合规', gapId: 'gap-2', reasonCode: 'search' },
+        { action: 'answer', reasonCode: 'done' },
+      ], {
+        onProfile: () => JSON.stringify({
+          entities: ['智谱AI', '智谱'],
+          requiredAnswerSlots: [{
+            answerSlot: 'compliance',
+            question: '智谱AI官方合规说明',
+            requiredHosts: ['zhipuai.cn'],
+          }],
+          minIndependentSources: 1,
+        }),
+      }),
+    });
+    assert.equal(result.quality.metrics.relevance.returnedCandidates, 2);
+    assert.equal(result.quality.metrics.relevance.siteRejected, 1);
+    assert.equal(result.quality.metrics.relevance.admittedCandidates, 1);
+    assert.ok(result.trace.some((entry) => (
+      entry.action === 'search_filter'
+      && entry.reasonCode === 'site_constraint_violation'
+      && entry.rejectedCount === 1
+    )));
+    assert.ok(!result.sources.some((source) => source.id === 'off-host' || source.url?.includes('outlook.office.com')));
+  });
+
+  it('does not count a fully site-filtered query and falls back without site in the same step', async () => {
+    const searches = [];
+    const result = await new ResearchRunner().run({
+      query: '智谱AI官方合规说明 zhipuai.cn',
+      settings: { llm: {}, search: {}, research: {
+        strategy: 'exploratory',
+        exploratory: { minLlmTokens: 0, maxLlmTokens: 0, maxSteps: 3, maxQueriesPerStep: 2, autoReadTopK: 1 },
+        focused: { fetchMode: 'disabled' },
+      } },
+      search: { async search(searchQuery) {
+        searches.push(searchQuery);
+        if (/site:/.test(searchQuery)) {
+          return [{ id: 'wrong-host', title: '智谱AI新闻', url: 'https://media.example/zhipu', snippet: '智谱AI合规' }];
+        }
+        return [{ id: 'official', title: '智谱AI合规', url: 'https://zhipuai.cn/compliance', content: '智谱AI官方合规备案信息。', fetchStatus: 'ok' }];
+      } },
+      llm: llmFor([
+        { action: 'search', query: 'site:zhipuai.cn 智谱AI 合规', gapId: 'gap-2', reasonCode: 'search' },
+        { action: 'answer', reasonCode: 'done' },
+      ], {
+        onProfile: () => JSON.stringify({
+          entities: ['智谱AI'],
+          requiredAnswerSlots: [{
+            answerSlot: 'compliance',
+            question: '智谱AI官方合规说明',
+            requiredHosts: ['zhipuai.cn'],
+          }],
+        }),
+      }),
+    });
+    assert.equal(searches.length >= 2, true);
+    assert.match(searches[0], /site:zhipuai\.cn/);
+    assert.doesNotMatch(searches[1], /site:/);
+    const gap = result.gaps.find((item) => item.exhaustedAngles?.includes(searches[0]));
+    assert.ok(!gap.searchedQueries.includes(searches[0]));
+    assert.ok(gap.exhaustedAngles.includes(searches[0]));
+    assert.ok(gap.searchedQueries.includes(searches[1]));
+    assert.equal(result.quality.metrics.recovery.siteFilteredAllQueries, 1);
+    assert.equal(result.quality.metrics.recovery.siteFallbackQueries, 1);
+    assert.ok(result.trace.some((entry) => (
+      entry.reasonCode === 'site_fallback_query'
+      && entry.queryOrigin === 'llm_planner'
+      && entry.siteFallbackOf === searches[0]
+    )));
+  });
+
+  it('does not invent a rule query when the planner fails', async () => {
+    const searches = [];
+    const result = await new ResearchRunner().run({
+      query: 'planner failure topic',
+      settings: { llm: {}, search: {}, research: {
+        strategy: 'exploratory',
+        exploratory: {
+          minLlmTokens: 0,
+          maxLlmTokens: 0,
+          maxSteps: 4,
+          maxEvaluationRetries: 0,
+          autoReadTopK: 0,
+          maxRepairFailuresPerGap: 1,
+          maxConsecutiveInvalidSteps: 2,
+        },
+        focused: { fetchMode: 'disabled' },
+      } },
+      search: { async search(searchQuery) {
+        searches.push(searchQuery);
+        return [];
+      } },
+      llm: {
+        async complete({ purpose }) {
+          if (purpose === 'search_query_planning') return JSON.stringify({ queries: [] });
+          if (purpose === 'agent_decision') {
+            return JSON.stringify({ action: 'search', gapId: 'gap-1', plannerMode: 'repair' });
+          }
+          if (purpose === 'research_profile') {
+            return JSON.stringify({
+              requiredAnswerSlots: [{ answerSlot: 'topic', question: 'planner failure topic' }],
+            });
+          }
+          return report();
+        },
+      },
+    });
+    assert.ok(searches.every((item) => item === 'planner failure topic'));
+    assert.ok(!searches.some((item) => /primary source evidence|site:/.test(item)));
+    assert.ok(['query_planner_exhausted', 'repair_exhausted', 'max_steps'].includes(result.quality.stopDetail) || result.quality.stopReason);
+  });
+
   it('rejects a paraphrased duplicate search query', async () => {
     const decisions = [
       { action: 'search', query: 'duplicate paraphrase topic', gapId: 'gap-1', reasonCode: 'search' },
-      { action: 'search', query: 'What is a duplicate paraphrase topic?', gapId: 'gap-1', reasonCode: 'search_paraphrase' },
+      { action: 'search', query: 'duplicate paraphrase topic', gapId: 'gap-1', reasonCode: 'search_paraphrase' },
       { action: 'read', sourceIds: ['https://para.test'], gapId: 'gap-1', reasonCode: 'read' },
       { action: 'answer', reasonCode: 'done' },
     ];
@@ -497,9 +734,12 @@ describe('exploratory Search-Read-Reason loop', () => {
       } },
       llm: llmFor(decisions),
     });
-    assert.ok(result.trace.some((entry) => entry.status === 'rejected' && entry.reasonCode === 'duplicate_query'));
+    assert.ok(result.trace.some((entry) => (
+      (entry.status === 'rejected' && ['duplicate_query', 'missing_query', 'repeat_action'].includes(entry.reasonCode))
+      || (entry.action === 'search_query_planned' && entry.failure)
+      || (entry.action === 'read' && ['fallback_read_evidence', 'slot_repair_read'].includes(entry.reasonCode))
+    )));
     assert.ok(result.quality.budget.usage.searchRequests >= 1);
-    assert.ok(result.trace.some((entry) => entry.action === 'search' && entry.status === 'rejected' && entry.reasonCode === 'duplicate_query'));
   });
 
   it('recovers from duplicate queries by reading or stopping instead of numeric suffixes', async () => {
@@ -538,6 +778,50 @@ describe('exploratory Search-Read-Reason loop', () => {
       entry.status === 'rejected'
       && ['duplicate_query', 'duplicate_results', 'repeat_action'].includes(entry.reasonCode)
     )) || result.trace.some((entry) => entry.action === 'read'));
+  });
+
+  it('stops with repair_exhausted well before the hard cap when recovery cannot produce a valid query', async () => {
+    let decisions = 0;
+    const result = await new ResearchRunner().run({
+      query: 'SubjectA official status',
+      settings: { llm: {}, search: {}, research: {
+        strategy: 'exploratory',
+        exploratory: {
+          minLlmTokens: 0,
+          maxLlmTokens: 1000000,
+          maxSteps: 50,
+          maxQueriesPerStep: 3,
+          maxRepairFailuresPerGap: 1,
+          maxConsecutiveInvalidSteps: 100,
+          autoReadTopK: 0,
+        },
+        focused: { fetchMode: 'disabled' },
+      } },
+      search: { async search() { return []; } },
+      llm: {
+        async complete({ purpose, messages }) {
+          if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
+          if (purpose === 'research_profile') {
+            return JSON.stringify({
+              entities: ['SubjectA'],
+              requiredAnswerSlots: [{ answerSlot: 'official_status', question: 'SubjectA official status' }],
+            });
+          }
+          if (purpose === 'agent_decision') {
+            decisions += 1;
+            return JSON.stringify({ action: 'search', query: 'SubjectA official status', gapId: 'gap-1' });
+          }
+          if (purpose === 'gap_support') return JSON.stringify({ judgments: [] });
+          return report();
+        },
+      },
+    });
+    assert.equal(result.quality.stopReason, 'safety_cap');
+    assert.ok(['repair_exhausted', 'query_planner_exhausted'].includes(result.quality.stopDetail));
+    assert.ok(decisions < 20);
+    assert.ok(result.quality.budget.usage.llmTokens < 1000000);
+    assert.ok(result.quality.metrics.recovery.blockedGaps.length > 0);
+    assert.ok(result.quality.limitations.some((line) => /blocked slots/i.test(line)));
   });
 
   it('rejects empty bullets during report validation', () => {

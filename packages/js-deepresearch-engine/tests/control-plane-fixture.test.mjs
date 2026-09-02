@@ -11,7 +11,7 @@ function readJson(name) {
 }
 
 describe('Issue #27 control-plane golden fixture', () => {
-  it('records brief, gap v2, and deterministic wave order', () => {
+  it('records current brief/gap schemas and deterministic wave order', () => {
     const brief = readJson('brief.json');
     const gaps = readJson('gaps.json');
     const trace = readJson('trace.json');

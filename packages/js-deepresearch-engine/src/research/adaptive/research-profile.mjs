@@ -8,6 +8,7 @@ const HOST_IN_QUERY = /\b(?:[a-z0-9-]+\.)+(?:com|org|net|edu|gov|io|hk|cn|uk|jp|
 const FILE_EXT_HOSTS = /\.(cpp|js|ts|py|md|pdf|exe|zip|png|jpg)$/i;
 const HOSTNAME_SHAPE = /^(?:[a-z0-9-]+\.)+[a-z]{2,}$/;
 const KNOWN_SOURCE_TYPES = new Set(['primary_filing', 'numeric']);
+const REQUIRED_HOST_MODES = new Set(['any', 'all']);
 
 export const PROFILE_FLAGS = Object.freeze([
   'freshness',
@@ -39,6 +40,10 @@ export function sanitizeHosts(values) {
 
 export function sanitizeSourceTypes(values) {
   return unique((values || []).filter((item) => KNOWN_SOURCE_TYPES.has(String(item || '').trim())));
+}
+
+function sanitizeRequiredHostMode(value) {
+  return REQUIRED_HOST_MODES.has(value) ? value : 'any';
 }
 
 export function extractLiteralHosts(query = '') {
@@ -94,6 +99,7 @@ export function sanitizeEvidenceProfile(profile = {}, {
     ...profile,
     flags: { ...emptyFlags(), ...(profile.flags || {}) },
     requiredHosts: sanitizeHosts(profile.requiredHosts),
+    requiredHostMode: sanitizeRequiredHostMode(profile.requiredHostMode),
     preferredHosts: sanitizeHosts(profile.preferredHosts),
     requiredSourceTypes: sanitizeSourceTypes(profile.requiredSourceTypes),
     plannedGaps: sanitizePlannedGaps(profile.plannedGaps),
@@ -117,6 +123,21 @@ export function sanitizeEvidenceProfile(profile = {}, {
     const cap = Math.max(1, listLocalCorpusChannels(settings).length);
     next.minIndependentSources = Math.min(Math.max(1, Number(next.minIndependentSources) || 1), cap);
   } else {
+    const inferredHints = next.requiredHosts.filter((host) => !literalHosts.has(host));
+    next.requiredHosts = next.requiredHosts.filter((host) => literalHosts.has(host));
+    next.preferredHosts = unique([...next.preferredHosts, ...inferredHints]);
+    next.plannedGaps = (next.plannedGaps || []).map((gap) => {
+      const requiredHosts = sanitizeHosts(gap.requiredHosts);
+      const inferredPreferred = requiredHosts.filter((host) => !literalHosts.has(host));
+      return {
+        ...gap,
+        requiredHosts: requiredHosts.filter((host) => literalHosts.has(host)),
+        preferredHosts: unique([
+          ...sanitizeHosts(gap.preferredHosts),
+          ...inferredPreferred,
+        ]),
+      };
+    });
     next.minIndependentSources = Math.max(1, Number(next.minIndependentSources) || 1);
   }
   return next;
@@ -127,6 +148,7 @@ function sanitizePlannedGaps(gaps) {
   return gaps.map((gap) => ({
     ...gap,
     requiredHosts: sanitizeHosts(gap?.requiredHosts),
+    requiredHostMode: sanitizeRequiredHostMode(gap?.requiredHostMode),
     preferredHosts: sanitizeHosts(gap?.preferredHosts),
     requiredSourceTypes: sanitizeSourceTypes(gap?.requiredSourceTypes),
   }));
@@ -140,6 +162,7 @@ export function mergeProfilePlan(base, plan = {}) {
       ...sanitizeHosts(base.requiredHosts),
       ...sanitizeHosts(plan.requiredHosts),
     ]),
+    requiredHostMode: sanitizeRequiredHostMode(plan.requiredHostMode || base.requiredHostMode),
     preferredHosts: unique([
       ...sanitizeHosts(base.preferredHosts),
       ...sanitizeHosts(plan.preferredHosts),
@@ -181,7 +204,7 @@ function profileSystemPrompt(scope, compact = false) {
   if (compact) {
     return [
       'Return compact JSON only for THIS query. Do not invent a fixed industry questionnaire.',
-      'Schema: {"requiredAnswerSlots":[{"answerSlot":"...","question":"...","priority":"critical|normal","evidenceCriteria":[]}],"requiredHosts":[],"requiredSourceTypes":[],"flags":{}}',
+      'Schema: {"requiredAnswerSlots":[{"answerSlot":"...","question":"...","priority":"critical|normal","requiredHosts":[],"requiredHostMode":"any|all","preferredHosts":[],"requiredSourceTypes":[],"evidenceCriteria":[]}],"requiredHosts":[],"requiredHostMode":"any|all","preferredHosts":[],"requiredSourceTypes":[],"flags":{}}',
       'requiredAnswerSlots must be non-empty for this query. Do not omit the closing brace.',
       '"官方" / "official" means first-party documents of the subject, not stock-exchange or SEC filings unless the query names that venue.',
       'Do not default to hkexnews.hk, sec.gov, sse.com.cn, or szse.cn.',
@@ -190,8 +213,8 @@ function profileSystemPrompt(scope, compact = false) {
   }
   return [
     'Infer a research evidence profile for THIS query only. Do not invent a fixed industry questionnaire.',
-    'Return JSON only: {"audience":null,"decision":null,"assumedExpertise":null,"timeRange":null,"geography":[],"entities":[],"exclusions":[],"successCriteria":[],"requiredAnswerSlots":[{"answerSlot":"...","question":"...","claimFamily":null,"priority":"critical|normal","evidenceCriteria":[]}],"consequentialClaims":[],"flags":{"freshness":false,"completeness":false,"plurality":false,"attribution":false,"primary_source":false,"numeric":false,"decision_critical":false},"requiredHosts":[],"preferredHosts":[],"requiredSourceTypes":[],"minIndependentSources":1,"gaps":[{"question":"...","priority":"critical|normal","requiredHosts":[]}]}',
-    'requiredHosts and preferredHosts must be real hostnames you decide this query needs. Leave them empty when unknown.',
+    'Return JSON only: {"audience":null,"decision":null,"assumedExpertise":null,"timeRange":null,"geography":[],"entities":[],"exclusions":[],"successCriteria":[],"requiredAnswerSlots":[{"answerSlot":"...","question":"...","claimFamily":null,"priority":"critical|normal","requiredHosts":[],"requiredHostMode":"any|all","preferredHosts":[],"requiredSourceTypes":[],"evidenceCriteria":[]}],"consequentialClaims":[],"flags":{"freshness":false,"completeness":false,"plurality":false,"attribution":false,"primary_source":false,"numeric":false,"decision_critical":false},"requiredHosts":[],"requiredHostMode":"any|all","preferredHosts":[],"requiredSourceTypes":[],"minIndependentSources":1,"gaps":[{"question":"...","priority":"critical|normal","requiredHosts":[],"preferredHosts":[]}]}',
+    'Only hostnames literally present in the query may be requiredHosts. Put inferred official sites, publishers, and useful domains in preferredHosts.',
     '"官方" / "official" means first-party documents of the subject, not stock-exchange or SEC filings unless the query names that venue.',
     'Do not default to hkexnews.hk, sec.gov, sse.com.cn, or szse.cn. Do not add primary_filing unless the query itself is about filings or disclosures.',
     'requiredSourceTypes may include primary_filing or numeric only.',
@@ -240,8 +263,8 @@ export async function planResearchProfile({ llm, query, profile, signal, setting
       llm,
       signal,
       purpose: 'research_profile',
-      maxTokens: 1200,
-      retryMaxTokens: 800,
+      maxTokens: 2400,
+      retryMaxTokens: 3200,
       accept: acceptsSanitizedPlan,
       messages: [{
         role: 'system',
@@ -317,10 +340,12 @@ export function createGapRecord({
   depth = 1,
   profile = {},
   requiredHosts,
+  requiredHostMode,
   preferredHosts,
   requiredSourceTypes,
   minIndependentSources,
   maxAgeDays,
+  contractSlotId,
   answerSlot,
   claimFamily,
   requiredSlot,
@@ -342,6 +367,7 @@ export function createGapRecord({
     depth,
     requiredSourceTypes: sanitizeSourceTypes(requiredSourceTypes ?? profile.requiredSourceTypes),
     requiredHosts: sanitizeHosts(requiredHosts ?? (priority === 'critical' ? profile.requiredHosts : [])),
+    requiredHostMode: sanitizeRequiredHostMode(requiredHostMode ?? profile.requiredHostMode),
     preferredHosts: sanitizeHosts(preferredHosts ?? profile.preferredHosts),
     blockedHosts: [],
     maxAgeDays: maxAgeDays ?? profile.maxAgeDays ?? null,
@@ -354,6 +380,7 @@ export function createGapRecord({
     contradictingPassageIds: [],
     confidence: null,
     evidenceCriteria: Array.isArray(evidenceCriteria) ? evidenceCriteria.filter(Boolean) : [],
+    contractSlotId: contractSlotId || null,
     slotSupport: null,
     missingEvidence: ['successful_body'],
     nextQueries: [],

@@ -17,6 +17,7 @@ export class HttpRerankProvider {
     const startedAt = Date.now();
     const items = [];
     let tokens = 0;
+    let tokenUsageObserved = false;
     let requests = 0;
 
     for (let offset = 0; offset < documents.length; offset += this.batchSize) {
@@ -61,7 +62,10 @@ export class HttpRerankProvider {
           });
         }
         const usageTokens = Number(data.usage?.total_tokens);
-        if (Number.isFinite(usageTokens)) tokens += usageTokens;
+        if (Number.isFinite(usageTokens)) {
+          tokens += usageTokens;
+          tokenUsageObserved = true;
+        }
       } catch (error) {
         if (error?.name === 'BudgetExceededError') throw error;
         if (isAbortError(error) && signal?.aborted) throw error;
@@ -89,7 +93,7 @@ export class HttpRerankProvider {
       items: Number(topK) > 0 ? items.slice(0, topK) : items,
       provider: this.provider,
       model: this.model,
-      usage: { requests, tokens },
+      usage: { requests, ...(tokenUsageObserved ? { tokens } : {}) },
       durationMs: Date.now() - startedAt,
       degraded: false,
     };

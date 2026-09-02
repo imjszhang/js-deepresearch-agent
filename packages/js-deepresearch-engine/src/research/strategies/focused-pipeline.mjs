@@ -11,7 +11,12 @@ import { applySlotSupportJudgments, judgeOpenSlotSupport } from '../gap-slot-sup
 import { normalizeSourceUrl } from '../source-candidates.mjs';
 import { resolveStrategyConcurrency } from '../strategy-utils.mjs';
 import { applyContractGaps, planAndNormalizeContract } from '../research-contract.mjs';
-import { isSuccessfulBody } from '../body-quality.mjs';
+import { classifyFetchedBody, isSuccessfulBody } from '../body-quality.mjs';
+import { classifySourceTier, inferEvidenceScope } from '../adaptive/source-policy.mjs';
+import { planSearchQueries } from '../search-query-planner.mjs';
+import { plannerFeedbackFromState } from '../planner-feedback.mjs';
+import { buildExecutedSearchTrace } from '../search-trace.mjs';
+import { collectObservabilityMetrics } from '../observability.mjs';
 
 function addTrace(trace, action, fields = {}) {
   trace.push({
@@ -46,14 +51,6 @@ function attachControl(findings, control) {
   return findings;
 }
 
-function gapQuery(gap, query, kind = 'repair') {
-  const missing = (gap.missingEvidence || []).join(' ');
-  const hosts = (gap.requiredHosts || []).map((host) => `site:${host}`).join(' ');
-  if (gap.status === 'conflicting') return `${gap.question} conflicting evidence correction different definition date denominator`;
-  if (kind === 'challenge') return `${gap.question || query} counterexample failure correction alternative explanation`;
-  return [gap.question || query, hosts, missing, 'primary source evidence'].filter(Boolean).join(' ');
-}
-
 function canonicalUrl(source) {
   return normalizeSourceUrl(source?.url) || source?.url || source?.id || '';
 }
@@ -67,7 +64,27 @@ function matchesConsequentialClaim(gap, claims = []) {
   return claims.some((claim) => keys.includes(normalizeClaimKey(claim)));
 }
 
-async function enrichWave(findings, context, focused, readPolicy) {
+function applyBodyClassification(findings, gaps = []) {
+  return findings.map((finding) => {
+    const gap = gaps.find((item) => item.id === finding.gapId) || {};
+    return {
+      ...finding,
+      sources: (finding.sources || []).map((source) => {
+        const quality = classifyFetchedBody(source);
+        return {
+          ...source,
+          bodyQuality: quality.status,
+          fetchStatus: quality.successful
+            ? (source.fetchStatus || 'ok')
+            : (quality.status === 'waf' ? 'waf' : (source.fetchStatus === 'irrelevant' ? 'irrelevant' : 'failed')),
+          tier: classifySourceTier(source, gap),
+        };
+      }),
+    };
+  });
+}
+
+async function enrichWave(findings, context, focused, readPolicy, state) {
   const byUrl = new Map();
   for (const finding of findings) {
     for (const source of finding.sources || []) {
@@ -93,12 +110,16 @@ async function enrichWave(findings, context, focused, readPolicy) {
       settings: context.settings,
       budget: context.budget,
       embedding: context.researchProviders?.embedding,
+      relevance: readPolicy.relevance,
+      relevanceGap: { question: context.query, requiredHosts: [] },
+      entities: context.brief?.entities || context.brief?.entities || [],
+      observedHosts: [...(state?.observedHosts || [])],
     });
   const enrichedByUrl = new Map((enriched[0]?.sources || []).map((source) => [canonicalUrl(source), source]));
-  return findings.map((finding) => ({
+  return applyBodyClassification(findings.map((finding) => ({
     ...finding,
     sources: (finding.sources || []).map((source) => enrichedByUrl.get(canonicalUrl(source)) || source),
-  }));
+  })), state?.gaps || []);
 }
 
 async function syncState(state, findings, { llm, signal, query, trace } = {}) {
@@ -110,6 +131,7 @@ async function syncState(state, findings, { llm, signal, query, trace } = {}) {
     query: query || state.query,
     gaps: state.gaps,
     findings,
+    cache: state.slotSupportCache,
   });
   applySlotSupportJudgments(state.gaps, support.judgments);
   state.syncGapCoverage();
@@ -121,6 +143,8 @@ async function syncState(state, findings, { llm, signal, query, trace } = {}) {
       attempts: support.attempts,
       batches: support.batches,
       splitRetries: support.splitRetries,
+      cacheHits: support.cacheHits,
+      cacheMisses: support.cacheMisses,
       gapIds: support.judgments.map((item) => item.gapId).filter(Boolean),
     });
   }
@@ -243,8 +267,80 @@ export async function runFocusedPipeline(context) {
   });
 
   let findings = [];
-  const executeWave = async (wave, targets, queryFor = (gap) => gap.question) => {
-    const waveQueries = targets.map((gap) => ({ gap, query: queryFor(gap) })).filter((item) => item.query);
+  const queryProvenance = {
+    plannerRejectedQueries: 0,
+    plannerRetryCount: 0,
+    plannerFailures: 0,
+    plannedQueries: 0,
+  };
+  const planWaveQueries = async (wave, targets) => {
+    if (!targets.length) return [];
+    const mode = wave === 'challenge' ? 'challenge' : (wave === 'repair' ? 'repair' : 'initial');
+    const feedback = plannerFeedbackFromState(state, {
+      searchedQueries: [
+        ...state.searchedQueries(),
+        ...findings.map((finding) => finding.searchQuery).filter(Boolean),
+      ],
+      queryMemory,
+    });
+    const planned = await planSearchQueries({
+      llm,
+      signal,
+      mode,
+      query,
+      gaps: targets,
+      brief,
+      limit: Math.max(targets.length, 1),
+      siteQueryMode: readPolicy.relevance?.siteQueryMode || 'confirmed',
+      evidenceScope: inferEvidenceScope(settings),
+      ...feedback,
+      observedHosts: [...(state.observedHosts || [])],
+      queryMemory,
+    });
+    queryProvenance.plannerRetryCount += planned.retried ? 1 : 0;
+    queryProvenance.plannerRejectedQueries += planned.dedup.rejected.length;
+    state.recordPlannerRejections(planned.dedup.rejected, { plannerMode: mode });
+    if (!planned.ok) {
+      queryProvenance.plannerFailures += 1;
+      addTrace(trace, 'search_query_planned', {
+        reasonCode: planned.failure || 'search_query_failed',
+        wave,
+        plannerMode: mode,
+        failure: planned.failure,
+        targetGapIds: targets.map((gap) => gap.id),
+      });
+      return [];
+    }
+    queryProvenance.plannedQueries += planned.planned.length;
+    addTrace(trace, 'search_query_planned', {
+      reasonCode: planned.reasonCode,
+      wave,
+      plannerMode: mode,
+      queryOrigin: 'llm_planner',
+      queries: planned.queries,
+      plannedQueries: planned.planned,
+      targetGapIds: planned.planned.map((item) => item.targetGapId).filter(Boolean),
+    });
+    return planned.planned.map((item, index) => {
+      const gap = targets.find((candidate) => candidate.id === item.targetGapId)
+        || targets.find((candidate) => candidate.question && item.query.includes(candidate.question))
+        || targets[index]
+        || targets[0];
+      return { gap, query: item.query, planned: { ...item, targetGapId: gap?.id || item.targetGapId } };
+    }).filter((item) => item.gap && item.query);
+  };
+  const executeWave = async (wave, targets) => {
+    const waveQueries = await planWaveQueries(wave, targets);
+    if (!waveQueries.length) {
+      addTrace(trace, 'search_wave_started', {
+        reasonCode: wave,
+        wave,
+        targetGapIds: targets.map((gap) => gap.id),
+        queries: [],
+        skipped: 'query_planner_failed',
+      });
+      return [];
+    }
     const resolvedConcurrency = resolveStrategyConcurrency(search, concurrency, waveQueries.length);
     emit({
       stage: 'searching',
@@ -257,25 +353,89 @@ export async function runFocusedPipeline(context) {
       wave,
       targetGapIds: targets.map((gap) => gap.id),
       queries: waveQueries.map((item) => item.query),
+      queryOrigin: 'llm_planner',
+      plannerMode: wave === 'challenge' ? 'challenge' : (wave === 'repair' ? 'repair' : 'initial'),
+      plannedQueries: waveQueries.map((item) => item.planned),
     });
-    const searched = await runBounded(waveQueries, resolvedConcurrency, async ({ gap, query: searchQuery }) => {
+    const searched = await runBounded(waveQueries, resolvedConcurrency, async ({ gap, query: searchQuery, planned }) => {
       try {
         const result = await searchQuestion({
-          question: searchQuery,
+          question: { question: searchQuery, searchOptions: planned?.searchOptions },
           search,
           signal,
           queryMemory,
           gapId: gap.id,
+          searchOptions: planned?.searchOptions,
           onSkip: ({ question }) => emit({ stage: 'query_skipped_duplicate', question }),
         });
         state.recordSearchedQuery(gap.id, searchQuery);
+        state.observeHosts(result.sources);
+        const outcome = state.recordSearchOutcome({
+          query: searchQuery,
+          queryOrigin: planned?.queryOrigin || 'llm_planner',
+          plannerMode: planned?.plannerMode || (wave === 'challenge' ? 'challenge' : (wave === 'repair' ? 'repair' : 'initial')),
+          gapId: gap.id,
+          searchOptions: planned?.searchOptions,
+          searchMeta: result.searchMeta,
+          sources: result.sources,
+          resultCount: result.sources?.length || 0,
+          returnedResultCount: result.sources?.length || 0,
+          memoryStatus: result.skipped || null,
+          error: result.error,
+          skipped: result.skipped || null,
+        });
+        addTrace(trace, 'search', buildExecutedSearchTrace({
+          query: searchQuery,
+          queryOrigin: planned?.queryOrigin || 'llm_planner',
+          plannerMode: planned?.plannerMode || null,
+          plannedQueries: planned ? [planned] : null,
+          searchOptions: planned?.searchOptions,
+          sources: result.sources,
+          searchMeta: result.searchMeta,
+          resultCount: result.sources?.length || 0,
+          memoryStatus: result.skipped || null,
+          error: result.error,
+          skipped: result.skipped || null,
+          targetGapIds: [gap.id],
+          reasonCode: result.skipped || (result.error ? 'search_failed' : 'executed_search'),
+        }));
         gap.nextQueries = [];
-        return { ...result, question: gap.question, gapId: gap.id, wave };
+        return {
+          ...result,
+          question: gap.question,
+          searchQuery,
+          gapId: gap.id,
+          wave,
+          queryOrigin: planned?.queryOrigin || 'llm_planner',
+          plannerMode: planned?.plannerMode || null,
+          outcome: outcome.outcome,
+        };
       } catch (error) {
         if (error?.name === 'AbortError') throw error;
         state.recordSearchedQuery(gap.id, searchQuery);
+        state.recordSearchOutcome({
+          query: searchQuery,
+          queryOrigin: planned?.queryOrigin || 'llm_planner',
+          plannerMode: planned?.plannerMode || null,
+          gapId: gap.id,
+          searchOptions: planned?.searchOptions,
+          sources: [],
+          error,
+        });
+        addTrace(trace, 'search', buildExecutedSearchTrace({
+          query: searchQuery,
+          queryOrigin: planned?.queryOrigin || 'llm_planner',
+          plannerMode: planned?.plannerMode || null,
+          plannedQueries: planned ? [planned] : null,
+          searchOptions: planned?.searchOptions,
+          sources: [],
+          error,
+          targetGapIds: [gap.id],
+          reasonCode: 'search_failed',
+        }));
         return {
           question: gap.question,
+          searchQuery,
           gapId: gap.id,
           wave,
           sources: [],
@@ -285,7 +445,7 @@ export async function runFocusedPipeline(context) {
     });
     const selected = applySourceSelection(searched, focused.sourceSelection);
     emit({ stage: 'enriching_sources', iteration: wave === 'discovery' ? 1 : 2, iterations: 2 });
-    const enriched = await enrichWave(selected, context, focused, readPolicy);
+    const enriched = await enrichWave(selected, context, focused, readPolicy, state);
     findings.push(...enriched);
     addTrace(trace, 'search_wave_merged', {
       reasonCode: `${wave}_merge`,
@@ -340,10 +500,9 @@ export async function runFocusedPipeline(context) {
 
     const repairTargets = repairGapsFromGate(gate, state.gaps).filter(isMaterialGap);
     if (!repairTargets.length) break;
-    for (const gap of repairTargets) gap.nextQueries = [gapQuery(gap, query)];
     const gapsBeforeRepair = state.gaps.map((gap) => ({ ...gap }));
     const bodyUrlsBeforeRepair = bodyUrlsFromFindings(findings);
-    await executeWave('repair', repairTargets, (gap) => gap.nextQueries[0]);
+    await executeWave('repair', repairTargets);
     gate = await syncState(state, findings, { llm, signal, query, trace });
     latestMarginal = waveMetrics(bodyUrlsBeforeRepair, findings, gapsBeforeRepair, state.gaps);
     consecutiveLowYield = latestMarginal.plateau ? consecutiveLowYield + 1 : 0;
@@ -359,7 +518,7 @@ export async function runFocusedPipeline(context) {
       .slice(0, focused.challenge.maxClaims)
     : [];
   if (challengeTargets.length && (!budget || budget.canClaim('searchRequests'))) {
-    await executeWave('challenge', challengeTargets, (gap) => gapQuery(gap, query, 'challenge'));
+    await executeWave('challenge', challengeTargets);
     gate = await syncState(state, findings, { llm, signal, query, trace });
     addTrace(trace, 'challenge_completed', {
       reasonCode: 'bounded_consequential_claim_challenge',
@@ -409,5 +568,13 @@ export async function runFocusedPipeline(context) {
     gaps: state.gaps,
     readiness: gate,
     marginal: latestMarginal,
+    queryProvenance,
+    recovery: queryProvenance,
+    searchOutcomes: state.searchOutcomes,
+    observability: collectObservabilityMetrics({
+      findings,
+      trace,
+      searchOutcomes: state.searchOutcomes,
+    }),
   });
 }

@@ -1,6 +1,91 @@
 import { getSourceEvidenceClass } from './focused-settings.mjs';
 import { DEFAULT_MAX_PASSAGE_CHARS, selectDisplayedEvidence } from './evidence-chain.mjs';
 
+export function searchQueryPlannerPrompt({
+  mode = 'initial',
+  query = '',
+  gap = null,
+  gaps = [],
+  brief = {},
+  readiness = null,
+  limit = 3,
+  searchedQueries = [],
+  rejectedQueries = [],
+  exhaustedAngles = [],
+  observedHosts = [],
+  allowedSiteHosts = [],
+  evidenceScope = 'web',
+  siteQueryMode = 'confirmed',
+  siteFallbackFor = '',
+  context = '',
+  hints = [],
+  rejectionReasons = [],
+  recentSearchOutcomes = [],
+} = {}) {
+  const schema = '{"queries":[{"query":"...","targetGapId":"gap-1","intent":"...","expectedEvidence":"...","sourceType":"web|news|filing|local","searchOptions":{"engines":"...","categories":"...","language":"...","pageno":1}}]}';
+  return [
+    {
+      role: 'system',
+      content: [
+        'You write natural-language web search queries for a research agent.',
+        `Return JSON only: ${schema}`,
+        `Write at most ${limit} complementary queries. Do not paraphrase.`,
+        'Write queries a human would type into a search engine. Match the language of the research question and target sources.',
+        'Never copy internal identifiers, snake_case slot names, evidenceCriteria codes, or English boilerplate such as "primary source evidence".',
+        'Do not invent or rewrite queries by concatenating slot names, hosts, or missing-evidence codes.',
+        'site: is optional. Use it only for hosts listed in allowedSiteHosts. preferredHosts are ranking hints, not site: targets unless they appear in allowedSiteHosts.',
+        'searchOptions are optional request parameters passed through to the search provider. Use them only when recentSearchOutcomes or rejectedQueries show a reason to change engines, categories, language, or page.',
+        'Read recentSearchOutcomes as facts. Do not repeat a failed angle unchanged.',
+        evidenceScope === 'local' ? 'Local corpus search is active. Never emit site: operators.' : '',
+        siteQueryMode === 'never' ? 'Do not emit site: operators in this mode.' : '',
+        mode === 'site_fallback' ? 'The previous site: query returned only off-host results. Rewrite it without any site: operator.' : '',
+        mode === 'challenge' ? 'Write a challenge query that looks for counter-evidence or an alternative explanation, still in natural language.' : '',
+        mode === 'repair' || mode === 'recovery' ? 'Change the search angle, source type, time range, or wording. Do not repeat rejected or searched queries.' : '',
+        'Hints are optional ideas only. Rewrite them; do not execute them unchanged if they contain identifiers or templates.',
+      ].filter(Boolean).join('\n'),
+    },
+    {
+      role: 'user',
+      content: JSON.stringify({
+        mode,
+        query,
+        gap,
+        gaps,
+        brief,
+        readiness,
+        limit,
+        searchedQueries,
+        rejectedQueries,
+        exhaustedAngles,
+        recentSearchOutcomes,
+        observedHosts,
+        allowedSiteHosts,
+        evidenceScope,
+        siteQueryMode,
+        siteFallbackFor: siteFallbackFor || null,
+        context: context || null,
+        hints,
+        rejectionReasons,
+      }),
+    },
+  ];
+}
+
+export function searchQueryPlannerRetryPrompt(args = {}) {
+  const messages = searchQueryPlannerPrompt(args);
+  return [
+    ...messages,
+    {
+      role: 'user',
+      content: [
+        'The previous queries were empty, duplicated, contained internal identifiers, used a forbidden template, or violated site:/local policy.',
+        'Return a complete JSON object with new natural-language queries only.',
+        args.rejectionReasons?.length ? `Rejection reasons: ${args.rejectionReasons.join(', ')}` : '',
+      ].filter(Boolean).join(' '),
+    },
+  ];
+}
+
 export function questionPrompt({ query, count, mode = 'initial', context = '' }) {
   const modeInstructions = {
     initial: `Break this research topic into ${count} focused web search questions:`,
@@ -96,9 +181,10 @@ export function reportPrompt({
 }
 
 export function claimEntailmentPrompt({ claim, passages = [] }) {
-  const passageBlock = passages.map((passage, index) => (
-    `[P${index + 1}] ${passage.text}`
-  )).join('\n\n');
+  const passageBlock = passages.map((passage, index) => {
+    const assessment = formatAssessment(passage.assessment);
+    return [`[P${index + 1}] ${passage.text}`, assessment].filter(Boolean).join('\n');
+  }).join('\n\n');
   return [
     {
       role: 'system',
@@ -108,6 +194,7 @@ export function claimEntailmentPrompt({ claim, passages = [] }) {
         'supported: a passage clearly states the claim. partially_supported: a passage supports only part of it.',
         'unsupported: a passage contradicts the claim. unverifiable: the passages do not decide it.',
         'quote must be a verbatim excerpt copied from one passage. Do not invent quotes.',
+        'If a passage includes source assessment metadata, consider whether that publisher and content type can support the claim as written.',
       ].join(' '),
     },
     {
@@ -119,9 +206,10 @@ export function claimEntailmentPrompt({ claim, passages = [] }) {
 
 export function gapSlotSupportPrompt({ query, slots = [], compact = false } = {}) {
   const slotBlock = slots.map(({ gap, passages = [] }, index) => {
-    const passageBlock = passages.map((passage, passageIndex) => (
-      `[${gap.id}:P${passageIndex + 1} id=${passage.id}] ${passage.text}`
-    )).join('\n\n');
+    const passageBlock = passages.map((passage, passageIndex) => {
+      const assessment = formatAssessment(passage.assessment);
+      return [`[${gap.id}:P${passageIndex + 1} id=${passage.id}] ${passage.text}`, assessment].filter(Boolean).join('\n');
+    }).join('\n\n');
     return [
       `Slot ${index + 1}`,
       `gapId: ${gap.id}`,
@@ -129,6 +217,9 @@ export function gapSlotSupportPrompt({ query, slots = [], compact = false } = {}
       `question: ${gap.question}`,
       gap.evidenceCriteria?.length ? `evidenceCriteria: ${gap.evidenceCriteria.join('; ')}` : '',
       `passages:\n${passageBlock}`,
+      passages.some((passage) => passage.assessment)
+        ? 'Each passage may include source assessment metadata from the read step. Use it when judging whether the evidence type can answer the slot.'
+        : '',
     ].filter(Boolean).join('\n');
   }).join('\n\n');
   const schema = compact
@@ -144,6 +235,7 @@ export function gapSlotSupportPrompt({ query, slots = [], compact = false } = {}
         'unsupported: passages do not answer the slot. conflicting: passages disagree. unverifiable: cannot decide.',
         'quote must be a verbatim excerpt copied from one provided passage. Do not invent quotes.',
         'Do not use search snippets. Embedding scores are only for ranking, not for closing a slot.',
+        'If a passage includes source assessment metadata, weigh publisher type and content kind together with the quoted text.',
       ].join(' '),
     },
     {
@@ -151,6 +243,52 @@ export function gapSlotSupportPrompt({ query, slots = [], compact = false } = {}
       content: `Query:\n${query}\n\n${slotBlock}`,
     },
   ];
+}
+
+export function sourceAssessmentPrompt({
+  query = '',
+  question = '',
+  title = '',
+  url = '',
+  content = '',
+  entities = [],
+  preferredHosts = [],
+  observedHosts = [],
+} = {}) {
+  const schema = '{"summary":"...","readability":"readable|unreadable|uncertain","contentKind":"article|homepage|product_page|filing|forum|login_wall|error_page|obfuscated|other","publisherType":"official|regulator|exchange_filing|mainstream_media|aggregator|reseller|mirror|ugc|unknown","firstParty":false,"evidenceTier":"other_primary|specialist|mainstream|reprint|ugc|unknown","reason":"..."}';
+  return [
+    {
+      role: 'system',
+      content: [
+        'Assess one fetched page for a research agent.',
+        `Return JSON only: ${schema}`,
+        'summary must be plain facts relevant to the research query, or empty if the page is unreadable.',
+        'readability=unreadable when the body is a WAF shell, captcha, encrypted blob, login wall, or otherwise not human-readable article text.',
+        'Do not invent facts. firstParty is true only when the page is published by the researched entity itself.',
+        'evidenceTier must be one of the listed values. Never emit required_primary.',
+      ].join('\n'),
+    },
+    {
+      role: 'user',
+      content: [
+        `Research query: ${query}`,
+        question ? `Focus question: ${question}` : '',
+        `Source title: ${title}`,
+        `Source URL: ${url}`,
+        entities.length ? `Entities: ${entities.join(', ')}` : '',
+        preferredHosts.length ? `Preferred hosts: ${preferredHosts.join(', ')}` : '',
+        observedHosts.length ? `Observed hosts: ${observedHosts.slice(0, 12).join(', ')}` : '',
+        '',
+        'Page content:',
+        content,
+      ].filter(Boolean).join('\n'),
+    },
+  ];
+}
+
+function formatAssessment(assessment) {
+  if (!assessment || typeof assessment !== 'object') return '';
+  return `Source assessment: readability=${assessment.readability || 'unknown'}; contentKind=${assessment.contentKind || 'unknown'}; publisherType=${assessment.publisherType || 'unknown'}; firstParty=${assessment.firstParty === true}; evidenceTier=${assessment.evidenceTier || 'unknown'}`;
 }
 
 export function reportRetryPrompt({

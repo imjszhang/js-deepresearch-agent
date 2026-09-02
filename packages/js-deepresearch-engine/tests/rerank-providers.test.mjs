@@ -118,6 +118,26 @@ describe('optional rerank providers', () => {
     assert.deepEqual(result.items.map((item) => item.id), ['a', 'b']);
   });
 
+  it('marks rerank token usage unknown when an HTTP endpoint omits usage', async () => {
+    globalThis.fetch = async (_url, options) => {
+      const body = JSON.parse(options.body);
+      return new globalThis.Response(JSON.stringify({
+        results: body.documents.map((_document, index) => ({ index, relevance_score: 0.8 })),
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    };
+    const budget = new BudgetManager({ research: { budget: {} } });
+    const providers = createResearchProviders({
+      rerank: { provider: 'http', baseUrl: 'http://127.0.0.1:8000' },
+    }, { budget });
+    const result = await providers.rerank.rerank({
+      query: 'q',
+      documents: [{ id: 'a', text: 'a' }],
+    });
+    assert.deepEqual(result.usage, { requests: 1 });
+    assert.equal(budget.snapshot().usage.rerankRequests, 1);
+    assert.equal(budget.snapshot().unknown.rerankTokens, true);
+  });
+
   it('enforces the external rerank request budget before each batch', async () => {
     globalThis.fetch = async (_url, options) => {
       const body = JSON.parse(options.body);

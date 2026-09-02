@@ -14,6 +14,7 @@ import {
   validateNarrativeObject,
   validateReportOutput,
 } from '../src/index.mjs';
+import { defaultSearchQueryPlan } from './helpers/search-query-planner-mock.mjs';
 import { emptyBulletLines } from '../src/research/report-builder.mjs';
 
 const findings = [{
@@ -272,7 +273,7 @@ Short.
           strategy: 'exploratory',
           exploratory: { minLlmTokens: 0, maxLlmTokens: 0, maxSteps: 4, maxEvaluationRetries: 0, autoReadTopK: 0 },
           focused: { fetchMode: 'disabled' },
-          budget: { maxLlmTokens: 2500, maxSearchRequests: 4, maxSourceReads: 0 },
+          budget: { maxLlmTokens: 5000, maxSearchRequests: 4, maxSourceReads: 0 },
         },
       },
       search: { async search() {
@@ -280,6 +281,7 @@ Short.
       } },
       llm: {
         async complete({ purpose, messages }) {
+          if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
           if (purpose === 'agent_decision') return JSON.stringify({ action: 'search', query: 'budget topic', gapId: 'gap-1' });
           if (purpose === 'gap_decomposition') return 'no json';
           if (purpose === 'research_profile') {
@@ -364,7 +366,8 @@ describe('structured narrative', () => {
       },
       search: { async search() { return [{ title: 'Ollama docs', url: 'https://ollama.com', snippet: 'Ollama runs local models.' }]; } },
       llm: {
-        async complete({ purpose }) {
+        async complete({ purpose, messages }) {
+          if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
           if (purpose === 'question_generation') return '[]';
           return `# Research Report
 
@@ -398,6 +401,7 @@ Ollama is a local model runner for Apple Silicon and this fallback narrative is 
       search: { async search() { return [{ title: 'Ollama docs', url: 'https://ollama.com', snippet: 'Ollama runs local models.' }]; } },
       llm: {
         async complete({ purpose, messages }) {
+          if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
           if (purpose === 'research_profile') {
             return JSON.stringify({
               requiredAnswerSlots: [{ answerSlot: 'ollama', question: 'What is Ollama?' }],
@@ -456,6 +460,7 @@ Ollama is a local model runner for Apple Silicon and this fallback narrative is 
       },
       llm: {
         async complete({ purpose, messages }) {
+          if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
           if (purpose === 'research_profile') {
             return JSON.stringify({
               requiredAnswerSlots: [{ answerSlot: '房产', question: '房产操作' }],

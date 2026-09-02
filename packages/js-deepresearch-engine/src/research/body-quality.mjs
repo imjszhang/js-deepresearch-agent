@@ -1,3 +1,5 @@
+import { assessmentBlocksSuccessfulBody } from './source-assessment.mjs';
+
 const WAF_OR_ERROR_NEEDLES = [
   /just a moment/i,
   /attention required/i,
@@ -39,7 +41,9 @@ export function sourceBodyText(source = {}) {
 
 export function isSuccessfulBody(source = {}) {
   if (!source) return false;
-  if (source.fetchStatus === 'failed' || source.fetchStatus === 'waf' || source.bodyQuality === 'waf') {
+  if (assessmentBlocksSuccessfulBody(source.assessment)) return false;
+  if (source.fetchStatus === 'failed' || source.fetchStatus === 'waf' || source.fetchStatus === 'irrelevant'
+    || source.bodyQuality === 'waf' || source.bodyQuality === 'irrelevant') {
     return false;
   }
   const text = sourceBodyText(source);
@@ -87,7 +91,21 @@ export function sourceHasObservableDate(source = {}) {
 }
 
 export function classifyFetchedBody(source = {}) {
+  if (assessmentBlocksSuccessfulBody(source.assessment)) {
+    return {
+      status: 'waf',
+      successful: false,
+      reason: source.assessment?.method === 'fail_closed' ? 'assessment_fail_closed' : 'assessment_unreadable',
+    };
+  }
   const text = sourceBodyText(source);
+  if (source.fetchStatus === 'irrelevant' || source.bodyQuality === 'irrelevant') {
+    return {
+      status: 'irrelevant',
+      successful: false,
+      reason: source.relevanceDecision?.reasonCode || source.skipReason || 'body_irrelevant',
+    };
+  }
   if (source.fetchStatus === 'failed') {
     return { status: 'failed', successful: false, reason: source.fetchError || 'fetch_failed' };
   }

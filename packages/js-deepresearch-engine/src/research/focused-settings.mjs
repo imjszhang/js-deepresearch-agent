@@ -120,6 +120,7 @@ export function getSourceEvidence(source = {}) {
 }
 
 export function sourceHasFetchedBody(source = {}) {
+  if (source.fetchStatus === 'irrelevant' || source.bodyQuality === 'irrelevant') return false;
   return Boolean(String(source.content || '').trim())
     && (source.fetchStatus === 'ok' || source.contentOrigin === 'fetched');
 }

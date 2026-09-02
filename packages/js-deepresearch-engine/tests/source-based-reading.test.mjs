@@ -15,6 +15,7 @@ import { getSourceEvidence, resolveFocusedSettings } from '../src/research/focus
 import { filterFindingsByRelevance } from '../src/research/source-relevance-filter.mjs';
 import { runFocusedPipeline } from '../src/research/strategies/focused-pipeline.mjs';
 import { runStrategy } from '../src/research/strategies.mjs';
+import { defaultSearchQueryPlan } from './helpers/search-query-planner-mock.mjs';
 
 const originalFetch = globalThis.fetch;
 
@@ -290,7 +291,15 @@ describe('source enricher', () => {
       enrichConcurrency: 1,
       llm: {
         async complete() {
-          return 'Focused summary about transformers.';
+          return JSON.stringify({
+            summary: 'Focused summary about transformers.',
+            readability: 'readable',
+            contentKind: 'article',
+            publisherType: 'mainstream_media',
+            firstParty: false,
+            evidenceTier: 'mainstream',
+            reason: 'readable article',
+          });
         },
       },
     });
@@ -516,6 +525,7 @@ describe('focused pipeline', () => {
       },
       llm: {
         async complete({ purpose, messages }) {
+          if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
           if (purpose === 'research_profile') {
             return JSON.stringify({
               requiredAnswerSlots: [
@@ -534,7 +544,7 @@ describe('focused pipeline', () => {
 
     assert.ok(searchedQuestions.includes('deep topic'));
     assert.ok(searchedQuestions.includes('first iteration question'));
-    assert.ok(searchedQuestions.some((question) => question.includes('primary source evidence')));
+    assert.ok(!searchedQuestions.some((question) => question.includes('primary source evidence')));
     assert.ok(findings.some((finding) => finding.wave === 'discovery'));
     assert.ok(findings.some((finding) => finding.wave === 'repair'));
   });
@@ -570,6 +580,7 @@ describe('focused pipeline', () => {
       },
       llm: {
         async complete({ purpose, messages }) {
+          if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
           if (purpose === 'research_profile') {
             return JSON.stringify({
               requiredAnswerSlots: [{ answerSlot: 'topic', question: 'topic' }],
@@ -599,7 +610,8 @@ describe('focused pipeline', () => {
       settings: { research: { focused: { fetchMode: 'disabled', iterationControl: { enabled: true, minIterations: 1, maxIterations: 4, earlyStop: true } } } },
       search: { async search(question) { searches.push(question); return [{ title: question, url: `https://source-${searches.length}.test`, snippet: 'usable evidence' }]; } },
       llm: {
-        async complete({ purpose }) {
+        async complete({ purpose, messages }) {
+          if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
           if (purpose === 'research_profile') {
             return JSON.stringify({
               requiredAnswerSlots: [
@@ -637,7 +649,8 @@ describe('focused pipeline', () => {
         return [{ title: 'Secondary overview', url: `https://blog.csdn.net/${searches.length}`, snippet: 'secondary summary' }];
       } },
       llm: {
-        async complete({ purpose }) {
+        async complete({ purpose, messages }) {
+          if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
           if (purpose === 'research_profile') {
             return JSON.stringify({
               requiredAnswerSlots: [{
@@ -653,9 +666,9 @@ describe('focused pipeline', () => {
       emit: () => {},
       trace,
     });
-    assert.ok(searches.some((question) => question.includes('successful_body')));
     assert.ok(findings.some((finding) => finding.wave === 'repair'));
     assert.ok(trace.some((entry) => entry.action === 'search_wave_started' && entry.wave === 'repair'));
+    assert.ok(!searches.some((question) => /successful_body|primary source evidence/.test(question)));
     assert.ok(!trace.some((entry) => entry.wave === 'repair' && entry.queries?.includes('general comparison')));
   });
 });

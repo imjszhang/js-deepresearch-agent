@@ -24,8 +24,6 @@ export function evaluateEvidenceSufficiency({ findings = [], iteration = 1, minI
   if (successful.length === 0) criticalGaps.push('No research question has usable sources.');
   if (flags.includes('primary_source_missing')) criticalGaps.push('Primary or official evidence is missing.');
   const recommendedQuestions = [];
-  if (flags.includes('primary_source_missing')) recommendedQuestions.push(`site:github.com ${query}`);
-  if (flags.includes('freshness_unknown')) recommendedQuestions.push(`${query} official sources publication date current status`);
   const sufficient = iteration >= minIterations && successful.length > 0
     && unique.size >= Math.min(2, successful.length)
     && !flags.includes('freshness_unknown')

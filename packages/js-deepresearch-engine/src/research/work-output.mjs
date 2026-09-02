@@ -5,6 +5,7 @@ import {
   CLAIM_EXTRACTION_VERSION,
   CLAIM_EVALUATION_VERSION,
 } from './claim-quality.mjs';
+import { publicSearchOptionsSnapshot } from '../search/normalize-search-config.mjs';
 
 function snapshotCorpusDirs(settings = {}) {
   const rawDirs = settings?.search?.local?.dirs;
@@ -20,6 +21,18 @@ function snapshotCorpusDirs(settings = {}) {
     dirs.push(resolved);
   }
   return dirs;
+}
+
+function snapshotResearchProviders(settings = {}) {
+  const providers = settings?.research?.providers || {};
+  const safe = (provider = {}) => ({
+    provider: provider.provider || null,
+    model: provider.model || null,
+  });
+  return {
+    rerank: safe(providers.rerank),
+    embedding: safe(providers.embedding),
+  };
 }
 
 export function resolveWorkDir(settings, cwd = process.cwd()) {
@@ -105,7 +118,10 @@ export function saveResearchArtifacts({
           questionsPerIteration: settings.research?.questionsPerIteration,
           concurrency: settings.research?.concurrency,
           budget: settings.research?.budget,
+          providers: snapshotResearchProviders(settings),
+          relevance: settings.research?.read?.relevance || null,
           searchEngine: settings.search?.engine || null,
+          search: publicSearchOptionsSnapshot(settings.search),
           corpusDirs: snapshotCorpusDirs(settings),
         },
       },

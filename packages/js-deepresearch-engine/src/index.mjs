@@ -48,7 +48,20 @@ export {
   saveResearchArtifacts,
   saveResearchToWorkDir,
 } from './research/work-output.mjs';
-export { normalizeSearchConfig } from './search/normalize-search-config.mjs';
+export {
+  normalizeSearchConfig,
+  sanitizeSearchOptions,
+  resolveSearchRequestOptions,
+  publicSearchOptionsSnapshot,
+} from './search/normalize-search-config.mjs';
+export { attachSearchMeta, getSearchMeta } from './search/search-result.mjs';
+export { buildPlannerFeedback, plannerFeedbackFromState } from './research/planner-feedback.mjs';
+export {
+  assessSourceBody,
+  normalizeSourceAssessment,
+  failClosedAssessment,
+} from './research/source-assessment.mjs';
+export { collectObservabilityMetrics } from './research/observability.mjs';
 export { resolveSearchConcurrency } from './search/search-capabilities.mjs';
 export { BudgetManager, BudgetExceededError } from './research/budget-manager.mjs';
 export { QueryMemory, normalizeQuery, querySimilarity } from './research/query-memory.mjs';
@@ -114,11 +127,11 @@ export {
   judgeOpenSlotSupport,
   applySlotSupportJudgments,
   failClosedSupport,
+  slotSupportFingerprint,
 } from './research/gap-slot-support.mjs';
 export { evaluateReadinessGate } from './research/adaptive/readiness-gate.mjs';
 export {
   classifySourceTier,
-  collectSearchAngleCandidates,
   evidenceIndependenceKey,
   hostnameOf,
   independentEvidenceKeysFromSources,
@@ -126,6 +139,14 @@ export {
   registrableDomainFromUrl,
   selectReadsByPolicy,
 } from './research/adaptive/source-policy.mjs';
+export {
+  planSearchQueries,
+  attachPlannedQueries,
+  validatePlannedQuery,
+  QUERY_ORIGINS,
+  SEARCH_QUERY_MODES,
+  SEARCH_QUERY_PLANNER_PURPOSE,
+} from './research/search-query-planner.mjs';
 export { normalizeExploratoryStopReason, EXPLORATORY_STOP_REASONS } from './research/adaptive/stop-reasons.mjs';
 export {
   assembleReport,

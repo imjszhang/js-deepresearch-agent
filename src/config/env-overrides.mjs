@@ -59,6 +59,20 @@ export function settingsFromEnv(env = process.env) {
     search.apiKey = searchApiKey;
   }
 
+  const searchLanguage = readEnv('SEARCH_LANGUAGE');
+  if (searchLanguage) {
+    search.language = searchLanguage;
+  }
+  const searchEngines = readEnv('SEARCH_ENGINES');
+  const searchCategories = readEnv('SEARCH_CATEGORIES');
+  if (searchEngines || searchCategories) {
+    search.options = {
+      ...(search.options && typeof search.options === 'object' ? search.options : {}),
+      ...(searchEngines ? { engines: searchEngines } : {}),
+      ...(searchCategories ? { categories: searchCategories } : {}),
+    };
+  }
+
   const jsEyesCli = readEnv('JS_EYES_CLI');
   if (jsEyesCli) {
     search.jsEyesCli = jsEyesCli;
@@ -123,6 +137,13 @@ export function settingsFromEnv(env = process.env) {
   const embeddingModel = readEnv('JDR_EMBEDDING_MODEL');
   const embeddingBaseUrl = readEnv('JDR_EMBEDDING_BASE_URL');
   const embeddingApiKey = readEnv('JDR_EMBEDDING_API_KEY') || readEnv('OPENCLAW_GATEWAY_TOKEN');
+  const relevanceEnabled = readEnv('JDR_RELEVANCE_ENABLED');
+  const relevanceMinScore = readEnv('JDR_RELEVANCE_MIN_RERANK_SCORE');
+  const bodyRelevance = readEnv('JDR_BODY_RELEVANCE_ENABLED');
+  const siteQueryMode = readEnv('JDR_SITE_QUERY_MODE');
+  const sourceAssessment = readEnv('JDR_SOURCE_ASSESSMENT');
+  const maxRepairFailuresPerGap = readEnv('JDR_MAX_REPAIR_FAILURES_PER_GAP');
+  const maxConsecutiveInvalidSteps = readEnv('JDR_MAX_CONSECUTIVE_INVALID_STEPS');
   if (rerankProvider || jinaApiKey || rerankModel || rerankBaseUrl || semanticTimeout
     || embeddingProvider || embeddingModel || embeddingBaseUrl || embeddingApiKey) {
     research.providers = {
@@ -140,6 +161,26 @@ export function settingsFromEnv(env = process.env) {
         ...(embeddingApiKey ? { apiKey: embeddingApiKey } : {}),
         ...(semanticTimeout ? { timeoutMs: Number(semanticTimeout) } : {}),
       } } : {}),
+    };
+  }
+  if (relevanceEnabled !== undefined || relevanceMinScore !== undefined || bodyRelevance !== undefined || siteQueryMode !== undefined || sourceAssessment !== undefined) {
+    research.read = {
+      ...(sourceAssessment !== undefined ? {
+        sourceAssessment: { enabled: String(sourceAssessment).toLowerCase() !== 'false' },
+      } : {}),
+      relevance: {
+        ...(relevanceEnabled !== undefined ? { enabled: String(relevanceEnabled).toLowerCase() !== 'false' } : {}),
+        ...(relevanceMinScore !== undefined ? { minRerankScore: Number(relevanceMinScore) } : {}),
+        ...(bodyRelevance !== undefined ? { bodyValidation: String(bodyRelevance).toLowerCase() !== 'false' } : {}),
+        ...(siteQueryMode !== undefined ? { siteQueryMode } : {}),
+      },
+    };
+  }
+  if (maxRepairFailuresPerGap !== undefined || maxConsecutiveInvalidSteps !== undefined) {
+    research.exploratory = {
+      ...(research.exploratory || {}),
+      ...(maxRepairFailuresPerGap !== undefined ? { maxRepairFailuresPerGap: Number(maxRepairFailuresPerGap) } : {}),
+      ...(maxConsecutiveInvalidSteps !== undefined ? { maxConsecutiveInvalidSteps: Number(maxConsecutiveInvalidSteps) } : {}),
     };
   }
 

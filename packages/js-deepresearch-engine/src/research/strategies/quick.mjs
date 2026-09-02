@@ -1,6 +1,8 @@
-import { generateQuestions } from '../question-generator.mjs';
+import { generatePlannedQuestions, userQueryEntry } from '../question-generator.mjs';
 import { searchQuestions } from '../search-executor.mjs';
 import { resolveStrategyConcurrency, uniqueQuestionCount } from '../strategy-utils.mjs';
+import { inferEvidenceScope } from '../adaptive/source-policy.mjs';
+import { buildExecutedSearchTrace } from '../search-trace.mjs';
 import { runIterativeStrategy } from './iterative.mjs';
 
 export const quickStrategyDefinition = {
@@ -43,29 +45,56 @@ async function runQuickSingleRound(context) {
     signal,
     emit,
     queryMemory,
+    settings,
+    brief,
+    trace = [],
   } = context;
   const followUpCount = Math.min(questionCount, 3);
   const resolvedConcurrency = resolveStrategyConcurrency(search, concurrency, followUpCount + 1);
 
   emit({ stage: 'generating_questions' });
-  const followUps = await generateQuestions({
+  const followUps = await generatePlannedQuestions({
     llm,
     query,
     count: followUpCount,
     signal,
     mode: 'rapid',
+    brief,
+    evidenceScope: inferEvidenceScope(settings),
+    queryMemory,
   });
-  const questions = [query, ...followUps];
-  const totalQuestions = uniqueQuestionCount(questions);
+  const questions = [userQueryEntry(query), ...followUps];
+  addQuickTrace(trace, 'search_query_planned', {
+    reasonCode: 'search_query_initial',
+    queryOrigin: 'user_query',
+    queries: questions.map((item) => item.query),
+    plannedQueries: questions,
+  });
+  const totalQuestions = uniqueQuestionCount(questions.map((item) => item.query));
 
   emit({ stage: 'searching', total: totalQuestions });
-  return searchQuestions({
+  const findings = await searchQuestions({
     questions,
     search,
     signal,
     concurrency: resolvedConcurrency,
     queryMemory,
     onSkip: ({ question }) => emit({ stage: 'query_skipped_duplicate', question }),
+    onResult: (result) => {
+      addQuickTrace(trace, 'search', buildExecutedSearchTrace({
+        query: result.searchQuery || result.question,
+        queryOrigin: result.searchQuery === query || result.question === query ? 'user_query' : 'llm_planner',
+        plannerMode: result.searchQuery === query || result.question === query ? null : 'initial',
+        plannedQueries: questions.filter((item) => item.query === (result.searchQuery || result.question)),
+        searchOptions: result.searchOptions,
+        sources: result.sources,
+        searchMeta: result.searchMeta,
+        resultCount: result.sources?.length || 0,
+        skipped: result.skipped || null,
+        error: result.error,
+        reasonCode: result.skipped || (result.error ? 'search_failed' : 'executed_search'),
+      }));
+    },
     onProgress: ({ completed, total, question }) => {
       emit({
         stage: 'search_item_complete',
@@ -74,6 +103,21 @@ async function runQuickSingleRound(context) {
         total,
       });
     },
+  });
+  return findings.map((finding, index) => ({
+    ...finding,
+    queryOrigin: index === 0 ? 'user_query' : 'llm_planner',
+    plannerMode: index === 0 ? null : 'initial',
+  }));
+}
+
+function addQuickTrace(trace, action, fields = {}) {
+  if (!Array.isArray(trace)) return;
+  trace.push({
+    step: trace.length + 1,
+    action,
+    ...fields,
+    createdAt: new Date().toISOString(),
   });
 }
 

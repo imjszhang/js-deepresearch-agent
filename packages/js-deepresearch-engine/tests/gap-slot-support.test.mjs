@@ -6,6 +6,7 @@ import {
   failClosedSupport,
   judgeOpenSlotSupport,
   selectSlotPassages,
+  slotSupportFingerprint,
 } from '../src/research/gap-slot-support.mjs';
 
 const SUBJECT_A_BODY = 'SubjectA publishes a first-party guide at docs.example.com that states production support began in 2026.';
@@ -251,5 +252,44 @@ describe('gap slot support judgments', () => {
       fetchStatus: 'ok',
     }]);
     assert.equal(evaluated.status, 'verified');
+  });
+
+  it('reuses the same fingerprint instead of calling gap_support again', async () => {
+    const gaps = [slotGap('gap-2', 'SubjectA')];
+    const findings = [finding('gap-2', 'https://docs.example.com/a', SUBJECT_A_BODY)];
+    const cache = new Map();
+    let calls = 0;
+    const llm = {
+      async complete() {
+        calls += 1;
+        return JSON.stringify({
+          judgments: [{
+            gapId: 'gap-2',
+            verdict: 'supported',
+            quote: 'production support began in 2026',
+          }],
+        });
+      },
+    };
+    const first = await judgeOpenSlotSupport({ query: 'SubjectA', gaps, findings, llm, cache });
+    const second = await judgeOpenSlotSupport({ query: 'SubjectA', gaps, findings, llm, cache });
+    assert.equal(calls, 1);
+    assert.equal(first.cacheMisses, 1);
+    assert.equal(second.cacheHits, 1);
+    assert.equal(second.attempts, 0);
+    assert.equal(second.judgments[0].verdict, 'supported');
+    const changed = await judgeOpenSlotSupport({
+      query: 'SubjectA',
+      gaps,
+      findings: [finding('gap-2', 'https://docs.example.com/a', `${SUBJECT_A_BODY} Updated 2026 filing.`)],
+      llm,
+      cache,
+    });
+    assert.equal(calls, 2);
+    assert.equal(changed.cacheMisses, 1);
+    assert.notEqual(
+      slotSupportFingerprint(gaps[0], selectSlotPassages(gaps[0], findings)),
+      slotSupportFingerprint(gaps[0], selectSlotPassages(gaps[0], changed.judgments ? [finding('gap-2', 'https://docs.example.com/a', `${SUBJECT_A_BODY} Updated 2026 filing.`)] : findings)),
+    );
   });
 });

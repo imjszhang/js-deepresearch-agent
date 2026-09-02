@@ -17,7 +17,6 @@ import {
 import { splitLlmCost } from './extract-run-stats.mjs';
 import { matchQueryBattery } from './query-battery.mjs';
 
-const HARD_STOP_RE = /budget_exhausted|max_budget|maxBudget|max_steps|maxSteps|max_llm_tokens|token_limit|llmTokens|hard_cap|hardCap/i;
 const DEFINITE_SLOT_STATUSES = new Set(['completed', 'missing', 'blocked']);
 
 function check(id, pass, detail) {
@@ -37,10 +36,32 @@ function allCitations(report, claims) {
 }
 
 export function hasHardStop(quality = {}) {
-  const flags = Array.isArray(quality.flags) ? quality.flags : [];
-  if (flags.some((flag) => HARD_STOP_RE.test(String(flag)))) return true;
-  return [quality.stopReason, quality.budget?.controllerStopReason, quality.budget?.stopReason]
-    .some((reason) => reason && HARD_STOP_RE.test(String(reason)));
+  const budget = quality.budget || {};
+  const usage = budget.usage || {};
+  const limits = budget.limits || {};
+  const effectiveUsage = {
+    ...usage,
+    explorationTokens: Number(usage.explorationTokens ?? usage.llmTokens) || 0,
+  };
+  const exhausted = [
+    ['explorationTokens', 'llmTokens'],
+    ['llmTokens', 'totalLlmTokens'],
+    ['searchRequests', 'searchRequests'],
+    ['sourceReads', 'sourceReads'],
+  ].some(([usageKey, limitKey]) => {
+    const limit = Number(limits[limitKey]) || 0;
+    return limit > 0 && Number(effectiveUsage[usageKey] || 0) >= limit;
+  });
+  if (exhausted) return true;
+  const requiredAmount = Number(budget.controllerStopRequiredAmount) || 0;
+  if (quality.stopReason === 'budget_exhausted'
+    && budget.controllerStopDetail === 'llm_hard_cap'
+    && Number(limits.llmTokens) > 0
+    && requiredAmount > 0
+    && effectiveUsage.explorationTokens + requiredAmount > Number(limits.llmTokens)) return true;
+  return quality.stopReason === 'safety_cap'
+    || quality.stopReason === 'user_cancelled'
+    || quality.stopDetail === 'max_steps';
 }
 
 export function auditReportIntegrity(report = '', query = '') {
@@ -149,6 +170,117 @@ export function auditEvidenceProvenance(sources = []) {
   };
 }
 
+export function auditQueryProvenance(trace = [], quality = {}) {
+  const searches = (Array.isArray(trace) ? trace : []).filter((entry) => (
+    entry?.action === 'search' && !['rejected', 'skipped'].includes(entry.status)
+  ));
+  const hasSchema = searches.some((entry) => entry.queryOrigin)
+    || Boolean(quality?.metrics?.queryProvenance)
+    || Number(quality?.metrics?.recovery?.plannerRetryCount) > 0
+    || Number(quality?.metrics?.recovery?.plannerRejectedQueries) > 0;
+  if (!hasSchema) {
+    return {
+      pass: true,
+      applicable: false,
+      checks: [check('query_provenance', true, 'Legacy run has no query provenance schema.')],
+      counts: { missing: 0, ruleGenerated: 0, siteFallbackWithoutPlanner: 0, legacy: true },
+    };
+  }
+  const missing = searches.filter((entry) => !entry.queryOrigin);
+  const illegalOrigin = searches.filter((entry) => (
+    entry.queryOrigin && !['user_query', 'llm_planner'].includes(entry.queryOrigin)
+  ));
+  const ruleTemplates = searches.filter((entry) => (
+    /primary source evidence|conflicting evidence correction|counterexample failure/i.test(
+      String(entry.query || (entry.queries || []).join(' ')),
+    )
+  ));
+  const siteFallbackWithoutPlanner = searches.filter((entry) => (
+    (entry.reasonCode === 'site_fallback_query' || entry.siteFallbackOf)
+    && entry.queryOrigin !== 'llm_planner'
+  ));
+  const checks = [
+    check(
+      'query_provenance_complete',
+      missing.length === 0,
+      missing.length ? `${missing.length} search(es) lack queryOrigin.` : 'Every executed search has queryOrigin.',
+    ),
+    check(
+      'query_origin_allowed',
+      illegalOrigin.length === 0 && ruleTemplates.length === 0,
+      illegalOrigin.length || ruleTemplates.length
+        ? 'Rule-generated or illegal query origins were executed.'
+        : 'Executed search origins are user_query or llm_planner.',
+    ),
+    check(
+      'site_fallback_via_planner',
+      siteFallbackWithoutPlanner.length === 0,
+      siteFallbackWithoutPlanner.length
+        ? `${siteFallbackWithoutPlanner.length} site fallback search(es) were not planner-authored.`
+        : 'Site fallback searches are planner-authored.',
+    ),
+  ];
+  return {
+    pass: checks.every((item) => item.pass),
+    applicable: true,
+    checks,
+    counts: {
+      missing: missing.length,
+      ruleGenerated: illegalOrigin.length + ruleTemplates.length,
+      siteFallbackWithoutPlanner: siteFallbackWithoutPlanner.length,
+      legacy: false,
+    },
+  };
+}
+
+export function auditRelevanceIntegrity(sources = [], quality = {}) {
+  const records = Array.isArray(sources) ? sources : [];
+  const acceptedRejected = records.filter((source) => (
+    source?.relevanceDecision?.accepted === false
+    && ['ok', 'read'].includes(source.fetchStatus || source.bodyQuality)
+  ));
+  const funnel = quality?.metrics?.relevance || null;
+  const siteBalanced = !funnel || Number(funnel.returnedCandidates || 0)
+    === Number(funnel.siteRejected || 0) + Number(funnel.admittedCandidates || 0);
+  const rerankBalanced = !funnel || Number(funnel.rerankEvaluated || 0)
+    === Number(funnel.rerankAccepted || 0) + Number(funnel.rerankRejected || 0);
+  const decisions = records.flatMap((source) => [
+    source?.relevanceDecision,
+    ...Object.values(source?.relevanceDecisionByGap || {}),
+    ...Object.values(source?.gapMatches || {}).map((match) => match?.relevanceDecision),
+  ]).filter(Boolean);
+  const unevaluatedRerankRejections = decisions.filter((decision) => (
+    decision.reasonCode === 'rerank_below_threshold' && decision.rerankScore == null
+  ));
+  const checks = [
+    check(
+      'no_rejected_source_as_body',
+      acceptedRejected.length === 0,
+      acceptedRejected.length
+        ? `${acceptedRejected.length} relevance-rejected source(s) were counted as body evidence.`
+        : 'No relevance-rejected source is counted as body evidence.',
+    ),
+    check('site_funnel_balanced', siteBalanced, siteBalanced ? 'Site relevance funnel balances.' : 'Site relevance funnel does not balance.'),
+    check('rerank_funnel_balanced', rerankBalanced, rerankBalanced ? 'Rerank relevance funnel balances.' : 'Rerank relevance funnel does not balance.'),
+    check(
+      'no_unevaluated_rerank_rejection',
+      unevaluatedRerankRejections.length === 0,
+      unevaluatedRerankRejections.length
+        ? `${unevaluatedRerankRejections.length} unevaluated rerank decision(s) were rejected.`
+        : 'No unevaluated rerank decision was rejected.',
+    ),
+  ];
+  return {
+    pass: checks.every((item) => item.pass),
+    checks,
+    counts: {
+      rejectedSourceBodies: acceptedRejected.length,
+      legacy: !funnel,
+      unevaluatedRerankRejections: unevaluatedRerankRejections.length,
+    },
+  };
+}
+
 export function evaluateProcessContract(strategy, {
   usage = {},
   cost = {},
@@ -156,7 +288,10 @@ export function evaluateProcessContract(strategy, {
   reportIntegrity,
   provenance,
   slots,
+  contractMaterialization = { pass: true },
   labeledNarrative = '',
+  report = '',
+  trace = [],
 } = {}) {
   const checks = [];
   const sourceReads = Number(usage.sourceReads ?? cost.sourceReads) || 0;
@@ -180,6 +315,11 @@ export function evaluateProcessContract(strategy, {
       'Quick must not present body-class or summary sources as evidence.',
     ));
   } else if (strategy === 'focused') {
+    checks.push(check(
+      'contract_slot_materialization',
+      contractMaterialization.pass,
+      contractMaterialization.pass ? 'Brief slots map one-to-one to gaps.' : 'Brief/gap slot mapping is incomplete or ambiguous.',
+    ));
     checks.push(check('source_reads_at_least_one', sourceReads >= 1, `sourceReads=${sourceReads}.`));
     checks.push(check(
       'real_body_or_summary',
@@ -210,11 +350,59 @@ export function evaluateProcessContract(strategy, {
     ));
   } else if (strategy === 'exploratory') {
     checks.push(check(
+      'contract_slot_materialization',
+      contractMaterialization.pass,
+      contractMaterialization.pass ? 'Brief slots map one-to-one to gaps.' : 'Brief/gap slot mapping is incomplete or ambiguous.',
+    ));
+    const claimedBudgetStop = quality.stopReason === 'budget_exhausted'
+      || quality.budget?.controllerStopReason === 'budget_exhausted';
+    checks.push(check(
+      'no_false_budget_exhaustion',
+      !claimedBudgetStop || hasHardStop(quality),
+      claimedBudgetStop && !hasHardStop(quality)
+        ? 'false_budget_exhaustion: no recorded finite cap was reached.'
+        : 'Budget stop is backed by a reached finite cap.',
+    ));
+    checks.push(check(
       'exploration_token_floor_or_hard_stop',
       minTokens === 0 || explorationTokens >= minTokens || hasHardStop(quality),
       minTokens
         ? `explorationTokens=${explorationTokens}, min=${minTokens}, hardStop=${hasHardStop(quality)}.`
         : 'No exploration token floor recorded.',
+    ));
+    const successfulEvidenceEntries = trace.filter((entry) => (
+      (entry.action === 'read' && Number(entry.successfulBodies) > 0)
+      || (entry.action === 'search' && (Number(entry.newUrlCount) > 0 || Number(entry.resultCount) > 0))
+    ));
+    const lastEvidenceTokens = successfulEvidenceEntries.length
+      ? Number(successfulEvidenceEntries.at(-1)?.budgetAfter?.usage?.llmTokens) || 0
+      : 0;
+    const zeroEvidenceTailTokens = explorationTokens == null
+      ? null
+      : Math.max(0, Number(explorationTokens) - lastEvidenceTokens);
+    const tailRatio = explorationTokens > 0 && zeroEvidenceTailTokens != null
+      ? zeroEvidenceTailTokens / explorationTokens
+      : 0;
+    const tailObservable = trace.some((entry) => Number.isFinite(Number(entry?.budgetAfter?.usage?.llmTokens)));
+    checks.push(check(
+      'no_zero_evidence_spin',
+      !tailObservable || tailRatio <= 0.25,
+      tailObservable
+        ? `zeroEvidenceTailTokens=${zeroEvidenceTailTokens ?? 'n/a'}, explorationTokens=${explorationTokens ?? 'n/a'}, ratio=${tailRatio.toFixed(3)}.`
+        : 'Zero-evidence tail is not observable in this legacy trace.',
+    ));
+    const blockedGaps = quality?.metrics?.recovery?.blockedGaps || [];
+    const limitationText = String(report || '').split(/^##?\s+(?:Limitations|Caveats)\b/im).slice(1).join('\n');
+    const disclosed = blockedGaps.every((gap) => (
+      limitationText.includes(String(gap.answerSlot || gap.gapId))
+      && limitationText.includes(String(gap.blockedReason || 'repair_exhausted'))
+    ));
+    checks.push(check(
+      'blocked_slots_disclosed',
+      disclosed,
+      blockedGaps.length
+        ? `${blockedGaps.length} blocked slot(s) ${disclosed ? 'are' : 'are not'} disclosed in Limitations/Caveats.`
+        : 'No blocked slots require disclosure.',
     ));
     checks.push(check(
       'critical_slots_definite',
@@ -248,10 +436,37 @@ export function evaluateProcessContract(strategy, {
     checks.push(check('no_process_contract', true, 'No published process contract for this strategy.'));
   }
 
+  const queryProvenance = auditQueryProvenance(trace, quality);
+  if (queryProvenance.applicable) {
+    checks.push(...queryProvenance.checks);
+  } else {
+    checks.push(check('query_provenance', true, 'Legacy run has no query provenance schema.'));
+  }
+
   return {
     pass: checks.length > 0 && checks.every((item) => item.pass),
     checks,
   };
+}
+
+export function auditContractMaterialization(brief = {}, gaps = []) {
+  const expected = brief?.requiredAnswerSlots || [];
+  if (!expected.length) return { pass: true, missing: [], duplicates: [], orphan: [] };
+  const requiredGaps = (gaps || []).filter((gap) => gap?.requiredSlot && !gap?.rollup);
+  const matchesFor = (slot) => requiredGaps.filter((gap) => (
+    gap.contractSlotId === slot.id
+    || (!gap.contractSlotId && gap.answerSlot === slot.answerSlot)
+  ));
+  const missing = expected.filter((slot) => matchesFor(slot).length === 0).map((slot) => slot.id);
+  const duplicates = expected.filter((slot) => matchesFor(slot).length > 1).map((slot) => slot.id);
+  const expectedIds = new Set(expected.map((slot) => slot.id));
+  const expectedAnswers = new Set(expected.map((slot) => slot.answerSlot));
+  const orphan = requiredGaps
+    .filter((gap) => (
+      gap.contractSlotId ? !expectedIds.has(gap.contractSlotId) : !expectedAnswers.has(gap.answerSlot)
+    ))
+    .map((gap) => gap.id);
+  return { pass: !missing.length && !duplicates.length && !orphan.length, missing, duplicates, orphan };
 }
 
 function structuralIssues({
@@ -277,6 +492,8 @@ export function auditStrategyRun({
   sources = [],
   claims = [],
   passages = [],
+  gaps = [],
+  brief = {},
   quality = {},
   trace = [],
   meta = {},
@@ -298,6 +515,7 @@ export function auditStrategyRun({
     sources,
   });
   const evidenceProvenance = auditEvidenceProvenance(sources);
+  const relevanceIntegrity = auditRelevanceIntegrity(sources, quality);
   const requiredSlotCompletion = completeSlots({
     battery,
     report,
@@ -308,6 +526,7 @@ export function auditStrategyRun({
     meta: { ...meta, query: meta.query || query },
     citationMap,
   });
+  const contractMaterialization = auditContractMaterialization(brief, gaps);
   const processContract = evaluateProcessContract(normalizedStrategy, {
     battery,
     usage: mergedUsage,
@@ -316,7 +535,10 @@ export function auditStrategyRun({
     reportIntegrity,
     provenance: evidenceProvenance,
     slots: requiredSlotCompletion,
+    contractMaterialization,
     labeledNarrative,
+    report,
+    trace,
   });
   const claimChecks = narrativeClaims.map((claim) => auditClaim(claim, {
     citationMap,
@@ -338,6 +560,7 @@ export function auditStrategyRun({
     || !reportIntegrity.pass
     || !citationIntegrity.pass
     || !evidenceProvenance.pass
+    || !relevanceIntegrity.pass
     || !requiredSlotCompletion.pass
   ) {
     status = 'not_ready';
@@ -354,10 +577,12 @@ export function auditStrategyRun({
       counts: citationIntegrity.counts,
     },
     evidenceProvenance,
+    relevanceIntegrity,
     requiredSlotCompletion: {
       pass: requiredSlotCompletion.pass,
       slots: requiredSlotCompletion.slots,
     },
+    contractMaterialization,
     cost: {
       explorationTokens: cost.explorationTokens,
       reportTokens: cost.reportTokens,

@@ -147,6 +147,120 @@ describe('extract run stats', () => {
     assert.equal(stats.cost.llmTokens, 12000);
     assert.equal(stats.actualLlmTokens, 12000);
     assert.equal(stats.counts.sourceCount, 1);
+    assert.equal(stats.observability.available, false);
+    assert.equal(stats.observability.respondedEngines, null);
+  });
+
+  it('keeps descriptive observability off official audit status', () => {
+    const legacy = extractRunStats({
+      meta: { strategy: 'focused' },
+      quality: { schemaVersion: 3, gate: 'pass', flags: [], budget: { usage: {} } },
+      trace: [{ action: 'search', query: 'topic' }],
+      findings: [],
+      sources: [],
+      passages: [],
+      claims: [],
+      report: '',
+    });
+    assert.equal(legacy.observability.available, false);
+
+    const current = extractRunStats({
+      meta: { strategy: 'exploratory' },
+      quality: {
+        schemaVersion: 3,
+        gate: 'pass',
+        flags: [],
+        budget: { usage: {} },
+        metrics: {
+          observability: {
+            respondedEngines: ['brave'],
+            unresponsiveEngines: ['google'],
+            queryOutcomes: { useful: 1 },
+            sourceAssessment: { count: 1, readability: { readable: 1 } },
+            slotSupportCache: { hits: 2, misses: 1 },
+            agentSnapshotChars: 1200,
+          },
+        },
+      },
+      trace: [
+        { action: 'search', query: 'topic', queryOrigin: 'user_query', outcome: 'useful', respondedEngines: ['brave'] },
+      ],
+      findings: [{ sources: [{ assessment: { readability: 'readable' } }] }],
+      sources: [],
+      passages: [],
+      claims: [],
+      report: '',
+    });
+    assert.equal(current.observability.available, true);
+    assert.deepEqual(current.observability.respondedEngines, ['brave']);
+    assert.equal(current.observability.slotSupportCache.hits, 2);
+  });
+
+  it('extracts a balanced relevance funnel and unknown rerank token usage', () => {
+    const stats = extractRunStats({
+      meta: { strategy: 'exploratory' },
+      quality: {
+        metrics: {
+          relevance: {
+            returnedCandidates: 10,
+            siteRejected: 4,
+            admittedCandidates: 6,
+            rerankEvaluated: 6,
+            rerankAccepted: 2,
+            rerankRejected: 4,
+            bodyIrrelevant: 1,
+            readAccepted: 1,
+          },
+        },
+        budget: {
+          usage: { rerankRequests: 2, rerankTokens: 0 },
+          unknown: { rerankTokens: true, estimatedCost: true },
+        },
+      },
+      trace: [],
+      sources: [],
+      findings: [],
+      passages: [],
+      claims: [],
+      report: '',
+    });
+    assert.equal(stats.relevanceFunnel.siteBalanced, true);
+    assert.equal(stats.relevanceFunnel.rerankBalanced, true);
+    assert.equal(stats.relevanceFunnel.rerankRejected, 4);
+    assert.equal(stats.cost.rerankTokensUnknown, true);
+  });
+
+  it('extracts recovery telemetry and zero-evidence tail tokens', () => {
+    const recovery = {
+      invalidSteps: 2,
+      recoveryRounds: 2,
+      duplicateQueryRejections: 3,
+      siteFilteredAllQueries: 1,
+      siteFallbackQueries: 1,
+      blockedGaps: [{ gapId: 'gap-2', answerSlot: 'valuation', blockedReason: 'repair_exhausted', failures: 3 }],
+    };
+    const stats = extractRunStats({
+      meta: { strategy: 'exploratory' },
+      quality: {
+        metrics: { recovery },
+        budget: { usage: { llmTokens: 1200, explorationTokens: 1000 } },
+      },
+      trace: [
+        { action: 'search', query: 'topic', queryOrigin: 'user_query', resultCount: 2, budgetAfter: { usage: { llmTokens: 700 } } },
+        { action: 'search', query: 'topic official', queryOrigin: 'llm_planner', reasonCode: 'site_fallback_query', siteFallbackOf: 'site:gov.cn topic' },
+        { action: 'llm_call', status: 'completed', purpose: 'agent_decision', tokens: 300 },
+      ],
+      sources: [],
+      findings: [],
+      passages: [],
+      claims: [],
+      report: '',
+    });
+    assert.deepEqual(stats.recovery, recovery);
+    assert.equal(stats.zeroEvidenceTailTokens, 300);
+    assert.equal(stats.queryProvenance.queriesMissingProvenance, 0);
+    assert.equal(stats.queryProvenance.ruleGeneratedQueryCount, 0);
+    assert.equal(stats.queryProvenance.siteFallbackWithoutPlanner, 0);
   });
 
   it('surfaces exploratory target tokens, stop reason, and unused budget', () => {
@@ -473,7 +587,7 @@ llama.cpp 定位为跨平台底层引擎 [1.1]。MLX 定位为 Apple 原生框�
     const engine = createIntelStoreEngine({ baseDir: path.join(intelRoot, 'store') });
     const query = 'SubjectA official status at docs.example.com';
     const sharedBrief = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       query,
       depth: 'focused',
       contractOrigin: 'planner',
@@ -481,13 +595,22 @@ llama.cpp 定位为跨平台底层引擎 [1.1]。MLX 定位为 Apple 原生框�
         id: 'status',
         answerSlot: 'status',
         question: 'What is SubjectA status?',
+        requiredHosts: ['docs.example.com', 'api.example.com'],
+        requiredHostMode: 'any',
+        preferredHosts: ['support.example.com'],
         evidenceCriteria: ['official document'],
         requiredSlot: true,
       }],
     };
     const sharedGaps = [{
       id: 'gap-2',
+      schemaVersion: 4,
+      contractSlotId: 'status',
       question: 'What is SubjectA status?',
+      answerSlot: 'status',
+      requiredHosts: ['docs.example.com', 'api.example.com'],
+      requiredHostMode: 'any',
+      preferredHosts: ['support.example.com'],
       status: 'verified',
       requiredSlot: true,
       evidenceCriteria: ['official document'],
@@ -515,11 +638,40 @@ llama.cpp 定位为跨平台底层引擎 [1.1]。MLX 定位为 Apple 原生框�
         fetchStatus: 'ok',
         contentOrigin: 'fetched',
         engine: 'searxng',
+        gapIds: ['gap-2'],
+        gapMatches: {
+          'gap-2': {
+            queries: ['SubjectA official status'],
+            rerank: { provider: 'http', score: 0.72 },
+            rerankScore: 0.72,
+            relevanceDecision: {
+              accepted: true,
+              reasonCode: 'relevance_accepted',
+              entityMatch: true,
+              siteMatch: true,
+              rerankScore: 0.72,
+              threshold: 0.01,
+              requiredHostProbe: false,
+            },
+          },
+        },
       }],
       quality: {
         schemaVersion: 3,
         gate: 'pass',
         flags: [],
+        metrics: {
+          relevance: {
+            returnedCandidates: 1,
+            siteRejected: 0,
+            admittedCandidates: 1,
+            rerankEvaluated: 1,
+            rerankAccepted: 1,
+            rerankRejected: 0,
+            bodyIrrelevant: 0,
+            readAccepted: 1,
+          },
+        },
         budget: { usage: { llmTokens: 8000, searchRequests: 3, sourceReads: 2, rerankRequests: 0 }, stopReason: 'evidence_sufficient' },
       },
       trace: [{ step: 1, action: 'search', strategy: 'focused' }],
@@ -578,8 +730,14 @@ llama.cpp 定位为跨平台底层引擎 [1.1]。MLX 定位为 Apple 原生框�
     const loaded = loadArtifactsByResearchId('roundtrip-focused', { engine });
     assert.equal(loaded.brief.contractOrigin, 'planner');
     assert.deepEqual(loaded.brief.requiredAnswerSlots[0].evidenceCriteria, ['official document']);
+    assert.equal(loaded.brief.requiredAnswerSlots[0].requiredHostMode, 'any');
+    assert.deepEqual(loaded.brief.requiredAnswerSlots[0].preferredHosts, ['support.example.com']);
     assert.equal(loaded.gaps[0].slotSupport.verdict, 'supported');
+    assert.equal(loaded.gaps[0].contractSlotId, 'status');
     assert.equal(loaded.gaps[0].slotSupport.quoteAnchored, true);
+    assert.equal(loaded.sources[0].gapMatches['gap-2'].rerankScore, 0.72);
+    assert.equal(loaded.sources[0].gapMatches['gap-2'].relevanceDecision.reasonCode, 'relevance_accepted');
+    assert.equal(loaded.quality.metrics.relevance.rerankAccepted, 1);
 
     const comparison = await compareStrategySessions({
       researchIds: ['roundtrip-quick', 'roundtrip-focused'],

@@ -68,14 +68,14 @@ export function resolveNewRunStopReason(reason, { step = 0, maxSteps = 0, budget
     normalized === EXPLORATORY_STOP_REASONS.evidenceSufficient
     || normalized === EXPLORATORY_STOP_REASONS.userCancelled
     || normalized === EXPLORATORY_STOP_REASONS.safetyCap
-    || normalized === EXPLORATORY_STOP_REASONS.budgetExhausted
     || normalized === EXPLORATORY_STOP_REASONS.contractUnavailable
   ) {
     return normalized;
   }
-  if (budget?.limits?.llmTokens && !budget.canClaim?.('llmTokens', 1)) {
+  if (budget?.exhaustionDetail?.({ llmClaim: budget?.defaultLlmMaxTokens || 1 })) {
     return EXPLORATORY_STOP_REASONS.budgetExhausted;
   }
+  if (normalized === EXPLORATORY_STOP_REASONS.budgetExhausted) return null;
   if (Number(maxSteps) > 0 && step >= maxSteps) return EXPLORATORY_STOP_REASONS.safetyCap;
-  return EXPLORATORY_STOP_REASONS.budgetExhausted;
+  return null;
 }

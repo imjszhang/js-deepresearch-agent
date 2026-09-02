@@ -4,10 +4,11 @@ function limit(value) {
 }
 
 export class BudgetExceededError extends Error {
-  constructor(kind) {
+  constructor(kind, requiredAmount = 1) {
     super(`Research budget exhausted: ${kind}`);
     this.name = 'BudgetExceededError';
     this.kind = kind;
+    this.requiredAmount = Math.max(1, Number(requiredAmount) || 1);
   }
 }
 
@@ -46,6 +47,8 @@ export class BudgetManager {
     );
     this.targetLlmTokens = this.minLlmTokens;
     this.controllerStopReason = null;
+    this.controllerStopDetail = null;
+    this.controllerStopRequiredAmount = null;
     this.defaultLlmMaxTokens = limit(settings?.llm?.maxTokens) || 4000;
     this.usage = {
       llmRequests: 0,
@@ -67,8 +70,20 @@ export class BudgetManager {
     this.emit = emit;
   }
 
-  setControllerStopReason(reason) {
+  setControllerStopReason(reason, detail = null, requiredAmount = null) {
     this.controllerStopReason = reason || null;
+    this.controllerStopDetail = detail || null;
+    this.controllerStopRequiredAmount = Number.isFinite(requiredAmount) ? requiredAmount : null;
+  }
+
+  exhaustionDetail({ llmClaim = 1 } = {}) {
+    const exploration = this.explorationUsed();
+    if (this.limits.totalLlmTokens > 0
+      && (this.usage.llmTokens || 0) + llmClaim > this.limits.totalLlmTokens) return 'total_llm_cap';
+    if (this.limits.llmTokens > 0 && exploration + llmClaim > this.limits.llmTokens) return 'llm_hard_cap';
+    if (this.limits.searchRequests > 0 && !this.canClaim('searchRequests')) return 'search_request_cap';
+    if (this.limits.sourceReads > 0 && !this.canClaim('sourceReads')) return 'source_read_cap';
+    return null;
   }
 
   updateReportReserve() {
@@ -119,7 +134,7 @@ export class BudgetManager {
   claim(kind, amount = 1, options = {}) {
     if (!this.canClaim(kind, amount, options)) {
       this.markExhausted(kind);
-      throw new BudgetExceededError(kind);
+      throw new BudgetExceededError(kind, amount);
     }
     this.usage[kind] = (this.usage[kind] || 0) + amount;
     if (kind === 'llmTokens') {
@@ -215,6 +230,8 @@ export class BudgetManager {
       unusedTargetTokens: this.remainingVsMin(),
       unusedHardCapTokens: this.remainingVsHardCap(),
       controllerStopReason: this.controllerStopReason,
+      controllerStopDetail: this.controllerStopDetail,
+      controllerStopRequiredAmount: this.controllerStopRequiredAmount,
       usage: { ...this.usage },
       unknown: { ...this.unknown },
       stopReason: this.stopReason,

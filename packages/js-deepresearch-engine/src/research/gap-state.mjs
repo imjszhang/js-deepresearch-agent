@@ -3,12 +3,11 @@ import {
   classifySourceTier,
   documentMatchesQuerySubject,
   evidenceIndependenceKey,
-  hostnamesMatch,
-  hostnameOf,
+  requiredHostCoverage,
 } from './adaptive/source-policy.mjs';
 
-export const GAP_SCHEMA_VERSION = 3;
-export const GAP_STATUSES = Object.freeze(['open', 'searched', 'body_read', 'verified', 'conflicting', 'limited']);
+export const GAP_SCHEMA_VERSION = 4;
+export const GAP_STATUSES = Object.freeze(['open', 'searched', 'body_read', 'verified', 'conflicting', 'limited', 'blocked']);
 
 function unique(values) {
   return [...new Set((values || []).filter(Boolean))];
@@ -35,9 +34,6 @@ function passagesForSource(source, passages = []) {
 
 function satisfiesRequiredEvidence(source, gap) {
   if (!sourceHasBody(source)) return false;
-  if ((gap.requiredHosts || []).length) {
-    return gap.requiredHosts.some((host) => hostnamesMatch(hostnameOf(source.url || source.id), host));
-  }
   if ((gap.requiredSourceTypes || []).includes('primary_filing')) {
     return ['required_primary', 'other_primary'].includes(source.tier || classifySourceTier(source, gap))
       && documentMatchesQuerySubject(source, gap.question);
@@ -55,13 +51,13 @@ export function needsSemanticClose(gap) {
 }
 
 export function collectGapSources(gap, findings = []) {
-  const dedicatedFindings = findings.filter((finding) => finding.gapId === gap.id);
+  const dedicatedFindings = findings.filter((finding) => (
+    finding.gapId === gap.id
+    || (gap.contractSlotId && finding.contractSlotId === gap.contractSlotId)
+    || (!finding.gapId && !finding.contractSlotId && gap.answerSlot && finding.answerSlot === gap.answerSlot)
+  ));
   const dedicated = dedicatedFindings.flatMap((finding) => (finding.sources || []).filter(sourceHasBody));
-  if (dedicatedFindings.length) return dedicated;
-  if (isRequiredSlot(gap)) {
-    return findings.flatMap((finding) => (finding.sources || []).filter(sourceHasBody));
-  }
-  return [];
+  return dedicated;
 }
 
 export function normalizeGapRecord(gap = {}, defaults = {}) {
@@ -70,11 +66,14 @@ export function normalizeGapRecord(gap = {}, defaults = {}) {
     schemaVersion: GAP_SCHEMA_VERSION,
     id: gap.id || defaults.id || 'gap-1',
     question: String(gap.question || defaults.question || '').trim(),
+    contractSlotId: gap.contractSlotId || defaults.contractSlotId || null,
     answerSlot: gap.answerSlot || defaults.answerSlot || null,
     claimFamily: gap.claimFamily || defaults.claimFamily || null,
     kind: gap.kind || defaults.kind || (gap.requiredSlot || defaults.requiredSlot ? 'slot' : 'followup'),
     rollup: Boolean(gap.rollup ?? defaults.rollup),
     requiredSlot: Boolean(gap.requiredSlot ?? defaults.requiredSlot),
+    requiredHostMode: gap.requiredHostMode === 'all' ? 'all' : 'any',
+    preferredHosts: unique(gap.preferredHosts || defaults.preferredHosts),
     priority: gap.priority === 'critical' ? 'critical' : (defaults.priority || 'normal'),
     status: GAP_STATUSES.includes(gap.status) ? gap.status : 'open',
     supportingPassageIds: unique(gap.supportingPassageIds || gap.evidencePassageIds),
@@ -85,6 +84,10 @@ export function normalizeGapRecord(gap = {}, defaults = {}) {
     missingEvidence: unique(gap.missingEvidence),
     nextQueries: unique(gap.nextQueries),
     resolutionReason: gap.resolutionReason || null,
+    blockedReason: gap.blockedReason || null,
+    repairFailures: Math.max(0, Number(gap.repairFailures) || 0),
+    repairAttempts: Math.max(0, Number(gap.repairAttempts) || 0),
+    exhaustedAngles: unique(gap.exhaustedAngles),
   };
 }
 
@@ -103,14 +106,13 @@ export function evaluateGapProvenance(gap, sources = [], { passageIds = [], pass
     ...contradicting.flatMap((source) => passagesForSource(source, passages)),
   ]);
   const missingEvidence = [];
-  const requiredSatisfied = !(normalized.requiredHosts || []).length
-    && !(normalized.requiredSourceTypes || []).includes('primary_filing')
-    ? true
-    : supporting.some((source) => satisfiesRequiredEvidence(source, normalized));
+  const hostCoverage = requiredHostCoverage(supporting, normalized);
+  const primarySatisfied = !(normalized.requiredSourceTypes || []).includes('primary_filing')
+    || supporting.some((source) => satisfiesRequiredEvidence(source, normalized));
+  const requiredSatisfied = hostCoverage.satisfied && primarySatisfied;
   if (!bodies.length) missingEvidence.push('successful_body');
-  if (!requiredSatisfied) missingEvidence.push(
-    (normalized.requiredHosts || []).length ? 'required_host_body' : 'primary_filing',
-  );
+  if (!hostCoverage.satisfied) missingEvidence.push('required_host_body');
+  if (!primarySatisfied) missingEvidence.push('primary_filing');
   const independent = new Set(supporting.map(evidenceIndependenceKey).filter(Boolean));
   const minIndependent = Math.max(1, Number(normalized.minIndependentSources) || 1);
   if (independent.size < minIndependent) missingEvidence.push('independent_sources');
@@ -144,6 +146,14 @@ export function synthesizeGapStatus(gap, provenance = {}, slotSupport = null) {
     confidence: null,
     resolutionReason: null,
   };
+  if (gap.status === 'blocked') {
+    return {
+      ...base,
+      status: 'blocked',
+      blockedReason: gap.blockedReason || 'repair_exhausted',
+      resolutionReason: gap.resolutionReason || 'Evidence repair was exhausted.',
+    };
+  }
 
   const searched = base.status === 'searched' || (gap.searchedQueries || []).length > 0;
   if (!(provenance.bodies || []).length) {
@@ -237,6 +247,10 @@ export function rollupRootGap(gaps = []) {
   } else if (slots.some((gap) => gap.status === 'searched')) {
     root.status = 'searched';
     root.resolutionReason = 'Required answer slots were searched but not yet verified.';
+    root.missingEvidence = unique(slots.flatMap((gap) => gap.missingEvidence || ['successful_body']));
+  } else if (slots.some((gap) => gap.status === 'blocked')) {
+    root.status = 'blocked';
+    root.resolutionReason = 'One or more required answer slots exhausted evidence repair.';
     root.missingEvidence = unique(slots.flatMap((gap) => gap.missingEvidence || ['successful_body']));
   } else {
     root.status = 'open';
