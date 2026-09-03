@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { searchQuestions } from '../src/research/search-executor.mjs';
+import { inferSearchOutcome } from '../src/research/search-trace.mjs';
+import { attachSearchMeta, collectRespondedEngines } from '../src/search/search-result.mjs';
+import { SearchProviderError } from '../src/search/search-provider-error.mjs';
 
 describe('searchQuestions', () => {
   it('limits concurrent searches and preserves result order', async () => {
@@ -102,5 +105,47 @@ describe('searchQuestions', () => {
     assert.equal(seen[0].options.searchOptions.engines, 'brave');
     assert.deepEqual(results[0].searchMeta.respondedEngines, ['brave']);
     assert.equal(results[0].searchQuery, '智谱');
+  });
+
+  it('serializes typed provider errors and keeps requested options', async () => {
+    const results = await searchQuestions({
+      questions: [{ question: '智谱', searchOptions: { engines: 'bing' } }],
+      search: {
+        async search() {
+          throw new SearchProviderError('slow down', {
+            code: 'rate_limited',
+            retryable: true,
+            retryAfterMs: 1000,
+            provider: 'js-eyes',
+          });
+        },
+      },
+    });
+    assert.equal(results[0].error.code, 'rate_limited');
+    assert.equal(results[0].error.retryable, true);
+    assert.equal(results[0].searchOptions.engines, 'bing');
+    assert.equal(inferSearchOutcome({ error: results[0].error }), 'rate_limited');
+  });
+});
+
+describe('search meta compatibility', () => {
+  it('collects both engines arrays and a single engine label', () => {
+    assert.deepEqual(collectRespondedEngines([
+      { engines: ['brave'] },
+      { engine: 'js-eyes:google' },
+    ]), ['brave', 'js-eyes:google']);
+  });
+
+  it('keeps old meta readable when new fields are absent', () => {
+    const sources = attachSearchMeta([{ title: 'A', url: 'https://a.test', snippet: 'a', engine: 'searxng' }], {
+      requestParams: { q: 'a' },
+      respondedEngines: ['brave'],
+    });
+    const { getSearchMeta } = { getSearchMeta: (list) => list[Symbol.for('jdr.searchMeta')] };
+    const meta = getSearchMeta(sources);
+    assert.equal(meta.requestedSearchOptions, undefined);
+    assert.deepEqual(meta.respondedEngines, ['brave']);
+    assert.equal(inferSearchOutcome({ resultCount: 1 }), 'useful');
+    assert.equal(inferSearchOutcome({ error: { message: 'boom' } }), 'failed');
   });
 });

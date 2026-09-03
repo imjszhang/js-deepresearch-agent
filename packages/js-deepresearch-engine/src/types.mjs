@@ -119,6 +119,8 @@
 /**
  * @typedef {Object} SearchCapabilities
  * @property {number|null} [maxQuestionConcurrency]
+ * @property {string[]} [supportedSearchOptions]
+ * @property {string|null} [fixedEngine]
  */
 
 /**

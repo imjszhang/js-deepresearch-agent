@@ -1,17 +1,24 @@
 import { attachSearchMeta, collectRespondedEngines } from '../search-result.mjs';
 import { resolveSearchRequestOptions } from '../normalize-search-config.mjs';
+import { DEFAULT_SEARCH_CAPABILITIES, filterSearchOptions } from '../search-capabilities.mjs';
+import { SearchProviderError } from '../search-provider-error.mjs';
 
 export class SearxngSearchEngine {
   constructor(config) {
     this.config = config;
     this.capabilities = {
+      ...DEFAULT_SEARCH_CAPABILITIES,
       maxQuestionConcurrency: null,
+      supportedSearchOptions: ['engines', 'categories', 'language', 'pageno', 'safesearch'],
+      fixedEngine: null,
     };
   }
 
   async search(query, { signal, searchOptions } = {}) {
     const baseUrl = (this.config.baseUrl || 'http://127.0.0.1:8080').replace(/\/$/, '');
-    const request = resolveSearchRequestOptions(this.config, searchOptions);
+    const requested = resolveSearchRequestOptions(this.config, searchOptions);
+    const { effective } = filterSearchOptions(requested, this.capabilities);
+    const request = effective;
     const url = new URL(`${baseUrl}/search`);
     url.searchParams.set('q', query);
     url.searchParams.set('format', 'json');
@@ -31,6 +38,13 @@ export class SearxngSearchEngine {
 
     if (!response.ok) {
       const detail = await response.text();
+      if (response.status === 429) {
+        throw new SearchProviderError(`SearXNG search failed (429): ${detail}`, {
+          code: 'rate_limited',
+          retryable: true,
+          provider: 'searxng',
+        });
+      }
       throw new Error(`SearXNG search failed (${response.status}): ${detail}`);
     }
 
@@ -55,12 +69,15 @@ export class SearxngSearchEngine {
       .filter((item) => item.url || item.snippet);
 
     return attachSearchMeta(sources, {
+      requestedSearchOptions: requested,
+      effectiveSearchOptions: effective,
       requestParams,
       numberOfResults: data.number_of_results ?? null,
       suggestions: Array.isArray(data.suggestions) ? data.suggestions : [],
       corrections: Array.isArray(data.corrections) ? data.corrections : [],
       unresponsiveEngines: Array.isArray(data.unresponsive_engines) ? data.unresponsive_engines : [],
       respondedEngines: collectRespondedEngines(sources),
+      providerRetries: 0,
     });
   }
 }

@@ -32,11 +32,11 @@ function passagesForSource(source, passages = []) {
   return unique([...fromSource, ...fromRecords]);
 }
 
-function satisfiesRequiredEvidence(source, gap) {
+function satisfiesRequiredEvidence(source, gap, extras = {}) {
   if (!sourceHasBody(source)) return false;
   if ((gap.requiredSourceTypes || []).includes('primary_filing')) {
     return ['required_primary', 'other_primary'].includes(source.tier || classifySourceTier(source, gap))
-      && documentMatchesQuerySubject(source, gap.question);
+      && documentMatchesQuerySubject(source, extras.query || gap.question, extras);
   }
   return true;
 }
@@ -91,8 +91,15 @@ export function normalizeGapRecord(gap = {}, defaults = {}) {
   };
 }
 
-export function evaluateGapProvenance(gap, sources = [], { passageIds = [], passages = [] } = {}) {
+export function evaluateGapProvenance(gap, sources = [], {
+  passageIds = [],
+  passages = [],
+  entities = [],
+  entityAliases = [],
+  query = '',
+} = {}) {
   const normalized = normalizeGapRecord(gap);
+  const extras = { entities, entityAliases, query };
   const bodies = sources.filter(sourceHasBody);
   const supporting = bodies.filter((source) => !contradicts(source));
   const contradicting = bodies.filter(contradicts);
@@ -108,7 +115,7 @@ export function evaluateGapProvenance(gap, sources = [], { passageIds = [], pass
   const missingEvidence = [];
   const hostCoverage = requiredHostCoverage(supporting, normalized);
   const primarySatisfied = !(normalized.requiredSourceTypes || []).includes('primary_filing')
-    || supporting.some((source) => satisfiesRequiredEvidence(source, normalized));
+    || supporting.some((source) => satisfiesRequiredEvidence(source, normalized, extras));
   const requiredSatisfied = hostCoverage.satisfied && primarySatisfied;
   if (!bodies.length) missingEvidence.push('successful_body');
   if (!hostCoverage.satisfied) missingEvidence.push('required_host_body');
@@ -146,7 +153,7 @@ export function synthesizeGapStatus(gap, provenance = {}, slotSupport = null) {
     confidence: null,
     resolutionReason: null,
   };
-  if (gap.status === 'blocked') {
+  if (gap.status === 'blocked' && !(provenance.bodies || []).length) {
     return {
       ...base,
       status: 'blocked',

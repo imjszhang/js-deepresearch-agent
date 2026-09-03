@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { ActionCostTracker, buildBudgetView, estimateReportPromptTokens } from './budget-view.mjs';
 import {
   evaluateExploratorySufficiency,
@@ -21,8 +22,20 @@ import { UrlPool } from './url-pool.mjs';
 import { collectGapSources, evaluateGapEvidence, rollupRootGap } from '../gap-state.mjs';
 import { compactSearchSnippets, getSearchMeta } from '../../search/search-result.mjs';
 import { inferSearchOutcome } from '../search-trace.mjs';
+import { serializeSearchError } from '../../search/search-provider-error.mjs';
+import { isExternalRerankProvider } from './source-policy.mjs';
 
 export { hostnameOf } from './source-policy.mjs';
+
+export function candidateContentFingerprint(source = {}) {
+  return createHash('sha256')
+    .update([source.title, source.snippet, source.summary, source.content].map((part) => String(part || '')).join('\n'))
+    .digest('hex');
+}
+
+export function rerankEvaluationKey(gapId, sourceId, fingerprint, model) {
+  return `${gapId}\0${sourceId}\0${fingerprint}\0${model || ''}`;
+}
 
 const ACTIONS = new Set(['search', 'read', 'reflect', 'draft', 'finalize', 'answer', 'stop']);
 const FINALIZE_ACTIONS = new Set(['draft', 'finalize', 'answer', 'stop']);
@@ -127,6 +140,10 @@ export class ResearchState {
       rerankEvaluated: 0,
       rerankAccepted: 0,
       rerankRejected: 0,
+      rerankCalls: 0,
+      uniqueGapCandidateEvaluations: 0,
+      cacheHits: 0,
+      rerankMissingResults: 0,
       bodyIrrelevant: 0,
       readAccepted: 0,
     };
@@ -140,7 +157,14 @@ export class ResearchState {
       plannerRetryCount: 0,
       plannerFailures: 0,
       lastPlannerFailure: null,
+      relevanceRejectedStreak: 0,
+      transientFailures: 0,
+      providerRetries: 0,
+      transientStreak: 0,
+      duplicateStreak: 0,
+      semanticNoYieldStreak: 0,
     };
+    this.rerankCache = new Map();
     this.cycle = {
       afterSearch: false,
       successfulBodyReads: 0,
@@ -205,7 +229,10 @@ export class ResearchState {
     const needsFiling = (gap?.requiredSourceTypes || []).includes('primary_filing');
     const tier = source.tier || classifySourceTier(source, gap);
     if (needsFiling && !['required_primary', 'other_primary'].includes(tier)) return false;
-    if (needsFiling && !documentMatchesQuerySubject(source, this.query)) return false;
+    if (needsFiling && !documentMatchesQuerySubject(source, this.query, {
+      entities: this.brief?.entities || this.profile?.brief?.entities || [],
+      entityAliases: this.brief?.entityAliases || this.profile?.brief?.entityAliases || [],
+    })) return false;
     if (gap?.requiredHosts?.length) {
       return gap.requiredHosts.some((host) => hostnamesMatch(policyHostnameOf(source.url || source.id), host));
     }
@@ -287,12 +314,16 @@ export class ResearchState {
         ...(gap.readSourceIds || []),
         ...sources.map((source) => source.id || source.url).filter(Boolean),
       ])];
-      if (gap.status === 'blocked' || gap.status === 'missing') continue;
+      if (gap.status === 'missing') continue;
+      if (gap.status === 'blocked' && !sources.length) continue;
       Object.assign(gap, evaluateGapEvidence(gap, sources, {
         passageIds: this.findings
           .filter((finding) => finding.gapId === gap.id)
           .flatMap((finding) => finding.passageIds || []),
         slotSupport: gap.slotSupport,
+        entities: this.brief?.entities || this.profile?.brief?.entities || [],
+        entityAliases: this.brief?.entityAliases || this.profile?.brief?.entityAliases || [],
+        query: this.query,
       }));
       if (gap.status === 'verified') gap.resolvedAtStep = this.step;
     }
@@ -339,8 +370,12 @@ export class ResearchState {
       queryOrigin: partial.queryOrigin || null,
       plannerMode: partial.plannerMode || null,
       gapId: partial.gapId || null,
-      searchOptions: partial.searchOptions || meta.requestParams || null,
+      searchOptions: partial.searchOptions || meta.effectiveSearchOptions || meta.requestParams || null,
+      requestedSearchOptions: partial.requestedSearchOptions || meta.requestedSearchOptions || null,
+      effectiveSearchOptions: partial.effectiveSearchOptions || meta.effectiveSearchOptions || null,
+      droppedSearchOptions: partial.droppedSearchOptions || meta.droppedSearchOptions || [],
       requestParams: meta.requestParams || null,
+      providerRetries: partial.providerRetries ?? meta.providerRetries ?? 0,
       respondedEngines: partial.respondedEngines || meta.respondedEngines || [],
       unresponsiveEngines: partial.unresponsiveEngines || meta.unresponsiveEngines || [],
       numberOfResults: meta.numberOfResults ?? null,
@@ -361,9 +396,7 @@ export class ResearchState {
         resultCount: accepted,
         siteRejectedCount: partial.siteRejectedCount ?? 0,
       }),
-      error: partial.error
-        ? { name: partial.error.name || 'Error', message: partial.error.message || String(partial.error) }
-        : null,
+      error: serializeSearchError(partial.error),
       skipped: partial.skipped || null,
       step: this.step,
     };
@@ -384,6 +417,81 @@ export class ResearchState {
       { query, reason, step: this.step },
     ];
     if (reason === 'site_filtered_all') this.recovery.siteFilteredAllQueries += 1;
+  }
+
+  recordTransientSearch(error = null) {
+    this.recovery.transientFailures += 1;
+    this.recovery.providerRetries += Number(error?.retries || error?.providerRetries || 0);
+  }
+
+  noteProgressKind(kind) {
+    if (kind === 'progress') {
+      this.recovery.transientStreak = 0;
+      this.recovery.duplicateStreak = 0;
+      this.recovery.semanticNoYieldStreak = 0;
+      this.recovery.relevanceRejectedStreak = 0;
+      return;
+    }
+    if (kind === 'transient') {
+      this.recovery.transientStreak += 1;
+      return;
+    }
+    if (kind === 'duplicate') {
+      this.recovery.duplicateStreak += 1;
+      return;
+    }
+    if (kind === 'relevance_rejected') {
+      this.recovery.relevanceRejectedStreak = (this.recovery.relevanceRejectedStreak || 0) + 1;
+      return;
+    }
+    this.recovery.semanticNoYieldStreak += 1;
+  }
+
+  setPlannerFailure(failure, extra = {}) {
+    if (!failure) return;
+    this.recovery.plannerFailures += 1;
+    this.recovery.lastPlannerFailure = {
+      reason: typeof failure === 'object' ? (failure.reason || failure.code || failure) : failure,
+      gapId: extra.gapId || null,
+      step: this.step,
+      stage: extra.stage || extra.plannerMode || 'planner',
+    };
+  }
+
+  clearPlannerFailure({ gapId } = {}) {
+    const last = this.recovery.lastPlannerFailure;
+    if (!last) return;
+    if (typeof last === 'object' && last.gapId && gapId && last.gapId !== gapId) return;
+    this.recovery.lastPlannerFailure = null;
+  }
+
+  candidateDecisionForGap(candidate, gapId) {
+    return candidate?.gapMatches?.[gapId]?.relevanceDecision
+      || candidate?.relevanceDecisionByGap?.[gapId]
+      || (candidate?.gapId === gapId ? candidate.relevanceDecision : null)
+      || null;
+  }
+
+  isEligibleUnreadCandidate(candidate, gapId) {
+    if (!candidate) return false;
+    if (this.readSourceIds.has(candidate.id) || candidate.status !== 'unread') return false;
+    const decision = this.candidateDecisionForGap(candidate, gapId);
+    if (!decision || decision.reasonCode === 'rerank_pending') return false;
+    return decision.accepted === true;
+  }
+
+  rejectionFeedback(gapId) {
+    const counts = {};
+    for (const candidate of this.candidates.values()) {
+      if (this.readSourceIds.has(candidate.id)) continue;
+      const decision = this.candidateDecisionForGap(candidate, gapId);
+      if (!decision) continue;
+      if (decision.accepted === false || decision.reasonCode === 'rerank_pending') {
+        const reason = decision.reasonCode || 'rejected';
+        counts[reason] = (counts[reason] || 0) + 1;
+      }
+    }
+    return counts;
   }
 
   observeHosts(sources = []) {
@@ -451,6 +559,7 @@ export class ResearchState {
       ...this.gaps.flatMap((gap) => gap.searchedQueries || []),
       ...this.observations
         .filter((observation) => observation.type === 'search_result')
+        .filter((observation) => !['rate_limited', 'provider_error'].includes(observation.outcome))
         .map((observation) => observation.query)
         .filter(Boolean),
     ])];
@@ -574,14 +683,15 @@ export class ResearchState {
       slotSupport: gap.slotSupport?.verdict || null,
       blockedReason: gap.blockedReason || null,
     }));
+    const focusGapId = this.focusGap()?.id || 'gap-1';
     const unread = this.rankedCandidates()
-      .filter((candidate) => !this.readSourceIds.has(candidate.id) && candidate.status === 'unread')
+      .filter((candidate) => this.isEligibleUnreadCandidate(candidate, focusGapId))
       .slice(0, SNAPSHOT_CANDIDATE_LIMIT)
       .map((candidate) => ({
         id: candidate.id,
         title: candidate.title,
         score: Math.round(this.candidateScore(candidate) * 1000) / 1000,
-        gapId: candidate.gapId,
+        gapId: focusGapId,
       }));
     const readiness = this.readiness;
     return {
@@ -589,7 +699,8 @@ export class ResearchState {
       step: this.step,
       maxSteps: this.maxSteps,
       lastAction: this.lastAction,
-      focusGapId: this.focusGap()?.id || 'gap-1',
+      focusGapId,
+      candidateRejections: this.rejectionFeedback(focusGapId),
       budget: this.budgetView,
       readiness: readiness ? {
         pass: readiness.pass,
@@ -705,14 +816,14 @@ export class ResearchState {
       const scopedRerankScore = match?.rerank?.score
         ?? match?.rerankScore
         ?? (primaryGapCandidate ? (candidate.rerank?.score ?? candidate.rerankScore) : null);
-      return match ? {
+      return {
         ...candidate,
         gapId: gap.id,
-        tier: match.tier || candidate.tier,
+        tier: match?.tier || candidate.tier,
         rerank: scopedRerank,
         rerankScore: scopedRerankScore,
-        relevanceDecision: match.relevanceDecision || candidate.relevanceDecision,
-      } : candidate;
+        relevanceDecision: match?.relevanceDecision || (primaryGapCandidate ? candidate.relevanceDecision : null),
+      };
     });
     const alreadyRead = new Set(
       [...this.readSourceIds].map((id) => {
@@ -732,6 +843,9 @@ export class ResearchState {
         enforceEntity: this.settings.research.read.relevance.entityGuard !== false,
         query: gap.question || this.query,
         entities: this.brief?.entities || this.profile?.brief?.entities || [],
+        entityAliases: this.brief?.entityAliases || this.profile?.brief?.entityAliases || [],
+        rerankProvider: this.settings?.research?.providers?.rerank?.provider || null,
+        externalRerankEnabled: isExternalRerankProvider(this.settings?.research?.providers?.rerank?.provider),
       } : null,
     });
     for (const picked of selected) {

@@ -4,12 +4,16 @@ import os from 'node:os';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { afterEach, describe, it } from 'node:test';
-import { resolveSearchConcurrency } from 'js-deepresearch-engine';
+import {
+  getSearchMeta,
+  resolveSearchConcurrency,
+} from 'js-deepresearch-engine';
 import {
   JsEyesCliSearchEngine,
   mergeSkillResults,
   parseJsEyesSkills,
   parseProviderSkills,
+  resetJsEyesInvokeQueues,
   resolveCliCommand,
   resolveJsEyesSkills,
   resolveProviderConfig,
@@ -22,6 +26,10 @@ import {
 } from '../src/search-providers/js-eyes/public.mjs';
 
 describe('JsEyesCliSearchEngine', () => {
+  afterEach(() => {
+    resetJsEyesInvokeQueues();
+  });
+
   it('uses local skill-run driver for zhihu without the missing unified command', async () => {
     const calls = [];
     const engine = new JsEyesCliSearchEngine({
@@ -205,6 +213,174 @@ describe('JsEyesCliSearchEngine', () => {
     assert.equal(resolveSearchConcurrency(engine, { research: { concurrency: 4 } }, 3), 1);
   });
 
+  it('uses local skill-run driver for Google ops', async () => {
+    const calls = [];
+    const engine = new JsEyesCliSearchEngine({
+      maxResults: 8,
+      jsEyesCli: 'custom-js-eyes',
+      provider: {
+        skills: ['js-google-ops-skill'],
+        serverUrl: 'ws://127.0.0.1:18080',
+        maxPages: 1,
+      },
+    }, {
+      spawn: createMockSpawn({
+        calls,
+        stdout: JSON.stringify({
+          ok: true,
+          result: {
+            items: [{
+              title: 'Zhipu overview',
+              url: 'https://example.test/zhipu',
+              snippet: 'Company overview',
+              engine: 'js-eyes:google',
+            }],
+          },
+        }),
+      }),
+    });
+
+    const results = await engine.search('智谱AI');
+    assert.deepEqual(calls[0].args, [
+      'skill',
+      'run',
+      'js-google-ops-skill',
+      'search',
+      '智谱AI',
+      '--limit',
+      '8',
+      '--max-pages',
+      '1',
+      '--server',
+      'ws://127.0.0.1:18080',
+    ]);
+    assert.equal(results[0].engine, 'js-eyes:google');
+    assert.equal(engine.capabilities.fixedEngine, 'js-eyes:google');
+    assert.deepEqual(engine.capabilities.supportedSearchOptions, []);
+  });
+
+  it('serializes invokes for the same server and skill', async () => {
+    let active = 0;
+    let maxActive = 0;
+    const spawn = () => {
+      const child = createMockChild();
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      setTimeout(() => {
+        child.stdout.emit('data', JSON.stringify({
+          ok: true,
+          result: { items: [{ title: 'A', url: 'https://example.test/a', snippet: 'a' }] },
+        }));
+        child.emit('close', 0, null);
+        active -= 1;
+      }, 25);
+      return child;
+    };
+    const config = {
+      provider: {
+        skills: ['js-google-ops-skill'],
+        serverUrl: 'ws://127.0.0.1:18080',
+      },
+    };
+    const first = new JsEyesCliSearchEngine(config, { spawn });
+    const second = new JsEyesCliSearchEngine(config, { spawn });
+    await Promise.all([first.search('one'), second.search('two')]);
+    assert.equal(maxActive, 1);
+  });
+
+  it('retries only structured transient provider errors', async () => {
+    const calls = [];
+    const engine = new JsEyesCliSearchEngine({
+      provider: {
+        skills: ['js-google-ops-skill'],
+        serverUrl: 'ws://127.0.0.1:18080',
+        maxRetries: 1,
+      },
+    }, {
+      spawn: createMockSpawn({
+        calls,
+        stdout: [
+          JSON.stringify({
+            ok: false,
+            error: { code: 'rate_limited', retryable: true, retryAfterMs: 1, message: 'slow down' },
+          }),
+          JSON.stringify({
+            ok: true,
+            result: { items: [{ title: 'Ok', url: 'https://example.test/ok', snippet: 'ok' }] },
+          }),
+        ],
+      }),
+    });
+    const results = await engine.search('query');
+    assert.equal(calls.length, 2);
+    assert.equal(results.length, 1);
+    assert.equal(getSearchMeta(results).providerRetries, 1);
+  });
+
+  it('does not classify unstructured stderr as rate limited', async () => {
+    const engine = new JsEyesCliSearchEngine({
+      provider: {
+        skills: ['js-google-ops-skill'],
+        maxRetries: 2,
+      },
+    }, {
+      spawn: createMockSpawn({
+        stdout: JSON.stringify({ ok: false, error: '请求频率超限' }),
+      }),
+    });
+    await assert.rejects(
+      () => engine.search('query'),
+      (error) => {
+        assert.equal(error.name, 'SearchProviderError');
+        assert.equal(error.code, 'provider_error');
+        assert.equal(error.retryable, false);
+        assert.ok(!String(error.message).includes('rate_limited') || error.code === 'provider_error');
+        return true;
+      },
+    );
+  });
+
+  it('drops unsupported searchOptions and records SearchMeta', async () => {
+    const engine = new JsEyesCliSearchEngine({
+      provider: {
+        skills: ['js-google-ops-skill'],
+        serverUrl: 'ws://127.0.0.1:18080',
+      },
+    }, {
+      spawn: createMockSpawn({
+        stdout: JSON.stringify({
+          ok: true,
+          result: {
+            items: [{
+              title: 'Google result',
+              url: 'https://example.test/google',
+              snippet: 'snippet',
+              engine: 'js-eyes:google',
+            }],
+          },
+        }),
+      }),
+    });
+    const results = await engine.search('query', { searchOptions: { engines: 'bing', language: 'zh' } });
+    const meta = getSearchMeta(results);
+    assert.deepEqual(meta.requestedSearchOptions, { engines: 'bing', language: 'zh' });
+    assert.deepEqual(meta.effectiveSearchOptions, {});
+    assert.ok(meta.droppedSearchOptions.includes('engines'));
+    assert.deepEqual(meta.respondedEngines, ['js-eyes:google']);
+  });
+
+  it('aborts a queued invoke immediately', async () => {
+    const controller = new AbortController();
+    const engine = new JsEyesCliSearchEngine({
+      provider: { skills: ['js-google-ops-skill'] },
+    }, {
+      spawn: () => createMockChild(),
+    });
+    const promise = engine.search('query', { signal: controller.signal });
+    controller.abort();
+    await assert.rejects(promise, { name: 'AbortError' });
+  });
+
   it('throws with stderr context when the CLI exits non-zero', async () => {
     const engine = new JsEyesCliSearchEngine({}, {
       spawn: createMockSpawn({ stderr: 'skill failed', code: 1 }),
@@ -230,11 +406,19 @@ describe('JsEyesCliSearchEngine', () => {
   it('kills the CLI on abort', async () => {
     const controller = new AbortController();
     const child = createMockChild();
+    let spawned = false;
     const engine = new JsEyesCliSearchEngine({}, {
-      spawn: () => child,
+      spawn: () => {
+        spawned = true;
+        return child;
+      },
     });
 
     const promise = engine.search('query', { signal: controller.signal });
+    await new Promise((resolve) => {
+      const check = () => (spawned ? resolve() : setTimeout(check, 0));
+      check();
+    });
     controller.abort();
 
     await assert.rejects(promise, { name: 'AbortError' });

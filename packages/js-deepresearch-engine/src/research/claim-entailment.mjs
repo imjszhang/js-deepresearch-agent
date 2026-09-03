@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { extractJsonObject } from './report-narrative.mjs';
 import { claimEntailmentPrompt } from './prompts.mjs';
 import { buildClaimEvaluation, CLAIM_VERDICTS } from './claim-quality.mjs';
@@ -57,13 +58,23 @@ export function applyEntailmentVerdict(claim, judgment, passages = []) {
   return next;
 }
 
+export function entailmentCacheKey(claim, passages = []) {
+  const fingerprints = (passages || [])
+    .map((passage) => createHash('sha256').update(String(passage?.text || '')).digest('hex'))
+    .sort()
+    .join(',');
+  return `${String(claim?.text || '').normalize('NFKC').trim()}\0${fingerprints}`;
+}
+
 export async function applyClaimEntailment(claims = [], {
   llm,
   passages = [],
   signal,
   mode = 'rules_then_llm',
+  cache = null,
 } = {}) {
   if (mode === 'rules' || !llm?.complete) return claims;
+  const store = cache || new Map();
   const next = [];
   for (const claim of claims) {
     if (!shouldJudgeClaim(claim, passages)) {
@@ -75,6 +86,11 @@ export async function applyClaimEntailment(claims = [], {
       next.push(claim);
       continue;
     }
+    const key = entailmentCacheKey(claim, cited);
+    if (store.has(key)) {
+      next.push(applyEntailmentVerdict(claim, store.get(key), cited));
+      continue;
+    }
     try {
       const raw = await llm.complete({
         purpose: 'claim_entailment',
@@ -84,6 +100,7 @@ export async function applyClaimEntailment(claims = [], {
         messages: claimEntailmentPrompt({ claim, passages: cited }),
       });
       const judgment = extractJsonObject(raw);
+      store.set(key, judgment);
       next.push(applyEntailmentVerdict(claim, judgment, cited));
     } catch (error) {
       if (error?.name === 'AbortError' || signal?.aborted) throw error;

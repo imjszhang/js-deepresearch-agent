@@ -1,4 +1,4 @@
-import { mapHistoricalStrategy, parseCitations, sourceHasFetchedBody } from 'js-deepresearch-engine';
+import { mapHistoricalStrategy, parseCitations, sourceHasFetchedBody, sourceUsableForAsOf } from 'js-deepresearch-engine';
 import {
   auditClaim,
   buildAuditCitationMap,
@@ -281,6 +281,47 @@ export function auditRelevanceIntegrity(sources = [], quality = {}) {
   };
 }
 
+export function auditAsOfCompliance(brief = {}, claims = [], sources = [], passages = []) {
+  const asOf = brief?.asOf;
+  if (!asOf?.date) {
+    return {
+      applicable: false,
+      pass: true,
+      reason: 'not_applicable',
+      checks: [check('as_of_present', true, 'No explicit asOf contract on this brief.')],
+    };
+  }
+  const sourceById = new Map((sources || []).map((source) => [source.id || source.url, source]));
+  const keyClaims = (claims || []).filter((claim) => claim.kind === 'key_claim');
+  const failures = [];
+  for (const claim of keyClaims) {
+    const citedIds = claim.citedSourceIds || [];
+    if (!citedIds.length) continue;
+    const cited = citedIds.map((id) => sourceById.get(id)).filter(Boolean);
+    const citedPassages = (passages || []).filter((passage) => citedIds.includes(passage.sourceId));
+    const usable = cited.some((source) => {
+      const text = citedPassages
+        .filter((passage) => passage.sourceId === (source.id || source.url))
+        .map((passage) => passage.text)
+        .join('\n');
+      return sourceUsableForAsOf(source, asOf, { passageText: text }).usable;
+    });
+    if (!usable) failures.push(claim.text);
+  }
+  return {
+    applicable: true,
+    pass: failures.length === 0,
+    reason: failures.length ? 'post_cutoff_or_unknown_date' : 'within_cutoff',
+    checks: [check(
+      'as_of_key_claims',
+      failures.length === 0,
+      failures.length
+        ? `${failures.length} key claim(s) used post-cutoff or undated sources.`
+        : 'Key claims respect the explicit asOf cutoff.',
+    )],
+  };
+}
+
 export function evaluateProcessContract(strategy, {
   usage = {},
   cost = {},
@@ -526,6 +567,7 @@ export function auditStrategyRun({
     meta: { ...meta, query: meta.query || query },
     citationMap,
   });
+  const asOfCompliance = auditAsOfCompliance(brief, narrativeClaims, sources, passages);
   const contractMaterialization = auditContractMaterialization(brief, gaps);
   const processContract = evaluateProcessContract(normalizedStrategy, {
     battery,
@@ -553,6 +595,14 @@ export function auditStrategyRun({
     passages,
     sources,
   });
+  const allSlots = requiredSlotCompletion.slots || [];
+  const requiredOnly = allSlots.filter((slot) => slot.required);
+  const slotCounts = {
+    total: allSlots.length,
+    completed: allSlots.filter((slot) => slot.status === 'completed').length,
+    required: requiredOnly.length,
+    requiredCompleted: requiredOnly.filter((slot) => slot.status === 'completed').length,
+  };
   let status = 'ready';
   if (invalidReasons.length) status = 'invalid';
   else if (
@@ -562,6 +612,7 @@ export function auditStrategyRun({
     || !evidenceProvenance.pass
     || !relevanceIntegrity.pass
     || !requiredSlotCompletion.pass
+    || !asOfCompliance.pass
   ) {
     status = 'not_ready';
   }
@@ -569,6 +620,8 @@ export function auditStrategyRun({
   return {
     batteryId: battery?.id || null,
     status,
+    invalidReasons,
+    slotCounts,
     processContract,
     reportIntegrity,
     citationIntegrity: {
@@ -581,7 +634,9 @@ export function auditStrategyRun({
     requiredSlotCompletion: {
       pass: requiredSlotCompletion.pass,
       slots: requiredSlotCompletion.slots,
+      counts: slotCounts,
     },
+    asOfCompliance,
     contractMaterialization,
     cost: {
       explorationTokens: cost.explorationTokens,

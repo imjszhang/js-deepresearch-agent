@@ -28,6 +28,43 @@ function requiredHostMode(value) {
   return REQUIRED_HOST_MODES.includes(value) ? value : 'any';
 }
 
+function lastDayOfMonth(year, month) {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+function parseIsoDate(value) {
+  const raw = String(value || '').trim();
+  const match = raw.match(/^(\d{4})-(\d{2})(?:-(\d{2}))?$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  if (month < 1 || month > 12) return null;
+  if (match[3]) {
+    const day = Number(match[3]);
+    if (day < 1 || day > lastDayOfMonth(year, month)) return null;
+    return `${match[1]}-${match[2]}-${match[3]}`;
+  }
+  return `${match[1]}-${match[2]}-${String(lastDayOfMonth(year, month)).padStart(2, '0')}`;
+}
+
+export function sanitizeAsOf(value, { defaultSource = 'user' } = {}) {
+  if (!value) return null;
+  if (typeof value === 'string') {
+    const date = parseIsoDate(value);
+    return date ? { date, source: defaultSource === 'planner' ? 'planner' : 'user', label: date } : null;
+  }
+  if (typeof value === 'object') {
+    const date = parseIsoDate(value.date || value.end || value.asOf);
+    if (!date) return null;
+    return {
+      date,
+      source: value.source === 'planner' || defaultSource === 'planner' ? 'planner' : 'user',
+      label: text(value.label, 80) || date,
+    };
+  }
+  return null;
+}
+
 function extractLiteralHosts(query) {
   return sanitizeHosts(String(query || '').match(HOST_IN_QUERY) || []);
 }
@@ -111,8 +148,10 @@ export function sanitizeResearchBrief(input = {}, {
     decision: text(source.decision) || null,
     assumedExpertise: text(source.assumedExpertise, 120) || null,
     timeRange: source.timeRange == null ? null : text(source.timeRange, 200),
+    asOf: sanitizeAsOf(source.asOf),
     geography: uniqueText(source.geography),
     entities: uniqueText(source.entities),
+    entityAliases: uniqueText(source.entityAliases),
     exclusions: uniqueText(source.exclusions),
     depth: resolvedDepth,
     deadline: source.deadline == null ? null : text(source.deadline, 120),
@@ -173,9 +212,11 @@ export function mergeResearchBrief(base, plan = {}, options = {}) {
     decision: pickScalar('decision'),
     assumedExpertise: pickScalar('assumedExpertise'),
     timeRange: pickScalar('timeRange'),
+    asOf: sanitizedBase.asOf || sanitizeAsOf(plan.asOf, { defaultSource: 'planner' }),
     deadline: pickScalar('deadline'),
     geography: pickList('geography'),
     entities: pickList('entities'),
+    entityAliases: pickList('entityAliases'),
     exclusions: pickList('exclusions'),
     successCriteria: pickList('successCriteria'),
     requiredAnswerSlots: sanitizedBase.requiredAnswerSlots.length

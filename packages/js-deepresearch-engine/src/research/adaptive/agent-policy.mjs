@@ -146,6 +146,9 @@ export function fallbackAdaptiveAction(state, options = {}) {
   if (readiness && !gatePass) {
     const repair = nextSlotRepairAction(state, { readiness, reasonCode: 'fallback_slot_repair' });
     if (repair) return repair;
+    return buildAngleChangeSearch(state, {
+      reasonCode: belowMin ? 'fallback_explore_below_min' : 'fallback_slot_repair',
+    }) || { action: 'reflect', reasonCode: 'repair_angles_exhausted' };
   }
   const focusId = state.focusGap?.()?.id || 'gap-1';
   const picks = pickUnreadCandidates(state, 2, focusId);

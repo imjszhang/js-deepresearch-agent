@@ -25,9 +25,11 @@ export function compactSearchSnippets(sources = [], limit = 3) {
 }
 
 export function collectRespondedEngines(sources = []) {
-  return unique((sources || []).flatMap((source) => (
-    Array.isArray(source?.engines) ? source.engines : []
-  )));
+  return unique((sources || []).flatMap((source) => {
+    if (Array.isArray(source?.engines) && source.engines.length) return source.engines;
+    if (source?.engine) return [source.engine];
+    return [];
+  }));
 }
 
 function unique(values = []) {

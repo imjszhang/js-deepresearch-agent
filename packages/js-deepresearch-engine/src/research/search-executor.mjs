@@ -1,4 +1,5 @@
 import { getSearchMeta } from '../search/search-result.mjs';
+import { isTransientSearchError, serializeSearchError } from '../search/search-provider-error.mjs';
 
 function questionText(item) {
   if (typeof item === 'string') return item;
@@ -58,7 +59,9 @@ export async function searchQuestion({
     return result;
   } catch (error) {
     if (isAbortError(error)) throw error;
-    queryMemory?.record({ query, gapId, provider: search.id || '', status: 'failed', results: [] });
+    if (!isTransientSearchError(error)) {
+      queryMemory?.record({ query, gapId, provider: search.id || '', status: 'failed', results: [] });
+    }
     const result = {
       question: query,
       searchQuery: query,
@@ -155,14 +158,6 @@ function throwIfAborted(signal) {
     error.name = 'AbortError';
     throw error;
   }
-}
-
-function serializeSearchError(error) {
-  if (!error) return null;
-  return {
-    name: error.name,
-    message: error.message,
-  };
 }
 
 function uniqueQuestionItems(values) {

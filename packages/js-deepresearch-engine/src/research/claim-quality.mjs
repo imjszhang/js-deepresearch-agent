@@ -261,7 +261,10 @@ export function aggregateEvidenceVerdict(evidence = []) {
 }
 
 function constrainVerdict(verdict, flags = []) {
-  if (flags.includes('uncited') || flags.includes('unresolved_citation')) return 'unverifiable';
+  if (flags.includes('uncited') || flags.includes('unresolved_citation') || flags.includes('as_of_incompatible')
+    || flags.includes('slot_blocked') || flags.includes('slot_limited')) {
+    return 'unverifiable';
+  }
   if (flags.includes('missing_direct_evidence') && ['supported', 'partially_supported'].includes(verdict)) {
     return 'unverifiable';
   }

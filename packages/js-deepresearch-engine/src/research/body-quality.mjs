@@ -126,3 +126,20 @@ export function classifyFetchedBody(source = {}) {
   }
   return { status: 'read', successful: true, reason: 'body_ok' };
 }
+
+export function sanitizeUnusableSourceBody(source = {}, quality = {}) {
+  const failed = quality.successful === false
+    || ['waf', 'failed', 'irrelevant'].includes(quality.status || source.bodyQuality || source.fetchStatus);
+  if (!failed) return source;
+  return {
+    ...source,
+    content: '',
+    summary: '',
+    snippet: source.snippet || '',
+    fetchStatus: quality.status === 'waf' ? 'waf' : (source.fetchStatus === 'ok' ? 'failed' : (source.fetchStatus || quality.status)),
+    bodyQuality: quality.status || source.bodyQuality,
+    accessStatus: quality.status || source.accessStatus || null,
+    accessNotes: quality.reason || source.accessNotes || null,
+    fetchError: source.fetchError || quality.reason || null,
+  };
+}

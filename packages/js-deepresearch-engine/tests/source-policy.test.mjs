@@ -3,10 +3,12 @@ import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import {
   classifySourceTier,
+  documentMatchesQuerySubject,
   evidenceIndependenceKey,
   evaluateSourceRelevance,
   independentEvidenceKeysFromSources,
   inferEvidenceScope,
+  resolveEntityAliases,
   selectReadsByPolicy,
   registrableDomainFromUrl,
   queryMatchesGapScope,
@@ -227,5 +229,94 @@ describe('source policy before rerank', () => {
       ['星河智算'],
       researchQuery,
     ), false);
+  });
+
+  it('keeps unevaluated external rerank candidates pending instead of auto-admitting them', () => {
+    const decision = evaluateSourceRelevance({
+      url: 'https://example.com/zhipu',
+      title: '智谱AI',
+    }, {
+      gap: { question: '智谱AI公司信息' },
+      query: '智谱AI 公司信息',
+      entities: ['智谱AI'],
+      rerankProvider: 'http',
+      minRerankScore: 0.01,
+    });
+    assert.equal(decision.accepted, false);
+    assert.equal(decision.reasonCode, 'rerank_pending');
+  });
+
+  it('does not strip OpenAI down to Open', () => {
+    const aliases = resolveEntityAliases(['OpenAI', 'Zhipu AI']);
+    assert.ok(aliases.includes('OpenAI'));
+    assert.ok(!aliases.includes('Open'));
+    assert.ok(aliases.includes('Zhipu'));
+    assert.equal(sourceMatchesEntities({ title: 'OpenAI platform docs' }, ['OpenAI']), true);
+  });
+
+  it('accepts a Chinese filing when structured aliases match', () => {
+    assert.equal(documentMatchesQuerySubject({
+      title: '智谱AI 招股说明书',
+      content: '智谱AI控股股东与营收披露。'.repeat(4),
+    }, 'What is the ownership structure?', {
+      entities: ['智谱AI'],
+      entityAliases: ['Zhipu AI', '智谱'],
+    }), true);
+    assert.equal(documentMatchesQuerySubject({
+      title: '思朗科技 年报',
+      content: '思朗科技股份有限公司年度报告正文。'.repeat(4),
+    }, 'What is the ownership structure?', {
+      entities: ['智谱AI'],
+      entityAliases: ['Zhipu AI'],
+    }), false);
+  });
+
+  it('exposes the matched entity alias', () => {
+    const decision = evaluateSourceRelevance({
+      title: 'Zhipu AI platform',
+      snippet: 'open platform',
+    }, {
+      entities: ['智谱AI'],
+      entityAliases: ['Zhipu AI'],
+      rerankProvider: null,
+    });
+    assert.equal(decision.accepted, true);
+    assert.equal(decision.matchedAlias, 'Zhipu AI');
+  });
+
+  it('does not let authority tier admit a pending or below-threshold candidate', () => {
+    const pending = selectReadsByPolicy({
+      candidates: [{
+        id: 'gov',
+        url: 'https://www.sec.gov/filing',
+        title: '智谱AI filing',
+        snippet: '智谱AI',
+        assessment: { evidenceTier: 'other_primary' },
+      }],
+      gap: { question: '智谱AI 股权', requiredHosts: [] },
+      relevance: {
+        query: '智谱AI 股权',
+        entities: ['智谱AI'],
+        rerankProvider: 'http',
+        minRerankScore: 0.01,
+      },
+      minCount: 1,
+      maxCount: 1,
+    });
+    assert.equal(pending.length, 0);
+    const low = evaluateSourceRelevance({
+      url: 'https://www.sec.gov/filing',
+      title: '智谱AI filing',
+      snippet: '智谱AI',
+      rerank: { provider: 'http', score: 0.001 },
+      assessment: { evidenceTier: 'other_primary' },
+    }, {
+      query: '智谱AI 股权',
+      entities: ['智谱AI'],
+      rerankProvider: 'http',
+      minRerankScore: 0.01,
+    });
+    assert.equal(low.accepted, false);
+    assert.equal(low.reasonCode, 'rerank_below_threshold');
   });
 });

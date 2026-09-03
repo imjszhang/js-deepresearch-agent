@@ -1,0 +1,93 @@
+{
+  "id": "google-ops-replay-2026-09-02",
+  "desensitized": true,
+  "note": "Minimized replay of a Google ops exploratory run. Titles and snippets only; no full bodies.",
+  "query": "截至2026年8月，全面研究智谱（智谱华章 / Zhipu AI）股权、产品、商业化与竞争。",
+  "provider": {
+    "engine": "js-eyes",
+    "skillId": "js-google-ops-skill",
+    "fixedEngine": "js-eyes:google",
+    "supportedSearchOptions": [],
+    "maxQuestionConcurrency": 1
+  },
+  "searches": [
+    {
+      "query": "智谱AI 股权结构 融资估值",
+      "gapId": "gap-equity",
+      "queryOrigin": "llm_planner",
+      "requestedSearchOptions": { "engines": "bing" },
+      "effectiveSearchOptions": {},
+      "droppedSearchOptions": ["engines"],
+      "outcome": "rate_limited",
+      "providerError": {
+        "code": "rate_limited",
+        "retryable": true,
+        "retryAfterMs": 1000
+      },
+      "resultCount": 0,
+      "respondedEngines": []
+    },
+    {
+      "query": "智谱AI 股权结构 融资估值",
+      "gapId": "gap-equity",
+      "queryOrigin": "llm_planner",
+      "requestedSearchOptions": { "engines": "bing" },
+      "effectiveSearchOptions": {},
+      "outcome": "duplicate_query",
+      "resultCount": 0
+    },
+    {
+      "query": "智谱AI 商业化 收入 客户",
+      "gapId": "gap-commercial",
+      "queryOrigin": "llm_planner",
+      "outcome": "useful",
+      "respondedEngines": ["js-eyes:google"],
+      "candidates": [
+        {
+          "id": "src-36kr",
+          "title": "智谱收入与客户传闻",
+          "url": "https://example.test/36kr-zhipu-revenue",
+          "snippet": "媒体转述智谱收入与客户进展。",
+          "engine": "js-eyes:google"
+        },
+        {
+          "id": "src-product",
+          "title": "智谱产品更新",
+          "url": "https://example.test/zhipu-product-update",
+          "snippet": "发布新模型与产品功能。",
+          "engine": "js-eyes:google"
+        }
+      ]
+    }
+  ],
+  "rerank": [
+    {
+      "gapId": "gap-commercial",
+      "sourceId": "src-36kr",
+      "score": 0.41,
+      "decision": "relevance_accepted"
+    },
+    {
+      "gapId": "gap-competition",
+      "sourceId": "src-36kr",
+      "score": 0.12,
+      "decision": "relevance_accepted"
+    }
+  ],
+  "reads": [
+    {
+      "sourceId": "src-36kr",
+      "discoveryGapIds": ["gap-competition"],
+      "targetGapId": "gap-competition",
+      "successful": true,
+      "selectReason": "auto_read_top_ranked"
+    }
+  ],
+  "expectedAfterFix": {
+    "maxQuestionConcurrency": 1,
+    "transientDoesNotConsumeRepair": true,
+    "uniqueRerankKey": ["gapId", "sourceId", "fingerprint", "model"],
+    "promotionRequiredForCrossSlot": true,
+    "completionStatusWhenSafetyCap": "incomplete"
+  }
+}

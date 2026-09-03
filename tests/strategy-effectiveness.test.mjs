@@ -12,6 +12,7 @@ import {
 } from '../scripts/benchmark/query-battery.mjs';
 import { isWafOrErrorBody } from '../scripts/benchmark/source-policy.mjs';
 import {
+  auditAsOfCompliance,
   auditClaim,
   auditContractMaterialization,
   auditRelevanceIntegrity,
@@ -152,6 +153,10 @@ describe('query battery', () => {
     assert.equal(battery.aspects, undefined);
     assert.ok(battery.slots.some((slot) => slot.id === 'financials.revenue'));
     assert.ok(battery.slots.some((slot) => slot.id === 'disclosure.gaps'));
+    const control = battery.slots.find((slot) => slot.id === 'company.control');
+    assert.equal(hitsPatterns('The controlling shareholder and ownership structure', control.patterns), true);
+    const gaps = battery.slots.find((slot) => slot.id === 'disclosure.gaps');
+    assert.equal(hitsPatterns('## Caveats\n\nMissing official filings.', gaps.patterns), true);
     assert.deepEqual(battery.sourcePolicies.regulatory.map((entry) => entry.host).sort(), [
       'hkexnews.hk',
       'www.hkexnews.hk',
@@ -276,6 +281,32 @@ llama.cpp、MLX 与 Ollama 都出现在本地推理讨论里，本文比较它�
     assert.equal(byId['llamacpp.positioning'].status !== 'completed', true);
     assert.equal(byId['mlx.performance'].status !== 'completed', true);
     assert.equal(audit.requiredSlotCompletion.pass, false);
+    assert.equal(audit.slotCounts.total, audit.requiredSlotCompletion.slots.length);
+    assert.ok(audit.slotCounts.required <= audit.slotCounts.total);
+  });
+
+  it('exposes structural invalid reasons instead of a bare invalid status', () => {
+    const audit = auditStrategyRun({
+      ...appleInput({
+        report: '# Report\n\n## Summary\nllama.cpp is a backend [1.1].\n',
+        passages: [{
+          id: 'p1',
+          sourceId: 's1',
+          text: 'not in source',
+          startChar: 0,
+          endChar: 12,
+          contentHash: 'abc',
+        }],
+        sources: [{
+          id: 's1',
+          url: 'https://github.com/ggml-org/llama.cpp',
+          content: 'llama.cpp official body',
+          fetchStatus: 'ok',
+        }],
+      }),
+    });
+    assert.equal(audit.status, 'invalid');
+    assert.ok(audit.invalidReasons.includes('quote_offset_mismatch') || audit.invalidReasons.length > 0);
   });
 
   it('passes the quick process contract on snippet-only sources and zero reads', () => {
@@ -410,6 +441,37 @@ ${'llama.cpp 定位为跨平台底层引擎 [1.1]。这篇长报告重复说明�
     assert.equal(audit.requiredSlotCompletion.pass, true);
     assert.equal(audit.processContract.pass, true);
     assert.equal(audit.status, 'ready');
+  });
+
+  it('does not let supported rate or cache metrics change official status', () => {
+    const audit = auditStrategyRun(appleInput({
+      quality: {
+        budget: { usage: { llmTokens: 40000, sourceReads: 6 } },
+        metrics: {
+          rates: { supportedRate: 0, supportedOrPartialRate: 0 },
+          relevance: { cacheHits: 999, rerankCalls: 387 },
+        },
+      },
+    }));
+    assert.equal(audit.status, 'ready');
+    assert.equal(audit.asOfCompliance.applicable, false);
+    assert.equal(audit.asOfCompliance.reason, 'not_applicable');
+  });
+
+  it('fails an explicit asOf contract on post-cutoff key claims', () => {
+    assert.equal(auditAsOfCompliance({}, []).applicable, false);
+    const audit = auditStrategyRun(appleInput({
+      brief: { asOf: { date: '2026-08-31' } },
+      claims: [{
+        kind: 'key_claim',
+        text: 'llama.cpp 吞吐约为 40 tok/s [1.1]',
+        citedSourceIds: ['s1'],
+      }],
+      sources: OFFICIAL_BODIES.map((source) => ({ ...source, publishedAt: '2026-09-10' })),
+    }));
+    assert.equal(audit.asOfCompliance.applicable, true);
+    assert.equal(audit.asOfCompliance.pass, false);
+    assert.equal(audit.status, 'not_ready');
   });
 });
 

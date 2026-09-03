@@ -112,7 +112,8 @@ async function enrichWave(findings, context, focused, readPolicy, state) {
       embedding: context.researchProviders?.embedding,
       relevance: readPolicy.relevance,
       relevanceGap: { question: context.query, requiredHosts: [] },
-      entities: context.brief?.entities || context.brief?.entities || [],
+      entities: context.brief?.entities || [],
+      entityAliases: context.brief?.entityAliases || [],
       observedHosts: [...(state?.observedHosts || [])],
     });
   const enrichedByUrl = new Map((enriched[0]?.sources || []).map((source) => [canonicalUrl(source), source]));

@@ -32,6 +32,7 @@ async function maybeAssessSource(source, fetched, {
   query,
   question,
   entities,
+  entityAliases,
   relevanceGap,
   observedHosts,
 }) {
@@ -44,7 +45,7 @@ async function maybeAssessSource(source, fetched, {
     title: source.title || fetched.title,
     url: String(source.url || '').trim(),
     content: fetched.content,
-    entities,
+    entities: [...new Set([...(entities || []), ...(entityAliases || [])])],
     preferredHosts: relevanceGap?.preferredHosts || [],
     observedHosts: observedHosts || [],
   });
@@ -64,6 +65,7 @@ async function enrichOneSource(source, {
   relevance,
   relevanceGap,
   entities,
+  entityAliases,
   observedHosts,
 }) {
   const url = String(source.url || '').trim();
@@ -104,6 +106,7 @@ async function enrichOneSource(source, {
       gap: relevanceGap || { question },
       query: question || query,
       entities,
+      entityAliases,
       enforceEntity: relevance.entityGuard !== false,
       rerankProvider: 'disabled',
       allowRequiredHostProbe: false,
@@ -117,6 +120,7 @@ async function enrichOneSource(source, {
         skipReason: relevanceDecision.reasonCode,
       };
     }
+    fetchedSource.relevanceDecision = relevanceDecision;
   }
 
   const assessmentEnabled = settings?.research?.read?.sourceAssessment?.enabled === true;
@@ -128,6 +132,7 @@ async function enrichOneSource(source, {
       query,
       question,
       entities,
+      entityAliases,
       relevanceGap,
       observedHosts,
     });
@@ -175,6 +180,7 @@ async function enrichOneSource(source, {
     query,
     question,
     entities,
+    entityAliases,
     relevanceGap,
     observedHosts,
   });
@@ -215,6 +221,7 @@ export async function enrichFindingSources(finding, options = {}) {
     relevance,
     relevanceGap,
     entities,
+    entityAliases,
     observedHosts,
     seenUrls = new Set(),
     enrichedCount = { value: 0 },
@@ -274,6 +281,7 @@ export async function enrichFindingSources(finding, options = {}) {
           relevance,
           relevanceGap,
           entities,
+          entityAliases,
           observedHosts,
         });
         enrichedByUrl.set(source.url, enriched);

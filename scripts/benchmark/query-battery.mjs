@@ -163,7 +163,7 @@ export const QUERY_BATTERIES = [
         critical: true,
         minSources: 1,
         sourcePolicy: 'regulatory',
-        patterns: [/控股|股东|股权结构|实控|majority shareholder|controlling/i],
+        patterns: [/控股|股东|股权结构|实控|majority shareholder|controlling|ownership|shareholder|control/i],
       },
       {
         id: 'company.financing',
@@ -300,7 +300,7 @@ export const QUERY_BATTERIES = [
         required: true,
         critical: true,
         minSources: 0,
-        patterns: [/^#{1,6}\s+.*(gaps?|limitations?|open questions?|局限|限制|未决|开放问题|信息缺口|风险提示)/im],
+        patterns: [/^#{1,6}\s+.*(gaps?|limitations?|open questions?|caveats?|局限|限制|未决|开放问题|信息缺口|风险提示)/im],
       },
     ],
   }),

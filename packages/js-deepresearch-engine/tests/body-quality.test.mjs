@@ -6,6 +6,7 @@ import {
   isRawBinaryDocumentText,
   isSuccessfulBody,
   isWafOrErrorBody,
+  sanitizeUnusableSourceBody,
   MIN_FETCHED_BODY_CHARS,
   sourceHasObservableDate,
 } from '../src/research/body-quality.mjs';
@@ -70,5 +71,26 @@ describe('body quality helper', () => {
       title: 'Undated note',
       content: 'A successful body without any calendar date.',
     }), false);
+  });
+
+  it('keeps WAF diagnostics and strips the fake fetched body', () => {
+    const quality = classifyFetchedBody({
+      fetchStatus: 'ok',
+      contentOrigin: 'fetched',
+      content: 'Just a moment... Cloudflare',
+      snippet: 'HKEX filing snippet',
+    });
+    const cleaned = sanitizeUnusableSourceBody({
+      url: 'https://www1.hkexnews.hk/a.htm',
+      title: 'Filing',
+      content: 'Just a moment... Cloudflare',
+      snippet: 'HKEX filing snippet',
+      fetchStatus: 'ok',
+    }, quality);
+    assert.equal(cleaned.content, '');
+    assert.equal(cleaned.summary, '');
+    assert.equal(cleaned.snippet, 'HKEX filing snippet');
+    assert.equal(cleaned.fetchStatus, 'waf');
+    assert.equal(cleaned.accessNotes, 'waf_or_shell');
   });
 });

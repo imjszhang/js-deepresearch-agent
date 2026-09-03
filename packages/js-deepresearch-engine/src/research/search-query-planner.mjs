@@ -145,6 +145,7 @@ export async function planSearchQueries({
   context = '',
   hints = [],
   recentSearchOutcomes = [],
+  providerCapabilities = null,
 } = {}) {
   const resolvedMode = SEARCH_QUERY_MODES.includes(mode) ? mode : 'initial';
   const resolvedLimit = Number(limit);
@@ -207,6 +208,7 @@ export async function planSearchQueries({
     context,
     hints,
     recentSearchOutcomes,
+    providerCapabilities,
   };
 
   const result = await completeStructuredJson({
@@ -310,13 +312,24 @@ export async function planSearchQueries({
   });
 }
 
-function unusedUserQuery(action, planArgs = {}) {
+function unusedOriginalUserQuery(planArgs = {}) {
   const original = String(planArgs.query || '').trim();
+  if (!original) return '';
+  const searched = [
+    ...(planArgs.searchedQueries || []),
+    ...(planArgs.exhaustedAngles || []),
+    ...(planArgs.gap?.searchedQueries || []),
+    ...(planArgs.gap?.exhaustedAngles || []),
+  ].map(normalizeQuery);
+  if (searched.includes(normalizeQuery(original))) return '';
+  return original;
+}
+
+function unusedUserQuery(action, planArgs = {}) {
+  const original = unusedOriginalUserQuery(planArgs);
   const candidate = String(action?.query || (action?.queries || [])[0] || '').trim();
   if (!original || !candidate) return '';
   if (normalizeQuery(candidate) !== normalizeQuery(original)) return '';
-  const searched = (planArgs.searchedQueries || []).map(normalizeQuery);
-  if (searched.includes(normalizeQuery(original))) return '';
   return original;
 }
 
@@ -354,6 +367,26 @@ export async function attachPlannedQueries(action, planArgs = {}) {
     ]),
   });
   if (!plan.ok) {
+    const fallback = unusedOriginalUserQuery(planArgs);
+    if (fallback) {
+      return {
+        action: {
+          ...action,
+          query: fallback,
+          queries: [fallback],
+          queryOrigin: QUERY_ORIGINS.userQuery,
+          needsPlanner: false,
+          planFailure: plan.failure,
+          plannedQueries: [createPlannedQuery({
+            query: fallback,
+            origin: QUERY_ORIGINS.userQuery,
+            plannerMode: null,
+            targetGapId: action.gapId || planArgs.gapId || null,
+          })],
+        },
+        plan,
+      };
+    }
     return {
       action: {
         ...action,
@@ -526,6 +559,8 @@ function compactBrief(brief = {}) {
     exclusions: brief.exclusions || [],
     geography: brief.geography || [],
     timeRange: brief.timeRange || null,
+    asOf: brief.asOf || null,
+    entityAliases: brief.entityAliases || [],
     slots: (brief.requiredAnswerSlots || []).map((slot) => ({
       id: slot.id,
       question: slot.question,

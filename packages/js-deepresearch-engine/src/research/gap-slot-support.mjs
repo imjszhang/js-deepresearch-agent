@@ -63,7 +63,7 @@ export function selectSlotPassages(gap, findings = [], {
   chunkChars = DEFAULT_CHUNK_CHARS,
 } = {}) {
   const focus = [gap.question, gap.answerSlot, ...(gap.evidenceCriteria || [])].filter(Boolean).join(' ');
-  return collectSuccessfulPassages(findings, {
+  const ranked = collectSuccessfulPassages(findings, {
     gapId: gap.id,
     contractSlotId: gap.contractSlotId,
     answerSlot: gap.answerSlot,
@@ -85,8 +85,16 @@ export function selectSlotPassages(gap, findings = [], {
         retrievalScore: tokenOverlapScore(focus, chunk.text),
       }));
     })
-    .sort((left, right) => (right.retrievalScore || 0) - (left.retrievalScore || 0))
-    .slice(0, topK);
+    .sort((left, right) => (right.retrievalScore || 0) - (left.retrievalScore || 0));
+  const bySource = new Map();
+  for (const passage of ranked) {
+    if (!bySource.has(passage.sourceId)) bySource.set(passage.sourceId, passage);
+  }
+  const diverse = [...bySource.values()].sort((left, right) => (
+    (right.retrievalScore || 0) - (left.retrievalScore || 0)
+  ));
+  const rest = ranked.filter((passage) => !diverse.includes(passage));
+  return [...diverse, ...rest].slice(0, topK);
 }
 
 export function slotSupportFingerprint(gap, passages = []) {

@@ -45,6 +45,7 @@ export function buildPlannerFeedback({
   plannerRejections = [],
   recentSearchOutcomes = [],
   queryMemoryEntries = [],
+  providerCapabilities = null,
   limit = DEFAULT_LIMIT,
 } = {}) {
   const rejected = [
@@ -73,6 +74,7 @@ export function buildPlannerFeedback({
     exhaustedAngles: uniqueStrings(exhaustedAngles).slice(-Math.max(limit, 1)),
     rejectedQueries: uniqueRejected.slice(-Math.max(limit, 1)),
     recentSearchOutcomes: outcomes.slice(-Math.max(limit, 1)),
+    providerCapabilities: providerCapabilities || null,
   };
 }
 
@@ -81,20 +83,27 @@ function uniqueStrings(values = []) {
 }
 
 export function plannerFeedbackFromState(state, extra = {}) {
-  const gap = extra.gap || state?.getGap?.(state.focusGap?.()?.id);
+  const scoped = extra.gap !== undefined;
+  const gap = scoped ? extra.gap : null;
+  const gapOutcomes = (state?.searchOutcomes || []).filter((item) => !gap || item.gapId === gap.id);
   return buildPlannerFeedback({
-    searchedQueries: extra.searchedQueries || state?.searchedQueries?.() || [],
-    exhaustedAngles: extra.exhaustedAngles || [
-      ...(gap?.exhaustedAngles || []),
-      ...(state?.gaps || []).flatMap((item) => item.exhaustedAngles || []),
-    ],
+    searchedQueries: extra.searchedQueries
+      || (gap ? (gap.searchedQueries || []) : (state?.searchedQueries?.() || [])),
+    exhaustedAngles: extra.exhaustedAngles || (gap
+      ? (gap.exhaustedAngles || [])
+      : [
+        ...(state?.gaps || []).flatMap((item) => item.exhaustedAngles || []),
+      ]),
     rejectedQueries: extra.rejectedQueries || [],
-    filteredQueries: extra.filteredQueries || [
-      ...(gap?.filteredQueries || []),
-      ...(state?.gaps || []).flatMap((item) => item.filteredQueries || []),
-    ],
+    filteredQueries: extra.filteredQueries || (gap
+      ? (gap.filteredQueries || [])
+      : [
+        ...(state?.gaps || []).flatMap((item) => item.filteredQueries || []),
+      ]),
     plannerRejections: extra.plannerRejections || state?.plannerRejections || [],
-    recentSearchOutcomes: extra.recentSearchOutcomes || state?.recentSearchOutcomes?.() || [],
+    recentSearchOutcomes: extra.recentSearchOutcomes
+      || (gap ? gapOutcomes : (state?.recentSearchOutcomes?.() || [])),
     queryMemoryEntries: extra.queryMemory?.entries || extra.queryMemoryEntries || [],
+    providerCapabilities: extra.providerCapabilities || extra.search?.capabilities || null,
   });
 }
