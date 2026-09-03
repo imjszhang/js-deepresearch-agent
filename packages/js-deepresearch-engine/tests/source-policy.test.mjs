@@ -231,6 +231,18 @@ describe('source policy before rerank', () => {
     ), false);
   });
 
+  it('does not let a generic slot inherit exclusive terms from the original question', () => {
+    const genericSlot = { question: 'topic evidence', answerSlot: 'topic' };
+    assert.equal(queryMatchesGapScope(
+      'topic evidence additional official documents',
+      genericSlot,
+      [],
+      'budget topic',
+    ), true);
+    assert.equal(queryMatchesGapScope('first', genericSlot, [], 'budget topic'), true);
+    assert.equal(queryMatchesGapScope('fallback topic', genericSlot, [], 'fallback topic'), true);
+  });
+
   it('keeps unevaluated external rerank candidates pending instead of auto-admitting them', () => {
     const decision = evaluateSourceRelevance({
       url: 'https://example.com/zhipu',

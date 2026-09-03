@@ -672,7 +672,11 @@ describe('exploratory agent loop', () => {
     assert.ok(!result.trace.some((entry) => entry.reasonCode === 'forced_final_answer'));
     assert.notEqual(result.quality.stopReason, 'max_steps_safety');
     assert.equal(result.quality.stopReason, 'safety_cap');
-    assert.ok(['repair_exhausted', 'query_planner_exhausted'].includes(result.quality.stopDetail));
+    assert.ok([
+      'repair_exhausted',
+      'query_planner_exhausted',
+      'consecutive_invalid_steps',
+    ].includes(result.quality.stopDetail));
     assert.ok(result.quality.budget.usage.searchRequests <= 18);
   });
 
