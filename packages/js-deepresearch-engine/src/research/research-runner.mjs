@@ -10,6 +10,8 @@ import { BudgetManager, BudgetExceededError, wrapProvidersWithBudget } from './b
 import { QueryMemory } from './query-memory.mjs';
 import { alignReportClaims, buildPassageArtifactsAsync, listSnippetOnlyCitationKeys } from './evidence-chain.mjs';
 import { evaluatePreReport } from './quality-gates.mjs';
+import { applyAsOfGate, resolveCompletionStatus, slotEvidenceLimitations } from './as-of.mjs';
+import { applySlotStatusToClaims } from './report-evidence.mjs';
 import { resolveFocusedSettings } from './focused-settings.mjs';
 import { createResearchProviders } from './research-providers.mjs';
 import { calculateQualityMetrics, qualityGateFromClaims } from './claim-quality.mjs';
@@ -132,8 +134,10 @@ export class ResearchRunner {
     const contractLimitation = earlyContractUnavailable
       ? 'The research contract could not be planned; required slots were not available to verify.'
       : null;
+    const slotLimitations = slotEvidenceLimitations(gaps);
     const reportLimitations = [
       ...preReport.limitations,
+      ...slotLimitations,
       ...(budgetLimitation ? [budgetLimitation] : []),
       ...(contractLimitation ? [contractLimitation] : []),
       ...(degradedLimitation ? [degradedLimitation] : []),
@@ -180,6 +184,9 @@ export class ResearchRunner {
             .flatMap((finding) => finding.passageIds || []),
           passages: passageArtifacts.passages,
           slotSupport: gap.slotSupport,
+          entities: resolvedBrief?.entities || [],
+          entityAliases: resolvedBrief?.entityAliases || [],
+          query,
         },
       ));
       rollupRootGap(gaps);
@@ -192,6 +199,7 @@ export class ResearchRunner {
       minChars: reportSettings.minChars,
       maxAttempts: reportSettings.maxAttempts,
       mode: 'narrative',
+      gaps,
       onAttempt: (event) => {
         trace.push({
           step: trace.length + 1,
@@ -231,11 +239,17 @@ export class ResearchRunner {
       emit({ stage: 'evaluating_report' });
       trace.push({ step: trace.length + 1, action: 'evaluate_report', reasonCode: 'claim_evidence_alignment', createdAt: new Date().toISOString() });
       const entailmentMode = settings?.research?.quality?.entailment || 'rules_then_llm';
-      const judgeClaims = async (currentClaims) => applyClaimEntailment(currentClaims, {
+      const entailmentCache = new Map();
+      const judgeClaims = async (currentClaims) => applyAsOfGate(await applyClaimEntailment(currentClaims, {
         llm,
         passages: passageArtifacts.passages,
         signal,
         mode: entailmentMode,
+        cache: entailmentCache,
+      }), {
+        asOf: resolvedBrief?.asOf,
+        sources: passageArtifacts.sources,
+        passages: passageArtifacts.passages,
       });
       const alignCurrentReport = () => alignReportClaims({
         report,
@@ -243,7 +257,7 @@ export class ResearchRunner {
         citationMap: passageArtifacts.citationMap,
         options: { ...evidenceOptions, strategy },
       });
-      claims = await judgeClaims(alignCurrentReport());
+      claims = applySlotStatusToClaims(await judgeClaims(alignCurrentReport()), { gaps, findings });
       const revision = reviseUnsupportedKeyClaims(narrativeDraft, claims);
       movedClaimTexts = revision.moved;
       if (revision.moved.length) {
@@ -252,7 +266,7 @@ export class ResearchRunner {
           ...reportLimitations,
           ...revision.moved.map((text) => `Insufficient direct evidence for: ${text}`),
         ]);
-        claims = await judgeClaims(alignCurrentReport());
+        claims = applySlotStatusToClaims(await judgeClaims(alignCurrentReport()), { gaps, findings });
       }
       const revisedCheck = validateReportOutput(report, {
         minChars: reportSettings.minChars,
@@ -302,6 +316,12 @@ export class ResearchRunner {
       claimEvaluationVersion: qualityMetrics.claimEvaluationVersion,
       ...preReport,
       gate: finalGate,
+      readiness: exploratoryLoop?.readiness || focusedControl?.readiness || null,
+      completionStatus: resolveCompletionStatus({
+        readiness: exploratoryLoop?.readiness || focusedControl?.readiness || null,
+        stopReason: budget.controllerStopReason || exploratoryLoop?.stopReason || null,
+        gaps,
+      }),
       flags: [
         ...preReport.flags,
         ...focusedFailures.map((failure) => failure.code).filter(Boolean),
@@ -314,6 +334,7 @@ export class ResearchRunner {
       ],
       limitations: [
         ...preReport.limitations,
+        ...slotLimitations,
       ...(budgetLimitation ? [budgetLimitation] : []),
       ...(contractLimitation ? [contractLimitation] : []),
       ...(unresolvedLimitation ? [unresolvedLimitation] : []),

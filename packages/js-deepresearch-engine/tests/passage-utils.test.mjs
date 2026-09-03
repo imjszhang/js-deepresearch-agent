@@ -42,4 +42,19 @@ describe('passage value filters', () => {
     assert.equal(ranked[0].text, 'earlier short note');
     assert.equal(stripPassageMarkup('原创： [水库论坛](javascript:void(0);)').includes('javascript'), false);
   });
+
+  it('keeps startChar/endChar aligned after paragraph and chunk trim', () => {
+    const content = [
+      '# Title',
+      '',
+      '  Leading spaces then a filing sentence about 智谱AI revenue.',
+      '',
+      'Another paragraph with a trailing space.  ',
+    ].join('\n');
+    const chunks = splitContentForPassages(content, 24);
+    assert.ok(chunks.length >= 2);
+    for (const chunk of chunks) {
+      assert.equal(content.slice(chunk.startChar, chunk.endChar), chunk.text);
+    }
+  });
 });

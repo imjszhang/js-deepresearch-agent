@@ -44,27 +44,37 @@ export function rankingFocus({ query = '', question = '', title = '', section = 
   return [query, question, title, section].filter(Boolean).join(' ').trim();
 }
 
+function leadingWhitespaceLength(value) {
+  const match = String(value || '').match(/^\s*/);
+  return match ? match[0].length : 0;
+}
+
 export function splitContentForPassages(content, maxChars = 300) {
+  const source = String(content || '');
   const chunks = [];
-  const paragraphs = String(content || '').split(/\n{2,}/);
+  const paragraphs = source.split(/\n{2,}/);
   let cursor = 0;
   let section = '';
   for (const paragraph of paragraphs) {
+    const rawStart = source.indexOf(paragraph, cursor);
+    cursor = Math.max(cursor, (rawStart >= 0 ? rawStart : cursor) + paragraph.length);
+    const paragraphLead = leadingWhitespaceLength(paragraph);
     const text = paragraph.trim();
-    const start = String(content).indexOf(paragraph, cursor);
-    cursor = Math.max(cursor, start + paragraph.length);
     if (!text) continue;
     if (/^#{1,6}\s+/.test(text)) {
       section = text.replace(/^#{1,6}\s+/, '');
       continue;
     }
     for (let offset = 0; offset < text.length; offset += maxChars) {
-      const value = text.slice(offset, offset + maxChars).trim();
+      const rawSlice = text.slice(offset, offset + maxChars);
+      const sliceLead = leadingWhitespaceLength(rawSlice);
+      const value = rawSlice.trim();
       if (isMediaOnlyPassage(value)) continue;
+      const startChar = Math.max(0, rawStart) + paragraphLead + offset + sliceLead;
       chunks.push({
         text: value,
-        startChar: Math.max(0, start) + offset,
-        endChar: Math.max(0, start) + offset + value.length,
+        startChar,
+        endChar: startChar + value.length,
         section,
       });
     }

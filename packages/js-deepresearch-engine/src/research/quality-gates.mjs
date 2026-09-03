@@ -75,3 +75,5 @@ export function evaluatePreReport({ findings = [], gaps = [], query = '' }) {
     metrics: { findingCount: findings.length, findingsWithSources, sourceCount, directEvidenceSources, openGapCount: openGaps.length },
   };
 }
+
+export { resolveCompletionStatus, slotEvidenceLimitations } from './as-of.mjs';

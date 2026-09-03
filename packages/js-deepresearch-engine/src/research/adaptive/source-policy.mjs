@@ -120,25 +120,39 @@ export function sourceMatchesSiteQuery(source = {}, query = '') {
   return hosts.some((host) => hostnamesMatch(hostname, host));
 }
 
+export function isExternalRerankProvider(provider) {
+  const value = String(provider || '').trim().toLowerCase();
+  return Boolean(value) && !['disabled', 'rules', 'none', 'local'].includes(value);
+}
+
+function stripStandaloneAiSuffix(value) {
+  return String(value || '').replace(/\s+AI$/i, '').trim();
+}
+
 function entityAliases(entities = []) {
   return uniqueTerms((entities || []).flatMap((entity) => {
     const value = String(entity || '').trim();
     if (!value) return [];
     const compact = value.replace(/\s+/g, '');
     const withoutSuffix = compact.replace(/(股份有限公司|有限责任公司|有限公司|集团|公司)$/u, '');
+    const withoutStandaloneAi = stripStandaloneAiSuffix(value);
     const cjkAliases = value.match(/[\p{Script=Han}]{2,}/gu) || [];
     const latinAliases = (value.match(/[a-z][a-z0-9.-]{2,}/gi) || [])
       .filter((item) => !['company', 'limited', 'technology'].includes(item.toLowerCase()));
-    return [value, compact, withoutSuffix, ...cjkAliases, ...latinAliases]
+    return [value, compact, withoutSuffix, withoutStandaloneAi, ...cjkAliases, ...latinAliases]
       .map((item) => item.replace(/(股份有限公司|有限责任公司|有限公司|集团|公司)$/u, ''))
-      .map((item) => item.replace(/AI$/i, ''))
+      .map((item) => stripStandaloneAiSuffix(item))
       .filter((item) => item.length >= 2);
   }));
 }
 
-export function sourceMatchesEntities(source = {}, entities = []) {
-  const aliases = entityAliases(entities);
-  if (!aliases.length) return true;
+export function resolveEntityAliases(entities = [], extraAliases = []) {
+  return uniqueTerms([...entityAliases(entities), ...extraAliases]);
+}
+
+export function matchEntityAlias(source = {}, entities = [], extraAliases = []) {
+  const aliases = resolveEntityAliases(entities, extraAliases);
+  if (!aliases.length) return { match: true, matchedAlias: null };
   const haystack = [
     source.title,
     source.snippet,
@@ -146,32 +160,44 @@ export function sourceMatchesEntities(source = {}, entities = []) {
     source.content,
     source.publisher,
   ].filter(Boolean).join('\n').normalize('NFKC').toLowerCase();
-  return aliases.some((alias) => haystack.includes(alias.normalize('NFKC').toLowerCase()));
+  const matchedAlias = aliases.find((alias) => haystack.includes(alias.normalize('NFKC').toLowerCase())) || null;
+  return { match: Boolean(matchedAlias), matchedAlias };
+}
+
+export function sourceMatchesEntities(source = {}, entities = [], extraAliases = []) {
+  return matchEntityAlias(source, entities, extraAliases).match;
 }
 
 export function evaluateSourceRelevance(source = {}, {
   gap = {},
   query = '',
   entities = [],
+  entityAliases: extraAliases = [],
   enabled = true,
   enforceEntity = true,
   minRerankScore = 0.01,
   rerankProvider = source?.rerank?.provider || null,
+  externalRerankEnabled = null,
   allowRequiredHostProbe = true,
 } = {}) {
   const rawRerankScore = source?.rerank?.score ?? source?.rerankScore;
   const rerankScore = rawRerankScore == null ? null : Number(rawRerankScore);
   const threshold = Number(minRerankScore);
-  const rerankEvaluated = Boolean(rerankProvider) && Number.isFinite(rerankScore);
+  const externalEnabled = externalRerankEnabled == null
+    ? isExternalRerankProvider(rerankProvider)
+    : Boolean(externalRerankEnabled);
+  const rerankEvaluated = externalEnabled && Number.isFinite(rerankScore);
   const siteMatch = sourceMatchesSiteQuery(source, query);
-  const entityMatch = sourceMatchesEntities(source, entities);
+  const entity = matchEntityAlias(source, entities, extraAliases);
   const requiredHostProbe = allowRequiredHostProbe && isRequiredHostSource(source, gap);
+  const pending = externalEnabled && !rerankEvaluated;
   const base = {
     accepted: true,
     reasonCode: requiredHostProbe
       ? 'required_host_probe'
-      : (rerankEvaluated ? 'relevance_accepted' : 'rerank_not_evaluated'),
-    entityMatch,
+      : (rerankEvaluated ? 'relevance_accepted' : (pending ? 'rerank_pending' : 'rerank_not_evaluated')),
+    entityMatch: entity.match,
+    matchedAlias: entity.matchedAlias,
     siteMatch,
     rerankScore: Number.isFinite(rerankScore) ? rerankScore : null,
     threshold: Number.isFinite(threshold) ? threshold : null,
@@ -179,11 +205,13 @@ export function evaluateSourceRelevance(source = {}, {
   };
   if (!enabled) return { ...base, reasonCode: 'relevance_disabled' };
   if (!siteMatch) return { ...base, accepted: false, reasonCode: 'site_constraint_violation' };
-  if (enforceEntity && !entityMatch && !requiredHostProbe) {
+  if (enforceEntity && !entity.match && !requiredHostProbe) {
     return { ...base, accepted: false, reasonCode: 'entity_mismatch' };
   }
-  const shouldApplyThreshold = rerankProvider
-    && !['disabled', 'rules'].includes(rerankProvider)
+  if (pending && !requiredHostProbe) {
+    return { ...base, accepted: false, reasonCode: 'rerank_pending' };
+  }
+  const shouldApplyThreshold = externalEnabled
     && Number.isFinite(rerankScore) && Number.isFinite(threshold);
   if (shouldApplyThreshold && rerankScore < threshold && !requiredHostProbe) {
     return { ...base, accepted: false, reasonCode: 'rerank_below_threshold' };
@@ -302,12 +330,15 @@ export function extractQuerySubjects(query = '') {
   return uniqueTerms(subjects).slice(0, 8);
 }
 
-export function documentMatchesQuerySubject(source = {}, query = '') {
-  const subjects = extractQuerySubjects(query);
-  if (!subjects.length) return true;
+export function documentMatchesQuerySubject(source = {}, query = '', extras = {}) {
   const title = String(source.title || '');
   const body = String(source.content || source.summary || source.snippet || '').slice(0, 500);
   const hay = `${title}\n${body}`.toLowerCase();
+  const structured = resolveEntityAliases(extras.entities || [], extras.entityAliases || []);
+  if (structured.length && matchEntityAlias(source, extras.entities || [], extras.entityAliases || []).match) {
+    return true;
+  }
+  const subjects = extractQuerySubjects(query);
   if (subjects.some((subject) => hay.includes(String(subject).toLowerCase()))) return true;
   if (!FILING_LIKE.test(`${title} ${body}`)) return true;
   return false;
@@ -330,7 +361,7 @@ function asScopeTexts(value) {
   return text ? [text] : [];
 }
 
-export function queryMatchesGapScope(query = '', gap = {}, entities = [], extraScope = []) {
+export function queryMatchesGapScope(query = '', gap = {}, entities = [], extraScope = [], extraAliases = []) {
   let scopeText = [
     gap.question,
     publicScopeField(gap.answerSlot),
@@ -338,7 +369,7 @@ export function queryMatchesGapScope(query = '', gap = {}, entities = [], extraS
     ...(gap.evidenceCriteria || []).map(publicScopeField),
     ...asScopeTexts(extraScope),
   ].filter(Boolean).join(' ').normalize('NFKC').toLowerCase();
-  for (const alias of entityAliases(entities)) {
+  for (const alias of resolveEntityAliases(entities, extraAliases)) {
     scopeText = scopeText.replaceAll(alias.normalize('NFKC').toLowerCase(), ' ');
   }
   const generic = new Set([

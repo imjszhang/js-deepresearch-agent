@@ -3,11 +3,14 @@ import { describe, it } from 'node:test';
 import { evaluateGapEvidence, needsSemanticClose } from '../src/research/gap-state.mjs';
 import {
   applySlotSupportJudgments,
+  collectSuccessfulPassages,
   failClosedSupport,
   judgeOpenSlotSupport,
   selectSlotPassages,
   slotSupportFingerprint,
 } from '../src/research/gap-slot-support.mjs';
+import { promoteSuccessfulSources } from '../src/research/slot-promotion.mjs';
+import { ResearchState } from '../src/research/adaptive/research-state.mjs';
 
 const SUBJECT_A_BODY = 'SubjectA publishes a first-party guide at docs.example.com that states production support began in 2026.';
 const SUBJECT_B_BODY = 'SubjectB publishes a first-party guide at docs.example.com that states it remains experimental only.';
@@ -291,5 +294,119 @@ describe('gap slot support judgments', () => {
       slotSupportFingerprint(gaps[0], selectSlotPassages(gaps[0], findings)),
       slotSupportFingerprint(gaps[0], selectSlotPassages(gaps[0], changed.judgments ? [finding('gap-2', 'https://docs.example.com/a', `${SUBJECT_A_BODY} Updated 2026 filing.`)] : findings)),
     );
+  });
+
+  it('does not fallback a required slot to another slot body until it is promoted', () => {
+    const commercial = slotGap('gap-commercial', 'commercialization');
+    commercial.question = 'commercial revenue and customers';
+    commercial.evidenceCriteria = ['revenue', 'customers'];
+    const findings = [finding('gap-competition', 'https://example.test/revenue', 'The company reported commercial revenue and named enterprise customers in 2025.')];
+    assert.equal(collectSuccessfulPassages(findings, {
+      gapId: commercial.id,
+      allowFallback: false,
+    }).length, 0);
+  });
+
+  it('promotes a body read in a competing slot into dedicated commercial evidence', () => {
+    const state = new ResearchState({
+      query: 'company commercialization and competition',
+      brief: { entities: ['SubjectA'] },
+    });
+    const commercial = state.addGap('commercial revenue and customers', 'normal', {
+      id: 'gap-commercial',
+      answerSlot: 'commercialization',
+      requiredSlot: true,
+      evidenceCriteria: ['revenue', 'customers'],
+    });
+    const source = {
+      id: 'https://example.test/revenue',
+      url: 'https://example.test/revenue',
+      title: 'SubjectA commercial revenue',
+      content: 'SubjectA reported commercial revenue and named enterprise customers in 2025.',
+      fetchStatus: 'ok',
+    };
+    state.findings.push({
+      gapId: 'gap-competition',
+      sources: [source],
+    });
+    const promotions = promoteSuccessfulSources({
+      state,
+      sources: [source],
+      discoveryGapId: 'gap-competition',
+      entities: ['SubjectA'],
+    });
+    assert.ok(promotions.some((item) => item.targetGapId === commercial.id));
+    assert.ok(collectSuccessfulPassages(state.findings, {
+      gapId: commercial.id,
+      allowFallback: false,
+    }).length > 0);
+  });
+
+  it('reopens a blocked required slot after an independent matching body is promoted', () => {
+    const state = new ResearchState({
+      query: '智谱AI 股权结构',
+      brief: { entities: ['智谱AI'], entityAliases: ['Zhipu AI', '智谱'] },
+    });
+    const ownership = state.addGap('What is the ownership structure?', 'critical', {
+      id: 'gap-ownership',
+      answerSlot: 'ownership',
+      requiredSlot: true,
+      evidenceCriteria: ['shareholder', 'equity'],
+    });
+    ownership.status = 'blocked';
+    ownership.blockedReason = 'repair_exhausted';
+    const source = {
+      id: 'https://www1.hkexnews.hk/zhipu.htm',
+      url: 'https://www1.hkexnews.hk/zhipu.htm',
+      title: '智谱AI 招股书',
+      content: '智谱AI招股说明书披露控股股东与股权结构，并列出主要股东持股比例。'.repeat(2),
+      fetchStatus: 'ok',
+    };
+    state.addCandidates([source], 'gap-discovery');
+    state.candidates.get(source.id).relevanceDecisionByGap = {
+      [ownership.id]: {
+        accepted: true,
+        reasonCode: 'relevance_accepted',
+        rerankScore: 0.9,
+      },
+    };
+    const promotions = promoteSuccessfulSources({
+      state,
+      sources: [source],
+      discoveryGapId: 'gap-discovery',
+      entities: ['智谱AI'],
+      entityAliases: ['Zhipu AI', '智谱'],
+    });
+    assert.ok(promotions.some((item) => item.targetGapId === ownership.id));
+    assert.notEqual(ownership.status, 'blocked');
+    assert.equal(ownership.blockedReason, null);
+  });
+
+  it('does not promote a product body into ownership from a broad original query', () => {
+    const state = new ResearchState({
+      query: '全面研究智谱AI：股权结构、产品、商业化与竞争格局',
+      brief: { entities: ['智谱AI'], entityAliases: ['智谱'] },
+    });
+    const ownership = state.addGap('What is the ownership structure?', 'critical', {
+      id: 'gap-ownership',
+      answerSlot: 'ownership',
+      requiredSlot: true,
+      evidenceCriteria: ['shareholder', 'equity'],
+    });
+    const source = {
+      id: 'https://example.test/product',
+      url: 'https://example.test/product',
+      title: '智谱AI 产品',
+      content: '智谱AI发布新的大模型产品和API服务，提供企业级产品能力。',
+      fetchStatus: 'ok',
+    };
+    const promotions = promoteSuccessfulSources({
+      state,
+      sources: [source],
+      discoveryGapId: 'gap-product',
+      entities: ['智谱AI'],
+      entityAliases: ['智谱'],
+    });
+    assert.equal(promotions.some((item) => item.targetGapId === ownership.id), false);
   });
 });

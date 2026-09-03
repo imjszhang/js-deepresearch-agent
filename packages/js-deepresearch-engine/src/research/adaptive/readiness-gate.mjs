@@ -1,6 +1,7 @@
 import { isSuccessfulBody, sourceHasObservableDate } from '../body-quality.mjs';
 import {
   classifySourceTier,
+  documentMatchesQuerySubject,
   independentEvidenceKeysFromSources,
   requiredHostCoverage,
 } from './source-policy.mjs';
@@ -14,13 +15,14 @@ function successfulSources(findings = []) {
   return findings.flatMap((finding) => (finding.sources || []).filter(isSuccessfulBody));
 }
 
-function requiredHostsRead(gap, findings) {
+function requiredHostsRead(gap, findings, extras = {}) {
   const hosts = gap.requiredHosts || [];
   const pool = collectGapSources(gap, findings);
   if (!hosts.length) {
     if ((gap.requiredSourceTypes || []).includes('primary_filing')) {
       const primary = pool.filter((source) => (
         ['required_primary', 'other_primary'].includes(source.tier || classifySourceTier(source, gap))
+        && documentMatchesQuerySubject(source, extras.query || gap.question, extras)
       ));
       return {
         missing: primary.length ? [] : ['primary_filing'],
@@ -131,7 +133,11 @@ export function evaluateReadinessGate({
   const missingRequired = [];
   for (const gap of resolvedGaps) {
     if (gap.rollup || !gapNeedsRequiredHost(gap)) continue;
-    const coverage = requiredHostsRead(gap, resolvedFindings);
+    const coverage = requiredHostsRead(gap, resolvedFindings, {
+      query: state?.query,
+      entities: brief.entities || [],
+      entityAliases: brief.entityAliases || [],
+    });
     if (coverage.missing.length && !coverage.satisfied) {
       const { missing } = coverage;
       missingRequired.push({ gapId: gap.id, hosts: missing });
@@ -172,6 +178,15 @@ export function evaluateReadinessGate({
     }
   }
 
+  const unresolvedRequiredGapIds = unresolvedRequiredSlots.map((gap) => gap.id);
+  const unresolvedCriticalGapIds = unresolvedCritical.map((gap) => gap.id);
+  const repairGapIds = uniqueIds([
+    ...unresolvedCriticalGapIds,
+    ...unresolvedRequiredGapIds,
+    ...resolvedGaps
+      .filter((gap) => !gap.rollup && ['conflicting', 'limited', 'body_read'].includes(gap.status))
+      .map((gap) => gap.id),
+  ]);
   const pass = failures.length === 0;
   return {
     pass,
@@ -180,7 +195,9 @@ export function evaluateReadinessGate({
     independentDomainCount: evidenceKeys.size,
     independentEvidenceCount: evidenceKeys.size,
     successfulBodyCount: bodies.length,
-    unresolvedCriticalGapIds: unresolvedCritical.map((gap) => gap.id),
+    unresolvedCriticalGapIds,
+    unresolvedRequiredGapIds,
+    repairGapIds,
     missingRequiredHosts: missingRequired.flatMap((item) => item.hosts),
     missingSubjects: [],
     method: 'rules',
@@ -188,9 +205,15 @@ export function evaluateReadinessGate({
   };
 }
 
+function uniqueIds(values = []) {
+  return [...new Set((values || []).filter(Boolean))];
+}
+
 export function repairGapsFromGate(gate = {}, gaps = []) {
   const targetIds = new Set([
     ...(gate.unresolvedCriticalGapIds || []),
+    ...(gate.unresolvedRequiredGapIds || []),
+    ...(gate.repairGapIds || []),
     ...(gate.failures || []).flatMap((failure) => failure.gapIds || []),
   ]);
   return gaps.filter((gap) => {

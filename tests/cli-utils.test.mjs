@@ -123,6 +123,8 @@ describe('CLI utilities', () => {
       'search-server-url': 'ws://127.0.0.1:18080',
       'search-max-pages': '2',
       'search-timeout-ms': '45000',
+      'search-min-interval-ms': '1500',
+      'search-max-retries': '2',
     });
 
     assert.equal(settings.search.engine, 'js-eyes');
@@ -130,6 +132,8 @@ describe('CLI utilities', () => {
     assert.equal(settings.search.provider.serverUrl, 'ws://127.0.0.1:18080');
     assert.equal(settings.search.provider.maxPages, 2);
     assert.equal(settings.search.provider.timeoutMs, 45000);
+    assert.equal(settings.search.provider.minIntervalMs, 1500);
+    assert.equal(settings.search.provider.maxRetries, 2);
   });
 
   it('maps budget and Schema v3 feature flags with explicit booleans', () => {

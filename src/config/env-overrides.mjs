@@ -105,6 +105,24 @@ export function settingsFromEnv(env = process.env) {
     search.jsEyesTimeoutMs = Number(jsEyesTimeoutMs);
   }
 
+  const minIntervalMs = readEnv('JS_EYES_MIN_INTERVAL_MS') || readEnv('JDR_SEARCH_MIN_INTERVAL_MS');
+  if (minIntervalMs) {
+    search.provider = {
+      ...(search.provider && typeof search.provider === 'object' ? search.provider : {}),
+      minIntervalMs: Number(minIntervalMs),
+    };
+    search.jsEyesMinIntervalMs = Number(minIntervalMs);
+  }
+
+  const maxRetries = readEnv('JS_EYES_MAX_RETRIES') || readEnv('JDR_SEARCH_MAX_RETRIES');
+  if (maxRetries) {
+    search.provider = {
+      ...(search.provider && typeof search.provider === 'object' ? search.provider : {}),
+      maxRetries: Number(maxRetries),
+    };
+    search.jsEyesMaxRetries = Number(maxRetries);
+  }
+
   const localDirs = readEnv('SEARCH_LOCAL_DIRS') || readEnv('JDR_CORPUS_DIRS');
   if (localDirs) {
     search.local = {

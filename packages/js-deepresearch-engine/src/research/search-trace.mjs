@@ -1,4 +1,5 @@
 import { compactSearchSnippets, getSearchMeta } from '../search/search-result.mjs';
+import { inferOutcomeFromError } from '../search/search-provider-error.mjs';
 
 export function inferSearchOutcome({
   error = null,
@@ -7,7 +8,7 @@ export function inferSearchOutcome({
   resultCount = 0,
   siteRejectedCount = 0,
 } = {}) {
-  if (error) return 'failed';
+  if (error) return inferOutcomeFromError(error) || 'failed';
   if (skipped === 'duplicate_query') return 'duplicate_query';
   if (memoryStatus === 'duplicate_results' || skipped === 'duplicate_results') return 'duplicate_results';
   if (Number(resultCount) <= 0 && Number(siteRejectedCount) > 0) return 'site_filtered_all';
@@ -46,10 +47,17 @@ export function buildExecutedSearchTrace({
     queryOrigin,
     plannerMode,
     plannedQueries,
-    searchOptions: searchOptions || meta.requestParams || null,
+    searchOptions: searchOptions || meta.effectiveSearchOptions || meta.requestParams || null,
+    requestedSearchOptions: meta.requestedSearchOptions || searchOptions || null,
+    effectiveSearchOptions: meta.effectiveSearchOptions || meta.requestParams || null,
+    droppedSearchOptions: meta.droppedSearchOptions || [],
     requestParams: meta.requestParams || null,
     unresponsiveEngines: meta.unresponsiveEngines || [],
     respondedEngines: meta.respondedEngines || [],
+    providerRetries: meta.providerRetries ?? 0,
+    providerError: error
+      ? { name: error.name || 'Error', message: error.message || String(error), code: error.code || null, retryable: Boolean(error.retryable) }
+      : (meta.providerError || null),
     resultCount: accepted,
     returnedResultCount: returned,
     siteRejectedCount,
@@ -65,6 +73,14 @@ export function buildExecutedSearchTrace({
     snippets: compactSearchSnippets(sources),
     targetGapIds: (targetGapIds || []).filter(Boolean),
     siteFallbackOf,
-    error: error ? { name: error.name || 'Error', message: error.message || String(error) } : null,
+    error: error
+      ? {
+        name: error.name || 'Error',
+        message: error.message || String(error),
+        code: error.code || null,
+        retryable: Boolean(error.retryable),
+        retryAfterMs: error.retryAfterMs ?? null,
+      }
+      : null,
   };
 }

@@ -197,6 +197,67 @@ describe('research profile does not invent venue policy', () => {
     assert.equal(profile.brief.requiredAnswerSlots[0].answerSlot, 'current status');
   });
 
+  it('lets the planner fill empty aliases and month-end asOf without promoting inferred hosts', async () => {
+    const query = '截至2026年8月研究智谱AI与Zhipu AI的招股书';
+    const profile = await planResearchProfile({
+      query,
+      profile: inferResearchProfile(query),
+      llm: {
+        async complete() {
+          return JSON.stringify({
+            entities: ['智谱AI'],
+            entityAliases: ['Zhipu AI', '智谱'],
+            asOf: '2026-08',
+            requiredHosts: ['hkexnews.hk'],
+            preferredHosts: ['hkexnews.hk'],
+            requiredSourceTypes: ['primary_filing'],
+            requiredAnswerSlots: [{
+              answerSlot: 'ownership',
+              question: '控股股东是谁',
+              priority: 'critical',
+            }],
+          });
+        },
+      },
+    });
+    assert.deepEqual(profile.brief.entities, ['智谱AI']);
+    assert.deepEqual(profile.brief.entityAliases, ['Zhipu AI', '智谱']);
+    assert.equal(profile.brief.asOf.date, '2026-08-31');
+    assert.equal(profile.brief.asOf.source, 'planner');
+    assert.deepEqual(profile.requiredHosts, []);
+    assert.ok(profile.preferredHosts.includes('hkexnews.hk'));
+  });
+
+  it('keeps user slots, aliases, and asOf over planner values', async () => {
+    const query = 'Read docs.example.com for 智谱AI';
+    const incoming = inferResearchProfile({
+      query,
+      entities: ['智谱AI'],
+      entityAliases: ['用户别名'],
+      asOf: '2026-07',
+      requiredAnswerSlots: [{ answerSlot: 'status', question: 'Is SubjectA supported?' }],
+    });
+    const profile = await planResearchProfile({
+      query,
+      profile: incoming,
+      llm: {
+        async complete() {
+          return JSON.stringify({
+            entities: ['PlannerCo'],
+            entityAliases: ['planner-alias'],
+            asOf: '2025-01',
+            requiredAnswerSlots: [{ answerSlot: 'planner-only', question: 'invented' }],
+            requiredHosts: ['sec.gov'],
+          });
+        },
+      },
+    });
+    assert.deepEqual(profile.brief.entities, ['智谱AI']);
+    assert.deepEqual(profile.brief.entityAliases, ['用户别名']);
+    assert.equal(profile.brief.asOf.date, '2026-07-31');
+    assert.equal(profile.brief.requiredAnswerSlots[0].answerSlot, 'status');
+  });
+
   it('keeps user slots when the planner returns a different contract', async () => {
     const query = 'Read docs.example.com for SubjectA';
     const incoming = inferResearchProfile({

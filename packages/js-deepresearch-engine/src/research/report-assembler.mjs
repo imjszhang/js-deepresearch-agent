@@ -172,7 +172,14 @@ export function assembleReport({
 }
 
 const LIST_PREFIX = /^\s*(?:[-*]|\d+[.)])\s+/;
-const WEAK_CLAIM_FLAGS = new Set(['uncited', 'snippet_only', 'unresolved_citation', 'missing_direct_evidence']);
+const WEAK_CLAIM_FLAGS = new Set([
+  'uncited',
+  'snippet_only',
+  'unresolved_citation',
+  'missing_direct_evidence',
+  'slot_blocked',
+  'slot_limited',
+]);
 
 function claimHasSourceContent(claim = {}) {
   return (claim.evidence || []).some((item) => {
@@ -184,11 +191,12 @@ function claimHasSourceContent(claim = {}) {
 
 export function shouldMoveWeakKeyClaim(claim = {}) {
   if (claim.kind !== 'key_claim') return false;
+  const flags = claim.evaluation?.flags || claim.flags || [];
+  if (flags.some((flag) => ['slot_blocked', 'slot_limited'].includes(flag))) return true;
   const verdict = claim.evaluation?.verdict;
   if (verdict === 'unsupported') return true;
   if (verdict !== 'unverifiable') return false;
   if (claimHasSourceContent(claim)) return false;
-  const flags = claim.evaluation?.flags || claim.flags || [];
   if (flags.some((flag) => WEAK_CLAIM_FLAGS.has(flag))) return true;
   return !claim.citedSourceId
     && !(claim.citedSourceIds || []).length
@@ -208,12 +216,24 @@ function isListLine(line) {
   return LIST_PREFIX.test(String(line || ''));
 }
 
-function removeClaimLines(narrative, text) {
+function isHeadingLine(line) {
+  return /^#{1,6}\s+/.test(String(line || ''));
+}
+
+function removeClaimLines(narrative, text, { paragraphs = false } = {}) {
   const lines = String(narrative || '').split('\n');
   const kept = [];
   let removed = false;
   for (const line of lines) {
+    if (isHeadingLine(line)) {
+      kept.push(line);
+      continue;
+    }
     if (isListLine(line) && claimLineMatches(line, text)) {
+      removed = true;
+      continue;
+    }
+    if (paragraphs && String(line).trim() && claimLineMatches(line, text)) {
       removed = true;
       continue;
     }
@@ -223,17 +243,80 @@ function removeClaimLines(narrative, text) {
   return { text: next, removed };
 }
 
+function claimHasSlotStatusFlag(claim = {}) {
+  const flags = claim.evaluation?.flags || claim.flags || [];
+  return flags.some((flag) => flag === 'slot_blocked' || flag === 'slot_limited');
+}
+
+const SUMMARY_HEADINGS = new Set(['summary', 'executive summary', '摘要', '总结', '概述']);
+const INCOMPLETE_SUMMARY = 'Required answer slots remain limited or blocked. Confirmed facts appear only where dedicated evidence was verified; see Caveats.';
+
+function isSummaryHeading(title = '') {
+  const normalized = String(title).normalize('NFKC').trim().toLowerCase().replace(/[：:]$/, '');
+  return SUMMARY_HEADINGS.has(normalized);
+}
+
+function summarySectionIsPlaceholder(report) {
+  const lines = String(report || '').split('\n');
+  const body = [];
+  let capture = false;
+  let captureLevel = 0;
+  for (const line of lines) {
+    const heading = line.match(/^(#{1,6})\s+(.+)$/);
+    if (heading) {
+      const level = heading[1].length;
+      if (isSummaryHeading(heading[2].trim())) {
+        capture = true;
+        captureLevel = level;
+        continue;
+      }
+      if (capture && level <= captureLevel) break;
+    }
+    if (capture) body.push(line);
+  }
+  const stripped = body.join('\n').replace(/[#*_`[\]()>]/g, '').replace(/[；;。.!?！？,，、\s…\-–—:：]/g, '');
+  return stripped.length < 12;
+}
+
+function insertAfterSummaryHeading(report, sentence) {
+  const lines = String(report || '').split('\n');
+  const next = [];
+  let inserted = false;
+  for (const line of lines) {
+    next.push(line);
+    const heading = line.match(/^#{1,6}\s+(.+)$/);
+    if (!inserted && heading && isSummaryHeading(heading[1].trim())) {
+      next.push('');
+      next.push(sentence);
+      next.push('');
+      inserted = true;
+    }
+  }
+  return inserted ? next.join('\n') : `${String(report || '').trim()}\n\n## Summary\n\n${sentence}\n`;
+}
+
+function ensureNarrativeAfterRevision(report) {
+  if (!summarySectionIsPlaceholder(report)) return report;
+  return insertAfterSummaryHeading(report, INCOMPLETE_SUMMARY);
+}
+
 export function reviseUnsupportedKeyClaims(report, claims = []) {
   const weak = claims.filter(shouldMoveWeakKeyClaim);
   let next = String(report || '');
   const moved = [];
+  let movedSlotStatus = false;
   for (const claim of weak) {
     const text = String(claim.text || '').trim();
     if (!text) continue;
-    const result = removeClaimLines(next, text);
+    const slotStatus = claimHasSlotStatusFlag(claim);
+    const result = removeClaimLines(next, text, { paragraphs: slotStatus });
     if (!result.removed) continue;
     next = result.text;
     moved.push(text);
+    if (slotStatus) movedSlotStatus = true;
   }
-  return { report: next.trim(), moved };
+  return {
+    report: (movedSlotStatus ? ensureNarrativeAfterRevision(next) : next).trim(),
+    moved,
+  };
 }

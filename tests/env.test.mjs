@@ -90,6 +90,8 @@ EXISTING=from-file
       JS_EYES_SERVER_URL: 'ws://127.0.0.1:18080',
       JS_EYES_MAX_PAGES: '3',
       JS_EYES_TIMEOUT_MS: '45000',
+      JS_EYES_MIN_INTERVAL_MS: '1500',
+      JS_EYES_MAX_RETRIES: '2',
     });
 
     assert.equal(overrides.search.engine, 'js-eyes');
@@ -100,6 +102,10 @@ EXISTING=from-file
     assert.equal(overrides.search.jsEyesServerUrl, 'ws://127.0.0.1:18080');
     assert.equal(overrides.search.jsEyesMaxPages, 3);
     assert.equal(overrides.search.jsEyesTimeoutMs, 45000);
+    assert.equal(overrides.search.jsEyesMinIntervalMs, 1500);
+    assert.equal(overrides.search.jsEyesMaxRetries, 2);
+    assert.equal(overrides.search.provider.minIntervalMs, 1500);
+    assert.equal(overrides.search.provider.maxRetries, 2);
     assert.equal(overrides.search.options.jsEyesCli, 'custom-js-eyes');
     assert.deepEqual(overrides.search.options.jsEyesSkills, ['js-xiaohongshu-ops-skill']);
   });

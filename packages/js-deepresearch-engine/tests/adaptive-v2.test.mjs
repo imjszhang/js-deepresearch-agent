@@ -605,7 +605,9 @@ describe('exploratory agent loop', () => {
     const result = await new ResearchRunner().run({
       query: 'parallel topic',
       settings: { llm: {}, search: {}, research: {
-        strategy: 'exploratory', exploratory: { minLlmTokens: 0, maxLlmTokens: 0, maxSteps: 6, maxEvaluationRetries: 0, maxQueriesPerStep: 3, autoReadTopK: 0, maxSearchRequests: 2 },
+        strategy: 'exploratory',
+        concurrency: 3,
+        exploratory: { minLlmTokens: 0, maxLlmTokens: 0, maxSteps: 6, maxEvaluationRetries: 0, maxQueriesPerStep: 3, autoReadTopK: 0, maxSearchRequests: 2 },
         focused: { fetchMode: 'disabled' },
       } },
       search: { async search(query) {

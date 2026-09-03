@@ -479,6 +479,38 @@ describe('report and research context', () => {
     assert.ok(evidence.length <= 80);
   });
 
+  it('preserves canonical citation indices after findings are partitioned', () => {
+    const messages = reportPrompt({
+      query: 'partitioned evidence',
+      findings: [
+        {
+          question: 'first verified',
+          gapId: 'g1',
+          sources: [{ title: 'First', url: 'https://example.com/1', content: 'first body', fetchStatus: 'ok' }],
+        },
+        {
+          question: 'second limited',
+          gapId: 'g2',
+          sources: [{ title: 'Second', url: 'https://example.com/2', content: 'second body', fetchStatus: 'ok' }],
+        },
+        {
+          question: 'third verified',
+          gapId: 'g3',
+          sources: [{ title: 'Third', url: 'https://example.com/3', content: 'third body', fetchStatus: 'ok' }],
+        },
+      ],
+      gaps: [
+        { id: 'g1', requiredSlot: true, status: 'verified' },
+        { id: 'g2', requiredSlot: true, status: 'limited' },
+        { id: 'g3', requiredSlot: true, status: 'verified' },
+      ],
+    });
+    const userContent = messages[1].content;
+    assert.match(userContent, /\[1\.1\] First/);
+    assert.match(userContent, /\[2\.1\] Second/);
+    assert.match(userContent, /\[3\.1\] Third/);
+  });
+
   it('formats follow-up context from enriched evidence', () => {
     const context = formatSourcesForResearchContext([{
       question: 'q',

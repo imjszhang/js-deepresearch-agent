@@ -39,8 +39,12 @@ function formatCache(cache) {
 }
 
 function slotSummary(audit) {
-  const counts = slotStatusCounts(audit);
-  return counts.total ? `${counts.completed}/${counts.total}` : 'n/a';
+  const counts = audit?.slotCounts || audit?.requiredSlotCompletion?.counts;
+  if (counts?.total || counts?.required) {
+    return `required ${counts.requiredCompleted || 0}/${counts.required || 0}; all ${counts.completed || 0}/${counts.total || 0}`;
+  }
+  const fallback = slotStatusCounts(audit);
+  return fallback.total ? `${fallback.completed}/${fallback.total}` : 'n/a';
 }
 
 function slotStatusCounts(audit) {
@@ -127,6 +131,9 @@ export function formatStrategyCompareMarkdown(comparison) {
       lines.push(
         `| ${run.strategyLabel} | ${audit.status} | ${formatPass(audit.processContract.pass)} | ${formatPass(audit.reportIntegrity.pass)} | ${formatPass(audit.citationIntegrity.pass)} | ${formatPass(audit.evidenceProvenance.pass)} | ${slotSummary(audit)} |`,
       );
+      if (audit.status === 'invalid' && audit.invalidReasons?.length) {
+        lines.push('', `- ${run.strategyLabel} invalid because: ${audit.invalidReasons.join(', ')}`);
+      }
     }
 
     lines.push(

@@ -170,6 +170,7 @@ export async function buildReport({
   maxAttempts = 2,
   mode = 'narrative',
   onAttempt = () => {},
+  gaps = [],
 }) {
   if (findings.length === 0) {
     return `# Research Report\n\nNo sources were found for: ${query}`;
@@ -183,8 +184,8 @@ export async function buildReport({
     const startedAt = Date.now();
     const report = await llm.complete({
       messages: attempt === 1
-        ? reportPrompt({ query, findings, limitations, strategy, passages, maxPassageChars })
-        : reportRetryPrompt({ query, findings, limitations, strategy, passages, maxPassageChars }),
+        ? reportPrompt({ query, findings, limitations, strategy, passages, maxPassageChars, gaps })
+        : reportRetryPrompt({ query, findings, limitations, strategy, passages, maxPassageChars, gaps }),
       signal,
       temperature: attempt === 1 ? 0.2 : 0,
       purpose,

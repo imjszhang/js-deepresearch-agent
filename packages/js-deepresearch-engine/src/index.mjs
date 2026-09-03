@@ -54,7 +54,16 @@ export {
   resolveSearchRequestOptions,
   publicSearchOptionsSnapshot,
 } from './search/normalize-search-config.mjs';
-export { attachSearchMeta, getSearchMeta } from './search/search-result.mjs';
+export { attachSearchMeta, getSearchMeta, collectRespondedEngines } from './search/search-result.mjs';
+export {
+  SearchProviderError,
+  searchErrorFromProviderPayload,
+  serializeSearchError,
+  isTransientSearchError,
+  inferOutcomeFromError,
+  classifySearchProgress,
+  classifyInvalidReason,
+} from './search/search-provider-error.mjs';
 export { buildPlannerFeedback, plannerFeedbackFromState } from './research/planner-feedback.mjs';
 export {
   assessSourceBody,
@@ -62,7 +71,13 @@ export {
   failClosedAssessment,
 } from './research/source-assessment.mjs';
 export { collectObservabilityMetrics } from './research/observability.mjs';
-export { resolveSearchConcurrency } from './search/search-capabilities.mjs';
+export {
+  resolveSearchConcurrency,
+  resolveSearchCapabilities,
+  filterSearchOptions,
+  DEFAULT_SEARCH_CAPABILITIES,
+  SEARCH_OPTION_KEYS,
+} from './search/search-capabilities.mjs';
 export { BudgetManager, BudgetExceededError } from './research/budget-manager.mjs';
 export { QueryMemory, normalizeQuery, querySimilarity } from './research/query-memory.mjs';
 export {
@@ -72,7 +87,15 @@ export {
   researchBriefFromInput,
   mergeResearchBrief,
   slotsFromPlannerGaps,
+  sanitizeAsOf,
 } from './research/research-brief.mjs';
+export {
+  applyAsOfGate,
+  resolveCompletionStatus,
+  slotEvidenceLimitations,
+  sourceUsableForAsOf,
+} from './research/as-of.mjs';
+export { promoteSuccessfulSources, shouldPromoteSourceToSlot } from './research/slot-promotion.mjs';
 export {
   GAP_SCHEMA_VERSION,
   GAP_STATUSES,
@@ -111,6 +134,7 @@ export {
   isSuccessfulBody,
   isRawBinaryDocumentText,
   classifyFetchedBody,
+  sanitizeUnusableSourceBody,
   MIN_FETCHED_BODY_CHARS,
 } from './research/body-quality.mjs';
 export {
@@ -129,9 +153,19 @@ export {
   failClosedSupport,
   slotSupportFingerprint,
 } from './research/gap-slot-support.mjs';
-export { evaluateReadinessGate } from './research/adaptive/readiness-gate.mjs';
+export { evaluateReadinessGate, repairGapsFromGate } from './research/adaptive/readiness-gate.mjs';
+export {
+  partitionFindingsForReport,
+  applySlotStatusToClaims,
+  evidenceGradeForGap,
+} from './research/report-evidence.mjs';
 export {
   classifySourceTier,
+  evaluateSourceRelevance,
+  resolveEntityAliases,
+  matchEntityAlias,
+  documentMatchesQuerySubject,
+  isExternalRerankProvider,
   evidenceIndependenceKey,
   hostnameOf,
   independentEvidenceKeysFromSources,

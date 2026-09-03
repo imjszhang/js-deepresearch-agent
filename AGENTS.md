@@ -112,6 +112,8 @@ npm exec --package=. -- jdr research "Explain the current state of local-first A
 | `--search-max-pages` | `search.provider.maxPages` | JS Eyes 搜索页数 |
 | `--js-eyes-max-pages` | `search.provider.maxPages` | 兼容别名 |
 | `--search-timeout-ms` | `search.provider.timeoutMs` | JS Eyes 单次搜索超时（毫秒） |
+| `--search-min-interval-ms` / `--js-eyes-min-interval-ms` | `search.provider.minIntervalMs` | 可选；同 skill 串行调用的最小间隔。默认 0，不写死站点策略 |
+| `--search-max-retries` / `--js-eyes-max-retries` | `search.provider.maxRetries` | 可选；仅对结构化 `retryable` provider 错误重试。默认不重试，除非 payload 自带 `retryable` |
 | `--js-eyes-timeout-ms` | `search.provider.timeoutMs` | 兼容别名 |
 | `--corpus-dirs` | `search.local.dirs` | 逗号分隔的本地目录通道；本次 run 启用 `local`（#16 fan-out 未合并前不会同时跑网页引擎） |
 | `--strategy` | `research.strategy` | `focused` \| `quick` \| `exploratory` |
@@ -630,6 +632,8 @@ npm run benchmark:strategies -- \
 | `JS_EYES_SERVER_URL` | `search.jsEyesServerUrl` |
 | `JS_EYES_MAX_PAGES` | `search.jsEyesMaxPages` |
 | `JS_EYES_TIMEOUT_MS` | `search.jsEyesTimeoutMs` |
+| `JS_EYES_MIN_INTERVAL_MS` / `JDR_SEARCH_MIN_INTERVAL_MS` | `search.provider.minIntervalMs` |
+| `JS_EYES_MAX_RETRIES` / `JDR_SEARCH_MAX_RETRIES` | `search.provider.maxRetries` |
 | `WORK_DIR` | `research.workDir` |
 | `JDR_HTTP_PROXY` | `http.proxy`；SOCKS5/HTTP 代理 URL（如 `socks5://127.0.0.1:1080`）；仅 LLM / embedding / rerank 使用，不代理 SearXNG 与 URL 正文抓取 |
 | `JDR_RERANK_PROVIDER` | `research.providers.rerank.provider`；只有显式设为 `jina` 才启用远程调用 |
@@ -784,7 +788,7 @@ npm exec --package=. -- jdr research "query" --search js-eyes --search-skills js
 js-eyes skill run js-reddit-ops-skill search "openclaw" --limit 3 --read-mode api --json
 ```
 
-各 skill 串行查询；单 skill 失败时仍返回其他 skill 结果（**AbortError 除外**，取消会立即停止后续 skill）；全部失败才报错。浏览器-backed skill 会自动将问题并发限制为 1。
+各 skill 串行查询；单 skill 失败时仍返回其他 skill 结果（**AbortError 除外**，取消会立即停止后续 skill）；全部失败才报错。浏览器-backed skill 会自动将问题并发限制为 1。exploratory 与 focused/quick 一样走 bounded search executor，不再用裸 `Promise.all` 绕过 `maxQuestionConcurrency`。JS Eyes 进程内还按 `serverUrl + skillId` 串行排队。Planner 给出的 `searchOptions` 会按 provider `supportedSearchOptions` 过滤；Google ops 的 `engines=bing` 会被丢掉并写入 SearchMeta，不会假装执行。限流等错误只认 provider JSON 里的 `code` / `retryable` / `retryAfterMs`，不解析中文限流文案。transient 失败不计入 `repairFailures`。`quality.completionStatus` 表示证据合同是否完成；`safety_cap` 且 required slot 仍开放时为 `incomplete`，不要把 legacy `quality.gate=pass_with_warnings` 当成研究完成。成功正文可在目标 slot 独立准入后显式 promotion，但 required slot 仍禁止未验证 fallback。
 
 **取消与 js-eyes**：每次搜索可能触发浏览器 `open_url`（如 Reddit）。`focused` 默认约 2 轮 ×（原问题 + 2 子问题）≈ 6 次搜索，并可能额外抓取最多 12 个 URL；取消后不再调度新搜索，但已打开的标签页需手动关闭。
 

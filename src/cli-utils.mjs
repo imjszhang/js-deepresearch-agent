@@ -72,6 +72,10 @@ function applyProviderOverrides(settings, flags) {
     'js-eyes-max-pages': 'search.provider.maxPages',
     'search-timeout-ms': 'search.provider.timeoutMs',
     'js-eyes-timeout-ms': 'search.provider.timeoutMs',
+    'search-min-interval-ms': 'search.provider.minIntervalMs',
+    'js-eyes-min-interval-ms': 'search.provider.minIntervalMs',
+    'search-max-retries': 'search.provider.maxRetries',
+    'js-eyes-max-retries': 'search.provider.maxRetries',
   };
 
   for (const [flag, key] of Object.entries(providerMappings)) {

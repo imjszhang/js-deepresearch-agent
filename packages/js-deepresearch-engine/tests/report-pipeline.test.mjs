@@ -144,6 +144,36 @@ Ollama targets easy local inference. [1.1]
     assert.equal(check.ok, true, check.flags.join(','));
   });
 
+  it('moves slot-limited Summary paragraphs into Caveats', () => {
+    const narrative = `# Research Report
+
+## Summary
+智谱AI于2026年1月在港交所上市，股票代码为2513.HK。 [1.1]
+
+A verified product fact remains after revision. [2.1]
+
+## Key Findings
+- A verified finding stays. [2.1]
+`;
+    const revised = reviseUnsupportedKeyClaims(narrative, [{
+      kind: 'key_claim',
+      text: '智谱AI于2026年1月在港交所上市，股票代码为2513.HK。 [1.1]',
+      flags: ['slot_limited'],
+      evaluation: { verdict: 'unverifiable', flags: ['slot_limited'] },
+    }]);
+    assert.equal(revised.moved.length, 1);
+    assert.doesNotMatch(revised.report, /港交所上市/);
+    assert.match(revised.report, /verified product fact remains/);
+    const reassembled = assembleReport({
+      narrative: revised.report,
+      findings,
+      limitations: revised.moved.map((text) => `Insufficient direct evidence for: ${text}`),
+      query: 'topic',
+    });
+    assert.match(reassembled, /## Caveats/);
+    assert.match(reassembled, /港交所上市/);
+  });
+
   it('moves unsupported key claims into Caveats instead of prefixing Unverified', () => {
     const narrative = `# Research Report
 

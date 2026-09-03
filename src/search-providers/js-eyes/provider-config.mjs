@@ -11,6 +11,13 @@ function positiveInteger(value, fallback) {
   return Math.floor(number);
 }
 
+function nonNegativeInteger(value, fallback) {
+  if (value == null || value === '') return fallback;
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0) return fallback;
+  return Math.floor(number);
+}
+
 export function resolveProviderConfig(config = {}) {
   const legacyProvider = {
     cli: config.jsEyesCli,
@@ -48,6 +55,13 @@ export function resolveProviderConfig(config = {}) {
       ...(legacyProvider.args && typeof legacyProvider.args === 'object' ? legacyProvider.args : {}),
       ...(nested.args && typeof nested.args === 'object' ? nested.args : {}),
     },
+    minIntervalMs: nonNegativeInteger(
+      nested.minIntervalMs ?? config.jsEyesMinIntervalMs,
+      0,
+    ),
+    maxRetries: nested.maxRetries == null && config.jsEyesMaxRetries == null
+      ? null
+      : nonNegativeInteger(nested.maxRetries ?? config.jsEyesMaxRetries, null),
     maxResults: positiveInteger(config.maxResults, 8),
   };
 }

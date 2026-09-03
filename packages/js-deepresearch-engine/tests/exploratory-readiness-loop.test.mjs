@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { ResearchRunner } from '../src/index.mjs';
+import { ResearchRunner, SearchProviderError } from '../src/index.mjs';
 import { fallbackAdaptiveAction } from '../src/research/adaptive/agent-policy.mjs';
 import { evaluateReadinessGate } from '../src/research/adaptive/readiness-gate.mjs';
 import { inferResearchProfile } from '../src/research/adaptive/research-profile.mjs';
@@ -870,5 +870,103 @@ describe('exploratory Search-Read-Reason loop', () => {
     assert.notEqual(result.quality.stopReason, 'evidence_sufficient');
     assert.ok(searches.length >= 2);
     assert.ok((result.quality.limitations || []).some((line) => /unresolved|slot|required/i.test(line)));
+  });
+
+  it('honors provider maxQuestionConcurrency during exploratory search', async () => {
+    let active = 0;
+    let maxActive = 0;
+    const result = await new ResearchRunner().run({
+      query: 'SubjectA official status',
+      settings: { llm: {}, search: {}, research: {
+        strategy: 'exploratory',
+        concurrency: 3,
+        exploratory: { minLlmTokens: 0, maxLlmTokens: 0, maxSteps: 3, maxQueriesPerStep: 3, autoReadTopK: 0 },
+        focused: { fetchMode: 'disabled' },
+      } },
+      search: {
+        capabilities: { maxQuestionConcurrency: 1 },
+        async search() {
+          active += 1;
+          maxActive = Math.max(maxActive, active);
+          await new Promise((resolve) => { setTimeout(resolve, 15); });
+          active -= 1;
+          return [{ title: 'SubjectA', url: `https://docs.example.com/${maxActive}`, snippet: 'SubjectA official status' }];
+        },
+      },
+      llm: llmFor([
+        {
+          action: 'search',
+          query: 'SubjectA one',
+          queries: ['SubjectA one', 'SubjectA two', 'SubjectA three'],
+          queryOrigin: 'user_query',
+          gapId: 'gap-1',
+        },
+        { action: 'answer', reasonCode: 'done' },
+      ]),
+    });
+    assert.equal(maxActive, 1);
+    assert.ok(result.trace.some((entry) => entry.action === 'search'));
+  });
+
+  it('does not consume repair budget on transient provider errors', async () => {
+    const result = await new ResearchRunner().run({
+      query: 'SubjectA official status',
+      settings: { llm: {}, search: {}, research: {
+        strategy: 'exploratory',
+        exploratory: {
+          minLlmTokens: 0,
+          maxLlmTokens: 0,
+          maxSteps: 6,
+          maxRepairFailuresPerGap: 1,
+          maxConsecutiveInvalidSteps: 3,
+          autoReadTopK: 0,
+        },
+        focused: { fetchMode: 'disabled' },
+      } },
+      search: {
+        async search() {
+          throw new SearchProviderError('slow down', { code: 'rate_limited', retryable: true });
+        },
+      },
+      llm: llmFor(Array.from({ length: 8 }, (_, index) => ({
+        action: 'search',
+        query: `SubjectA official documents ${index}`,
+        queryOrigin: 'user_query',
+        gapId: 'gap-1',
+      }))),
+    });
+    assert.notEqual(result.quality.stopDetail, 'repair_exhausted');
+    assert.ok(!(result.gaps || []).some((gap) => gap.blockedReason === 'repair_exhausted'));
+    assert.ok((result.quality.metrics.recovery.transientFailures || 0) >= 1);
+  });
+
+  it('marks safety_cap with open required slots as incomplete', async () => {
+    const result = await new ResearchRunner().run({
+      query: 'SubjectA official status',
+      settings: { llm: {}, search: {}, research: {
+        strategy: 'exploratory',
+        exploratory: {
+          minLlmTokens: 0,
+          maxLlmTokens: 0,
+          maxSteps: 2,
+          maxRepairFailuresPerGap: 1,
+          maxConsecutiveInvalidSteps: 100,
+          autoReadTopK: 0,
+        },
+        focused: { fetchMode: 'disabled' },
+      } },
+      search: { async search() { return []; } },
+      llm: llmFor([
+        { action: 'search', query: 'SubjectA official status', queryOrigin: 'user_query', gapId: 'gap-1' },
+        { action: 'search', query: 'SubjectA official status two', queryOrigin: 'user_query', gapId: 'gap-1' },
+      ], {
+        onProfile: () => JSON.stringify({
+          requiredAnswerSlots: [{ answerSlot: 'official_status', question: 'SubjectA official status' }],
+        }),
+      }),
+    });
+    assert.equal(result.quality.stopReason, 'safety_cap');
+    assert.equal(result.quality.completionStatus, 'incomplete');
+    assert.ok(['pass_with_warnings', 'fail', 'pass'].includes(result.quality.gate));
   });
 });

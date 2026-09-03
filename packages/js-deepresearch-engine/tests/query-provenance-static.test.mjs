@@ -1,17 +1,45 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { readFileSync, readdirSync } from 'node:fs';
+import path from 'node:path';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = fileURLToPath(new URL('../../..', import.meta.url));
 
-function rg(args) {
+function sourceFiles(target) {
+  const absolute = path.resolve(repoRoot, target);
+  if (!readdirSafe(absolute)) return [absolute];
+  return readdirSync(absolute, { withFileTypes: true })
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .flatMap((entry) => {
+      const child = path.join(absolute, entry.name);
+      return entry.isDirectory() ? sourceFiles(child) : [child];
+    });
+}
+
+function readdirSafe(target) {
   try {
-    return execFileSync('rg', args, { cwd: repoRoot, encoding: 'utf8' });
+    return readdirSync(target, { withFileTypes: true });
   } catch (error) {
-    if (error.status === 1) return '';
+    if (error.code === 'ENOTDIR') return null;
     throw error;
   }
+}
+
+function rg(args) {
+  const [lineNumbers, pattern, ...targets] = args;
+  assert.equal(lineNumbers, '-n');
+  const matcher = new RegExp(pattern);
+  const hits = targets.flatMap((target) => sourceFiles(target).flatMap((file) => (
+    readFileSync(file, 'utf8')
+      .split(/\r?\n/)
+      .flatMap((line, index) => (
+        matcher.test(line)
+          ? [`${path.relative(repoRoot, file)}:${index + 1}:${line}`]
+          : []
+      ))
+  )));
+  return hits.join('\n');
 }
 
 describe('query provenance static boundary', () => {

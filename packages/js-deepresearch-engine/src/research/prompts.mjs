@@ -1,5 +1,6 @@
 import { getSourceEvidenceClass } from './focused-settings.mjs';
 import { DEFAULT_MAX_PASSAGE_CHARS, selectDisplayedEvidence } from './evidence-chain.mjs';
+import { partitionFindingsForReport } from './report-evidence.mjs';
 
 export function searchQueryPlannerPrompt({
   mode = 'initial',
@@ -21,6 +22,7 @@ export function searchQueryPlannerPrompt({
   hints = [],
   rejectionReasons = [],
   recentSearchOutcomes = [],
+  providerCapabilities = null,
 } = {}) {
   const schema = '{"queries":[{"query":"...","targetGapId":"gap-1","intent":"...","expectedEvidence":"...","sourceType":"web|news|filing|local","searchOptions":{"engines":"...","categories":"...","language":"...","pageno":1}}]}';
   return [
@@ -34,7 +36,7 @@ export function searchQueryPlannerPrompt({
         'Never copy internal identifiers, snake_case slot names, evidenceCriteria codes, or English boilerplate such as "primary source evidence".',
         'Do not invent or rewrite queries by concatenating slot names, hosts, or missing-evidence codes.',
         'site: is optional. Use it only for hosts listed in allowedSiteHosts. preferredHosts are ranking hints, not site: targets unless they appear in allowedSiteHosts.',
-        'searchOptions are optional request parameters passed through to the search provider. Use them only when recentSearchOutcomes or rejectedQueries show a reason to change engines, categories, language, or page.',
+        'searchOptions are optional request parameters passed through to the search provider. Use them only when they appear in providerCapabilities.supportedSearchOptions. A fixedEngine provider will ignore unsupported engines.',
         'Read recentSearchOutcomes as facts. Do not repeat a failed angle unchanged.',
         evidenceScope === 'local' ? 'Local corpus search is active. Never emit site: operators.' : '',
         siteQueryMode === 'never' ? 'Do not emit site: operators in this mode.' : '',
@@ -58,6 +60,7 @@ export function searchQueryPlannerPrompt({
         rejectedQueries,
         exhaustedAngles,
         recentSearchOutcomes,
+        providerCapabilities,
         observedHosts,
         allowedSiteHosts,
         evidenceScope,
@@ -127,7 +130,15 @@ function sourceEvidenceClassLabel(source) {
   return 'missing evidence';
 }
 
+function formatFindingBlock(finding, index, { passages, maxPassageChars }) {
+  const sources = (finding.sources || []).map((source, sourceIndex) => (
+    `[${index + 1}.${sourceIndex + 1}] ${source.title}\n${source.url}\nEvidence class: ${sourceEvidenceClassLabel(source)}\nEvidence: ${selectDisplayedEvidence(source, { passages, maxChars: maxPassageChars })}`
+  )).join('\n\n');
+  return `Question: ${finding.question}\nEvidence grade: ${finding.evidenceGrade || 'verified'}\nSources:\n${sources}`;
+}
+
 const NARRATIVE_SCHEMA = '{"title":"...","summary":["... [1.1]"],"keyFindings":[{"heading":"...","claims":["... [1.2]"]}],"caveats":["..."]}';
+const REPORT_FINDING_INDEX = Symbol('reportFindingIndex');
 
 export function reportPrompt({
   query,
@@ -136,13 +147,22 @@ export function reportPrompt({
   strategy = 'focused',
   passages = [],
   maxPassageChars = DEFAULT_MAX_PASSAGE_CHARS,
+  gaps = [],
 } = {}) {
-  const sourceBlock = findings.map((finding, index) => {
-    const sources = finding.sources.map((source, sourceIndex) => (
-      `[${index + 1}.${sourceIndex + 1}] ${source.title}\n${source.url}\nEvidence class: ${sourceEvidenceClassLabel(source)}\nEvidence: ${selectDisplayedEvidence(source, { passages, maxChars: maxPassageChars })}`
-    )).join('\n\n');
-    return `Question: ${finding.question}\nSources:\n${sources}`;
-  }).join('\n\n---\n\n');
+  const indexedFindings = findings.map((finding, index) => ({
+    ...finding,
+    [REPORT_FINDING_INDEX]: index,
+  }));
+  const partitioned = partitionFindingsForReport({ findings: indexedFindings, gaps, strategy });
+  const verifiedBlock = partitioned.verified.map((finding) => (
+    formatFindingBlock(finding, finding[REPORT_FINDING_INDEX], { passages, maxPassageChars })
+  )).join('\n\n---\n\n');
+  const limitedBlock = partitioned.limited.map((finding) => (
+    formatFindingBlock(finding, finding[REPORT_FINDING_INDEX], { passages, maxPassageChars })
+  )).join('\n\n---\n\n');
+  const blockedBlock = partitioned.blocked.map((finding) => (
+    `${finding.question} [${finding.gapId || 'unresolved'}] status=${finding.evidenceGrade}`
+  )).join('\n');
 
   const snippetPolicy = strategy === 'quick'
     ? 'This is a quick snippet-only scan; you may cite search snippets, but do not invent body-level evidence.'
@@ -163,7 +183,9 @@ export function reportPrompt({
         'Do not include evidence, sources, Evidence, or Sources fields.',
         'Do not copy Evidence class labels or source-body dumps into claims.',
         'The runtime appends Evidence and Sources from collected findings.',
-        'Only use facts supported by the collected evidence blocks.',
+        'Only verified/resolved evidence may enter Summary or Key Findings as confirmed facts.',
+        'Limited or body_read evidence may only appear in Caveats with hedging language.',
+        'Blocked, missing, open, or searched slots are gap notes only and must not be written as confirmed evidence.',
         snippetPolicy,
         'If evidence is insufficient, say so in caveats instead of inventing details.',
         'Finish every sentence. Do not stop mid-clause or mid-citation.',
@@ -174,7 +196,9 @@ export function reportPrompt({
       content: [
         `Research query:\n${query}`,
         limitations.length ? `Quality constraints:\n${limitations.map((item) => `- ${item}`).join('\n')}\nDo not state these unsupported areas as established facts.` : '',
-        `Collected evidence:\n${sourceBlock}`,
+        verifiedBlock ? `Verified evidence (may support Summary/Key Findings):\n${verifiedBlock}` : 'Verified evidence: none.',
+        limitedBlock ? `Limited evidence (Caveats only, hedge every claim):\n${limitedBlock}` : '',
+        blockedBlock ? `Unresolved or blocked slots (gap notes only, do not confirm):\n${blockedBlock}` : '',
       ].filter(Boolean).join('\n\n'),
     },
   ];
@@ -298,8 +322,9 @@ export function reportRetryPrompt({
   strategy = 'focused',
   passages = [],
   maxPassageChars = DEFAULT_MAX_PASSAGE_CHARS,
+  gaps = [],
 } = {}) {
-  const messages = reportPrompt({ query, findings, limitations, strategy, passages, maxPassageChars });
+  const messages = reportPrompt({ query, findings, limitations, strategy, passages, maxPassageChars, gaps });
   return [
     ...messages,
     {

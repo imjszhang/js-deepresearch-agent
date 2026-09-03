@@ -204,18 +204,24 @@ function profileSystemPrompt(scope, compact = false) {
   if (compact) {
     return [
       'Return compact JSON only for THIS query. Do not invent a fixed industry questionnaire.',
-      'Schema: {"requiredAnswerSlots":[{"answerSlot":"...","question":"...","priority":"critical|normal","requiredHosts":[],"requiredHostMode":"any|all","preferredHosts":[],"requiredSourceTypes":[],"evidenceCriteria":[]}],"requiredHosts":[],"requiredHostMode":"any|all","preferredHosts":[],"requiredSourceTypes":[],"flags":{}}',
+      'Schema: {"entities":[],"entityAliases":[],"asOf":null,"requiredAnswerSlots":[{"answerSlot":"...","question":"...","priority":"critical|normal","requiredHosts":[],"requiredHostMode":"any|all","preferredHosts":[],"requiredSourceTypes":[],"evidenceCriteria":[]}],"requiredHosts":[],"requiredHostMode":"any|all","preferredHosts":[],"requiredSourceTypes":[],"flags":{}}',
       'requiredAnswerSlots must be non-empty for this query. Do not omit the closing brace.',
+      'entityAliases may only copy aliases, tickers, or legal names that appear literally in the query. Do not invent translations.',
+      'If the query says 截至YYYY年M月 or as-of a calendar month, set asOf to that month last day as YYYY-MM-DD inclusive cutoff.',
       '"官方" / "official" means first-party documents of the subject, not stock-exchange or SEC filings unless the query names that venue.',
+      'When the query asks for filings or disclosures, inferred venues go in preferredHosts, never requiredHosts.',
       'Do not default to hkexnews.hk, sec.gov, sse.com.cn, or szse.cn.',
       local,
     ].filter(Boolean).join('\n');
   }
   return [
     'Infer a research evidence profile for THIS query only. Do not invent a fixed industry questionnaire.',
-    'Return JSON only: {"audience":null,"decision":null,"assumedExpertise":null,"timeRange":null,"geography":[],"entities":[],"exclusions":[],"successCriteria":[],"requiredAnswerSlots":[{"answerSlot":"...","question":"...","claimFamily":null,"priority":"critical|normal","requiredHosts":[],"requiredHostMode":"any|all","preferredHosts":[],"requiredSourceTypes":[],"evidenceCriteria":[]}],"consequentialClaims":[],"flags":{"freshness":false,"completeness":false,"plurality":false,"attribution":false,"primary_source":false,"numeric":false,"decision_critical":false},"requiredHosts":[],"requiredHostMode":"any|all","preferredHosts":[],"requiredSourceTypes":[],"minIndependentSources":1,"gaps":[{"question":"...","priority":"critical|normal","requiredHosts":[],"preferredHosts":[]}]}',
+    'Return JSON only: {"audience":null,"decision":null,"assumedExpertise":null,"timeRange":null,"asOf":null,"geography":[],"entities":[],"entityAliases":[],"exclusions":[],"successCriteria":[],"requiredAnswerSlots":[{"answerSlot":"...","question":"...","claimFamily":null,"priority":"critical|normal","requiredHosts":[],"requiredHostMode":"any|all","preferredHosts":[],"requiredSourceTypes":[],"evidenceCriteria":[]}],"consequentialClaims":[],"flags":{"freshness":false,"completeness":false,"plurality":false,"attribution":false,"primary_source":false,"numeric":false,"decision_critical":false},"requiredHosts":[],"requiredHostMode":"any|all","preferredHosts":[],"requiredSourceTypes":[],"minIndependentSources":1,"gaps":[{"question":"...","priority":"critical|normal","requiredHosts":[],"preferredHosts":[]}]}',
     'Only hostnames literally present in the query may be requiredHosts. Put inferred official sites, publishers, and useful domains in preferredHosts.',
+    'entityAliases may only copy aliases, tickers, or legal names that appear literally in the query. Do not invent translations or marketing names.',
+    'If the query says 截至YYYY年M月 or as-of a calendar month, set asOf to that month last day as YYYY-MM-DD inclusive cutoff. Do not infer a date from vague latest wording.',
     '"官方" / "official" means first-party documents of the subject, not stock-exchange or SEC filings unless the query names that venue.',
+    'When the query asks for filings or disclosures, inferred venues go in preferredHosts, never requiredHosts.',
     'Do not default to hkexnews.hk, sec.gov, sse.com.cn, or szse.cn. Do not add primary_filing unless the query itself is about filings or disclosures.',
     'requiredSourceTypes may include primary_filing or numeric only.',
     local,

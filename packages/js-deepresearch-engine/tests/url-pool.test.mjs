@@ -44,4 +44,26 @@ describe('per-gap URL discovery metadata', () => {
     assert.equal(state.pickPolicyReads(1, 'gap-2')[0].rerankScore, 0.8);
     assert.equal(state.pickPolicyReads(1, 'gap-3')[0].rerankScore, 0.2);
   });
+
+  it('does not leak another gap score when the current gap has no evaluation', () => {
+    const state = new ResearchState({ query: 'company research' });
+    state.addGap('financial performance', 'critical', { id: 'gap-2' });
+    state.addGap('technology moat', 'critical', { id: 'gap-3' });
+    state.addCandidates([{
+      id: 'shared',
+      url: 'https://example.com/shared',
+      title: 'Shared company source',
+      rerank: { provider: 'http', score: 0.8 },
+    }], 'gap-2', { query: 'financial query' });
+    state.addCandidates([{
+      id: 'shared',
+      url: 'https://example.com/shared',
+      title: 'Shared company source',
+    }], 'gap-3', { query: 'technology query' });
+    const candidate = state.candidates.get('shared');
+    candidate.gapMatches['gap-2'].rerank = { provider: 'http', score: 0.8 };
+    const picked = state.pickPolicyReads(1, 'gap-3');
+    assert.equal(picked.length, 1);
+    assert.equal(picked[0].rerankScore, null);
+  });
 });

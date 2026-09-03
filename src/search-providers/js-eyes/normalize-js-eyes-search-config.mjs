@@ -28,6 +28,8 @@ function buildProviderFromLegacy(config, options) {
       ...(options.jsEyesArgs && typeof options.jsEyesArgs === 'object' ? options.jsEyesArgs : {}),
       ...(config.jsEyesArgs && typeof config.jsEyesArgs === 'object' ? config.jsEyesArgs : {}),
     },
+    minIntervalMs: config.jsEyesMinIntervalMs ?? options.jsEyesMinIntervalMs,
+    maxRetries: config.jsEyesMaxRetries ?? options.jsEyesMaxRetries,
   };
 }
 
@@ -54,6 +56,8 @@ function mergeProvider(existing = {}, legacy = {}, explicit = {}) {
       ...(legacy.args && typeof legacy.args === 'object' ? legacy.args : {}),
       ...(explicit.args && typeof explicit.args === 'object' ? explicit.args : {}),
     },
+    minIntervalMs: explicit.minIntervalMs ?? legacy.minIntervalMs ?? existing.minIntervalMs,
+    maxRetries: explicit.maxRetries ?? legacy.maxRetries ?? existing.maxRetries,
   };
 }
 
@@ -71,6 +75,8 @@ export function normalizeJsEyesSearchConfig(config = {}) {
     jsEyesMaxPages: config.jsEyesMaxPages,
     jsEyesTimeoutMs: config.jsEyesTimeoutMs,
     jsEyesArgs: config.jsEyesArgs,
+    jsEyesMinIntervalMs: config.jsEyesMinIntervalMs,
+    jsEyesMaxRetries: config.jsEyesMaxRetries,
   };
 
   for (const [key, value] of Object.entries(legacy)) {
@@ -113,6 +119,8 @@ export function normalizeJsEyesSearchConfig(config = {}) {
   merged.jsEyesTimeoutMs = provider.timeoutMs;
   merged.jsEyesMaxPages = provider.maxPages;
   merged.jsEyesArgs = provider.args;
+  merged.jsEyesMinIntervalMs = provider.minIntervalMs;
+  merged.jsEyesMaxRetries = provider.maxRetries;
 
   options.jsEyesSkills = provider.skills;
   options.jsEyesSkill = provider.skills[0];
@@ -121,6 +129,8 @@ export function normalizeJsEyesSearchConfig(config = {}) {
   options.jsEyesTimeoutMs = provider.timeoutMs;
   options.jsEyesMaxPages = provider.maxPages;
   options.jsEyesArgs = provider.args;
+  options.jsEyesMinIntervalMs = provider.minIntervalMs;
+  options.jsEyesMaxRetries = provider.maxRetries;
   options.provider = provider;
 
   return merged;

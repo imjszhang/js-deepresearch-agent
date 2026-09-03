@@ -33,7 +33,10 @@ export function nextSlotRepairAction(state, {
   reasonCode = 'slot_repair_search',
 } = {}) {
   const targets = rankSlotRepairTargets(readiness, state?.gaps || []);
-  for (const gap of targets) {
+  const blockedWithUnread = (state?.gaps || []).filter((gap) => (
+    gap.status === 'blocked' && !gap.rollup && (state.pickPolicyReads?.(2, gap.id) || []).length
+  ));
+  for (const gap of [...targets, ...blockedWithUnread]) {
     const unread = state.pickPolicyReads?.(2, gap.id) || [];
     if (unread.length) {
       return {
@@ -44,6 +47,7 @@ export function nextSlotRepairAction(state, {
         repairTarget: gap.id,
       };
     }
+    if (gap.status === 'blocked') continue;
     return {
       action: 'search',
       gapId: gap.id,

@@ -84,6 +84,38 @@ describe('source enricher relevance gate', () => {
     assert.equal(finding.sources[0].assessment.readability, 'readable');
   });
 
+  it('admits a body that matches a structured entity alias', async () => {
+    registerContentFetchHandler(async () => ({
+      status: 'ok',
+      title: '北京智谱华章科技股份有限公司招股说明书',
+      content: '北京智谱华章科技股份有限公司披露了股权结构、主要股东和融资安排。',
+    }));
+    const [finding] = await enrichFindings([{
+      gapId: 'gap-equity',
+      question: 'What is the ownership structure of Zhipu AI?',
+      sources: [{ url: 'https://example.com/filing', title: '招股说明书' }],
+    }], {
+      query: '研究 Zhipu AI',
+      fetchMode: 'full',
+      maxUrlsPerIteration: 1,
+      maxUrlsTotal: 1,
+      maxContentChars: 8000,
+      enrichConcurrency: 1,
+      llm: null,
+      settings: { research: { focused: { fetchBackend: 'auto' } } },
+      relevance: { enabled: true, entityGuard: true, bodyValidation: true },
+      relevanceGap: { id: 'gap-equity', question: 'What is the ownership structure of Zhipu AI?' },
+      entities: ['Zhipu AI'],
+      entityAliases: ['北京智谱华章科技股份有限公司'],
+      budget: { claim() {}, canClaim() { return true; } },
+    });
+    assert.equal(finding.sources[0].fetchStatus, 'ok');
+    assert.equal(
+      finding.sources[0].relevanceDecision.matchedAlias,
+      '北京智谱华章科技股份有限公司',
+    );
+  });
+
   it('fail-closes unreadable assessment JSON and does not treat it as a successful body', async () => {
     registerContentFetchHandler(async () => ({
       status: 'ok',

@@ -52,7 +52,8 @@ function renderQuality(quality) {
   return `
     <section class="card">
       <h2>Research Quality</h2>
-      <p>Gate: <strong>${escapeHtml(quality.gate || 'unknown')}</strong></p>
+      <p>Completion: <strong>${escapeHtml(quality.completionStatus || 'unknown')}</strong></p>
+      <p>Legacy report gate: <strong>${escapeHtml(quality.gate || 'unknown')}</strong></p>
       <div class="grid">
         <p>Evaluated claims: <strong>${metrics.evaluatedClaimCount ?? 0}</strong></p>
         <p>Key claim support: <strong>${formatRate(metrics.rates?.keyClaimSupportedRate)}</strong></p>
