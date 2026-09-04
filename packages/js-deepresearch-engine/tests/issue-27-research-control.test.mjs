@@ -109,6 +109,8 @@ describe('Issue #27 structured research control', () => {
       consequentialClaims: [' production ready ', 'production ready'],
     }, { depth: 'focused' });
     assert.equal(brief.schemaVersion, RESEARCH_BRIEF_SCHEMA_VERSION);
+    assert.equal(brief.queryShape, null);
+    assert.equal(brief.premise, null);
     assert.equal(brief.audience, 'Engineering leaders');
     assert.equal(brief.depth, 'focused');
     assert.deepEqual(brief.requiredAnswerSlots[0].requiredHosts, ['docs.example.com']);

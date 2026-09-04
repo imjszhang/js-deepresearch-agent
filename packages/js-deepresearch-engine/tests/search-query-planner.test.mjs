@@ -7,6 +7,7 @@ import {
   attachPlannedQueries,
   QUERY_ORIGINS,
 } from '../src/research/search-query-planner.mjs';
+import { searchQueryPlannerPrompt } from '../src/research/prompts.mjs';
 
 function llmJson(payload, { truncated = false } = {}) {
   let calls = 0;
@@ -276,5 +277,54 @@ describe('search query planner', () => {
     assert.equal(result.failure, 'scope_mismatch');
     assert.equal(result.dedup.rejected[0].reason, 'scope_mismatch');
     assert.deepEqual(result.queries, []);
+  });
+
+  it('does not lock search-query language to the research question language', () => {
+    const prompt = searchQueryPlannerPrompt({
+      query: '店面会话正在变成新的货架。Anthropic 开源 Commerce Agents',
+      gap: {
+        id: 'gap-2',
+        question: 'Anthropic 开源 Commerce Agents 是在帮零售商把货架留在自己家里吗?',
+        evidenceCriteria: ['first_party'],
+      },
+    });
+    assert.match(prompt[0].content, /Choose each search query's language from the sources/);
+    assert.doesNotMatch(prompt[0].content, /Match the language of the research question/);
+    assert.match(prompt[0].content, /Do not set searchOptions.language to the user's question language by default/);
+  });
+
+  it('accepts an English first-party query for a Chinese product-judgment slot', async () => {
+    const result = await planSearchQueries({
+      llm: llmJson({
+        queries: [{
+          query: 'Anthropic Commerce Agents forkable official blueprint GitHub',
+          targetGapId: 'gap-2',
+          expectedEvidence: 'official docs',
+          searchOptions: { language: 'en' },
+        }],
+      }),
+      mode: 'initial',
+      query: '店面会话正在变成新的货架。Anthropic 开源 Commerce Agents，是在帮零售商把货架留在自己家里，还是在用「可 fork 的正确做法」把货架标准写成 Claude 的？',
+      gap: {
+        id: 'gap-2',
+        question: '在店面会话正在变成新的货架的前提下,Anthropic 开源 Commerce Agents 是在帮零售商把货架留在自己家里,还是在用「可 fork 的正确做法」把货架标准写成 Claude 的?',
+        answerSlot: 'judgment_on_commerce_agents_design',
+        evidenceCriteria: ['first_party'],
+      },
+      brief: {
+        query: '店面会话正在变成新的货架。Anthropic 开源 Commerce Agents，是在帮零售商把货架留在自己家里，还是在用「可 fork 的正确做法」把货架标准写成 Claude 的？',
+        queryShape: 'judgment',
+        entities: ['Anthropic', 'Commerce Agents', 'Claude'],
+        requiredAnswerSlots: [{
+          id: 'judgment_on_commerce_agents_design',
+          question: '在店面会话正在变成新的货架的前提下,Anthropic 开源 Commerce Agents 是在帮零售商把货架留在自己家里,还是在用「可 fork 的正确做法」把货架标准写成 Claude 的?',
+          evidenceCriteria: ['first_party'],
+        }],
+      },
+      limit: 1,
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.queries[0], 'Anthropic Commerce Agents forkable official blueprint GitHub');
+    assert.equal(result.planned[0].searchOptions.language, 'en');
   });
 });
