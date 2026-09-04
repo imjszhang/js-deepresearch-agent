@@ -3,6 +3,10 @@ import { inferEvidenceScope, listLocalCorpusChannels } from './source-policy.mjs
 import { mergeResearchBrief, sanitizeResearchBrief, slotsFromPlannerGaps } from '../research-brief.mjs';
 import { GAP_SCHEMA_VERSION } from '../gap-state.mjs';
 import { completeStructuredJson, hasUsablePlannerPayload } from '../structured-llm.mjs';
+import { resolveReadSettings } from '../read-settings.mjs';
+import { buildProfileUserMessage, profileSystemPrompt } from '../research-profile-prompt.mjs';
+
+export { PROFILE_EVIDENCE_CRITERIA, PROFILE_QUERY_SHAPES, buildProfileUserMessage, profileSystemPrompt } from '../research-profile-prompt.mjs';
 
 const HOST_IN_QUERY = /\b(?:[a-z0-9-]+\.)+(?:com|org|net|edu|gov|io|hk|cn|uk|jp|ai|info)\b/gi;
 const FILE_EXT_HOSTS = /\.(cpp|js|ts|py|md|pdf|exe|zip|png|jpg)$/i;
@@ -197,35 +201,31 @@ export function mergeProfilePlan(base, plan = {}) {
   return next;
 }
 
-function profileSystemPrompt(scope, compact = false) {
-  const local = scope === 'local'
-    ? 'This run can only read local files. Do not invent web hosts such as fang.com, ke.com, or sec.gov. Leave requiredHosts empty unless the query literally names a hostname. Do not require primary_filing.'
-    : '';
-  if (compact) {
-    return [
-      'Return compact JSON only for THIS query. Do not invent a fixed industry questionnaire.',
-      'Schema: {"entities":[],"entityAliases":[],"asOf":null,"requiredAnswerSlots":[{"answerSlot":"...","question":"...","priority":"critical|normal","requiredHosts":[],"requiredHostMode":"any|all","preferredHosts":[],"requiredSourceTypes":[],"evidenceCriteria":[]}],"requiredHosts":[],"requiredHostMode":"any|all","preferredHosts":[],"requiredSourceTypes":[],"flags":{}}',
-      'requiredAnswerSlots must be non-empty for this query. Do not omit the closing brace.',
-      'entityAliases may only copy aliases, tickers, or legal names that appear literally in the query. Do not invent translations.',
-      'If the query says 截至YYYY年M月 or as-of a calendar month, set asOf to that month last day as YYYY-MM-DD inclusive cutoff.',
-      '"官方" / "official" means first-party documents of the subject, not stock-exchange or SEC filings unless the query names that venue.',
-      'When the query asks for filings or disclosures, inferred venues go in preferredHosts, never requiredHosts.',
-      'Do not default to hkexnews.hk, sec.gov, sse.com.cn, or szse.cn.',
-      local,
-    ].filter(Boolean).join('\n');
-  }
-  return [
-    'Infer a research evidence profile for THIS query only. Do not invent a fixed industry questionnaire.',
-    'Return JSON only: {"audience":null,"decision":null,"assumedExpertise":null,"timeRange":null,"asOf":null,"geography":[],"entities":[],"entityAliases":[],"exclusions":[],"successCriteria":[],"requiredAnswerSlots":[{"answerSlot":"...","question":"...","claimFamily":null,"priority":"critical|normal","requiredHosts":[],"requiredHostMode":"any|all","preferredHosts":[],"requiredSourceTypes":[],"evidenceCriteria":[]}],"consequentialClaims":[],"flags":{"freshness":false,"completeness":false,"plurality":false,"attribution":false,"primary_source":false,"numeric":false,"decision_critical":false},"requiredHosts":[],"requiredHostMode":"any|all","preferredHosts":[],"requiredSourceTypes":[],"minIndependentSources":1,"gaps":[{"question":"...","priority":"critical|normal","requiredHosts":[],"preferredHosts":[]}]}',
-    'Only hostnames literally present in the query may be requiredHosts. Put inferred official sites, publishers, and useful domains in preferredHosts.',
-    'entityAliases may only copy aliases, tickers, or legal names that appear literally in the query. Do not invent translations or marketing names.',
-    'If the query says 截至YYYY年M月 or as-of a calendar month, set asOf to that month last day as YYYY-MM-DD inclusive cutoff. Do not infer a date from vague latest wording.',
-    '"官方" / "official" means first-party documents of the subject, not stock-exchange or SEC filings unless the query names that venue.',
-    'When the query asks for filings or disclosures, inferred venues go in preferredHosts, never requiredHosts.',
-    'Do not default to hkexnews.hk, sec.gov, sse.com.cn, or szse.cn. Do not add primary_filing unless the query itself is about filings or disclosures.',
-    'requiredSourceTypes may include primary_filing or numeric only.',
-    local,
-  ].filter(Boolean).join('\n');
+function collectUserRequiredHosts(profile = {}, userSlots = []) {
+  return unique([
+    ...sanitizeHosts(profile.requiredHosts),
+    ...userSlots.flatMap((slot) => sanitizeHosts(slot?.requiredHosts)),
+  ]);
+}
+
+function profileUserContent({
+  query,
+  profile = {},
+  evidenceScope = 'web',
+  settings = {},
+  retry = false,
+} = {}) {
+  const userSlots = profile.brief?.requiredAnswerSlots || [];
+  const readPolicy = resolveReadSettings(settings, { strategy: profile.brief?.depth || 'exploratory' });
+  return buildProfileUserMessage({
+    query,
+    literalHosts: extractLiteralHosts(query),
+    userSlots,
+    userRequiredHosts: collectUserRequiredHosts(profile, userSlots),
+    evidenceScope,
+    siteQueryMode: readPolicy.relevance?.siteQueryMode || 'confirmed',
+    retry,
+  });
 }
 
 export function hasUsableResearchContract(profile = {}, brief = {}) {
@@ -277,14 +277,25 @@ export async function planResearchProfile({ llm, query, profile, signal, setting
         content: profileSystemPrompt(scope, false),
       }, {
         role: 'user',
-        content: query,
+        content: profileUserContent({
+          query,
+          profile: scoped,
+          evidenceScope: scope,
+          settings,
+        }),
       }],
       retryMessages: [{
         role: 'system',
         content: profileSystemPrompt(scope, true),
       }, {
         role: 'user',
-        content: `Previous profile JSON was truncated or invalid. Return complete compact JSON for: ${query}`,
+        content: profileUserContent({
+          query,
+          profile: scoped,
+          evidenceScope: scope,
+          settings,
+          retry: true,
+        }),
       }],
     });
     if (result.ok) {

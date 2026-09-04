@@ -5,7 +5,9 @@ import {
   mergeProfilePlan,
   planResearchProfile,
   sanitizeEvidenceProfile,
+  profileSystemPrompt,
 } from '../src/research/adaptive/research-profile.mjs';
+import { sanitizeResearchBrief, mergeResearchBrief } from '../src/research/research-brief.mjs';
 
 describe('research profile does not invent venue policy', () => {
   it('does not treat official docs as exchange filings', () => {
@@ -208,6 +210,8 @@ describe('research profile does not invent venue policy', () => {
             entities: ['智谱AI'],
             entityAliases: ['Zhipu AI', '智谱'],
             asOf: '2026-08',
+            queryShape: 'inventory',
+            premise: '截至2026年8月研究智谱',
             requiredHosts: ['hkexnews.hk'],
             preferredHosts: ['hkexnews.hk'],
             requiredSourceTypes: ['primary_filing'],
@@ -224,6 +228,8 @@ describe('research profile does not invent venue policy', () => {
     assert.deepEqual(profile.brief.entityAliases, ['Zhipu AI', '智谱']);
     assert.equal(profile.brief.asOf.date, '2026-08-31');
     assert.equal(profile.brief.asOf.source, 'planner');
+    assert.equal(profile.brief.queryShape, 'inventory');
+    assert.equal(profile.brief.premise, '截至2026年8月研究智谱');
     assert.deepEqual(profile.requiredHosts, []);
     assert.ok(profile.preferredHosts.includes('hkexnews.hk'));
   });
@@ -279,5 +285,83 @@ describe('research profile does not invent venue policy', () => {
     assert.equal(profile.brief.requiredAnswerSlots[0].answerSlot, 'status');
     assert.equal(profile.contractUnavailable, false);
     assert.ok(!profile.brief.requiredAnswerSlots.some((slot) => slot.answerSlot === 'planner-only'));
+  });
+
+  it('asks the planner for a query-entailed contract instead of a questionnaire', () => {
+    const web = profileSystemPrompt('web', false);
+    const compact = profileSystemPrompt('local', true);
+    assert.match(web, /compile an evidence contract/i);
+    assert.match(web, /Decide slots and evidenceCriteria from the query|decide the contract from the query/i);
+    assert.match(web, /first_party \| filing \| numeric \| user_named \| mainstream_media/);
+    assert.match(web, /A supporting fact that helps close an existing slot is not a new slot/);
+    assert.match(web, /Do not default to hkexnews\.hk/);
+    assert.doesNotMatch(web, /publishers, and useful domains/);
+    assert.doesNotMatch(web, /Infer a research evidence profile/);
+    assert.match(web, /店面会话正在变成新的货架/);
+    assert.match(web, /把「优先引用」理解成每个槽必须三种证据都读到/);
+    assert.match(compact, /Do not invent web hosts/);
+    assert.match(compact, /Do not add primary_filing/);
+    assert.match(compact, /A supporting fact is not a new slot/);
+  });
+
+  it('sends extracted hosts and user slots in the profile user message', async () => {
+    const query = 'Read docs.example.com for SubjectA';
+    const incoming = inferResearchProfile({
+      query,
+      requiredAnswerSlots: [{ answerSlot: 'status', question: 'Is SubjectA supported?', requiredHosts: ['docs.example.com'] }],
+    });
+    let userContent = '';
+    let systemContent = '';
+    await planResearchProfile({
+      query,
+      profile: incoming,
+      settings: { research: { read: { relevance: { siteQueryMode: 'confirmed' } } } },
+      llm: {
+        async complete({ messages }) {
+          systemContent = messages[0].content;
+          userContent = messages[1].content;
+          return JSON.stringify({
+            requiredAnswerSlots: [{ answerSlot: 'planner-only', question: 'invented' }],
+          });
+        },
+      },
+    });
+    assert.match(systemContent, /You compile an evidence contract/);
+    assert.match(userContent, /literalHosts":\["docs\.example\.com"\]|literalHosts: \["docs\.example\.com"\]/);
+    assert.match(userContent, /userSlots:/);
+    assert.match(userContent, /Is SubjectA supported/);
+    assert.match(userContent, /userRequiredHosts: \["docs\.example\.com"\]/);
+    assert.match(userContent, /siteQueryMode: confirmed/);
+    assert.doesNotMatch(userContent, /^Read docs\.example\.com for SubjectA$/);
+  });
+
+  it('round-trips planner queryShape and premise without replacing user values', () => {
+    const query = '店面会话正在变成新的货架。Anthropic 开源 Commerce Agents，是在帮零售商把货架留在自己家里，还是在用「可 fork 的正确做法」把货架标准写成 Claude 的？';
+    const planner = sanitizeResearchBrief({
+      query,
+      queryShape: 'judgment',
+      premise: '店面会话正在变成新的货架',
+      requiredAnswerSlots: [{
+        answerSlot: 'control',
+        question: `${query}`,
+        evidenceCriteria: ['first_party', 'analyst commentary'],
+      }],
+    });
+    assert.equal(planner.queryShape, 'judgment');
+    assert.equal(planner.premise, '店面会话正在变成新的货架');
+    assert.deepEqual(planner.requiredAnswerSlots[0].evidenceCriteria, ['first_party', 'analyst commentary']);
+    assert.equal(sanitizeResearchBrief({ query, queryShape: 'not-a-shape' }).queryShape, null);
+
+    const merged = mergeResearchBrief({
+      query,
+      queryShape: 'judgment',
+      premise: '用户前提',
+    }, {
+      queryShape: 'inventory',
+      premise: 'planner premise',
+      requiredAnswerSlots: [{ answerSlot: 'control', question: query }],
+    });
+    assert.equal(merged.queryShape, 'judgment');
+    assert.equal(merged.premise, '用户前提');
   });
 });

@@ -82,6 +82,7 @@ export { BudgetManager, BudgetExceededError } from './research/budget-manager.mj
 export { QueryMemory, normalizeQuery, querySimilarity } from './research/query-memory.mjs';
 export {
   RESEARCH_BRIEF_SCHEMA_VERSION,
+  RESEARCH_QUERY_SHAPES,
   sanitizeResearchBrief,
   sanitizeAnswerSlots,
   researchBriefFromInput,
@@ -89,6 +90,12 @@ export {
   slotsFromPlannerGaps,
   sanitizeAsOf,
 } from './research/research-brief.mjs';
+export {
+  PROFILE_EVIDENCE_CRITERIA,
+  PROFILE_QUERY_SHAPES,
+  buildProfileUserMessage,
+  profileSystemPrompt,
+} from './research/research-profile-prompt.mjs';
 export {
   applyAsOfGate,
   resolveCompletionStatus,
