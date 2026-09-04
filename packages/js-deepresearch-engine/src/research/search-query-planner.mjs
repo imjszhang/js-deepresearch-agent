@@ -555,6 +555,7 @@ function compactGap(gap) {
 function compactBrief(brief = {}) {
   return {
     query: brief.query || '',
+    queryShape: brief.queryShape || null,
     entities: brief.entities || [],
     exclusions: brief.exclusions || [],
     geography: brief.geography || [],
@@ -565,6 +566,7 @@ function compactBrief(brief = {}) {
       id: slot.id,
       question: slot.question,
       priority: slot.priority,
+      evidenceIntent: (slot.evidenceCriteria || []).map((item) => String(item).replace(/[_-]+/g, ' ')),
     })),
   };
 }
