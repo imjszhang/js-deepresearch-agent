@@ -166,6 +166,10 @@ export {
   isPlaceholderSummary,
   emptyBulletLines,
   extractLabeledNarrativeText,
+  classifyReportFailurePhase,
+  sanitizeReportFailedChecks,
+  looksLikeStructuredNarrative,
+  REPORT_FAILURE_PHASES,
 } from './research/report-builder.mjs';
 export {
   isWafOrErrorBody,
@@ -253,6 +257,8 @@ export {
   parseNarrativeResponse,
   parseMarkdownNarrative,
   normalizeNarrativeDocument,
+  sanitizeNarrativeText,
+  sanitizeNarrativeResponse,
   containsSourceDump as narrativeContainsSourceDump,
 } from './research/report-narrative.mjs';
 export {

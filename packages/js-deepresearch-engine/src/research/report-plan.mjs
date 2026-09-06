@@ -7,12 +7,6 @@ function asList(value) {
   return Array.isArray(value) ? value.filter(Boolean) : [];
 }
 
-function compactText(value = '', max = 420) {
-  const text = String(value || '').replace(/\s+/g, ' ').trim();
-  if (text.length <= max) return text;
-  return `${text.slice(0, max - 1).trim()}…`;
-}
-
 function canonicalKey(text = '') {
   return String(text || '')
     .replace(/\s+/g, ' ')
@@ -27,6 +21,10 @@ function claimId(prefix, text, extra = '') {
     .digest('hex')
     .slice(0, 12);
   return `${prefix}-${digest}`;
+}
+
+function sha256(value = '') {
+  return createHash('sha256').update(String(value)).digest('hex');
 }
 
 function passageById(passages = [], id) {
@@ -54,14 +52,72 @@ function citationsFromSupport(slotSupport = {}, passages = [], citationMap) {
     const key = citationKeyForSource(citationMap, sourceId);
     if (key) citations.push(key);
   }
+  for (const sourceId of [
+    ...asList(slotSupport.evidenceSourceIds),
+    ...asList(slotSupport.officialSourceIds),
+  ]) {
+    const key = citationKeyForSource(citationMap, sourceId);
+    if (key) citations.push(key);
+  }
   return [...new Set(citations)];
 }
 
-function buildSlotBoundClaim({ slot, passages = [], citationMap }) {
+function citationsFromSlotFindings(slot = {}, support = {}, findings = [], citationMap) {
+  let matchingSources = asList(findings)
+    .filter((finding) => (
+      finding.gapId === slot.id
+      || (slot.contractSlotId && finding.contractSlotId === slot.contractSlotId)
+      || (slot.answerSlot && finding.answerSlot === slot.answerSlot)
+      || (slot.question && finding.question === slot.question)
+    ))
+    .flatMap((finding) => asList(finding.sources));
+  const supportedSourceIds = new Set([
+    ...asList(support.evidenceSourceIds),
+    ...asList(support.officialSourceIds),
+  ]);
+  if (supportedSourceIds.size) {
+    matchingSources = matchingSources.filter((source) => (
+      supportedSourceIds.has(source.id) || supportedSourceIds.has(source.url)
+    ));
+  } else if (matchingSources.length !== 1) {
+    return [];
+  }
+  const sourceIds = new Set(matchingSources.map((source) => source.id).filter(Boolean));
+  const urls = new Set(matchingSources.map((source) => source.url).filter(Boolean));
+  return citationEntries(citationMap)
+    .filter((entry) => (
+      sourceIds.has(entry.sourceId)
+      || sourceIds.has(entry.source?.id)
+      || urls.has(entry.source?.url)
+    ))
+    .map((entry) => entry.citationKey)
+    .filter(Boolean);
+}
+
+function citationsContainingQuote(citationMap, quote = '') {
+  if (!quote) return [];
+  return citationEntries(citationMap)
+    .filter((entry) => String(entry.source?.content || entry.source?.summary || '').includes(quote))
+    .map((entry) => entry.citationKey)
+    .filter(Boolean);
+}
+
+function buildSlotBoundClaim({ slot, findings = [], passages = [], citationMap }) {
   const support = slot.slotSupport && typeof slot.slotSupport === 'object' ? slot.slotSupport : {};
-  const quote = compactText(support.quote || '');
-  const text = quote || compactText(slot.question) || `Verified finding for ${slot.id}`;
-  const citations = citationsFromSupport(support, passages, citationMap);
+  const quote = String(support.quote || '').replace(/\s+/g, ' ').trim();
+  const citations = [...new Set([
+    ...citationsFromSupport(support, passages, citationMap),
+    ...citationsFromSlotFindings(slot, support, findings, citationMap),
+    ...citationsContainingQuote(citationMap, quote),
+  ])];
+  const supportable = (
+    ['supported', 'partially_supported'].includes(support.verdict)
+    && support.quoteAnchored === true
+    && quote
+    && citations.length > 0
+  );
+  if (!supportable) return null;
+  const text = `${quote} [${citations.join(', ')}]`;
   return {
     id: claimId('slot', text, slot.id),
     canonicalClaimId: claimId('canon', text),
@@ -131,7 +187,8 @@ export function flattenPlanClaims(plan = {}) {
 }
 
 export function validateReportPlan(plan = {}, contract = {}) {
-  const flags = [];
+  const failedChecks = [];
+  const fail = (check, expected, actual) => failedChecks.push({ check, expected, actual });
   const keyClaims = flattenPlanClaims(plan).filter((claim) => (
     claim.kind === 'key_claim'
     && (claim.placements || []).includes('key_findings')
@@ -139,15 +196,41 @@ export function validateReportPlan(plan = {}, contract = {}) {
   ));
   const hasKeyFindingText = keyClaims.length > 0;
   const requiredSlotClaims = asList(plan.slotClaims).filter((claim) => claim.required);
+  const requiredSlots = asList(contract.verifiedRequiredSlots);
 
   if (contract.requiredInKeyFindings || contract.narrativeMode === 'closed_judgment') {
-    if (!hasKeyFindingText) flags.push('report_missing_key_claims');
-    if (requiredSlotClaims.length && !hasKeyFindingText) flags.push('report_missing_slot_claims');
+    if (!hasKeyFindingText) {
+      fail('report_missing_key_claims', { minimumKeyClaims: 1 }, { keyClaims: keyClaims.length });
+    }
+    if (requiredSlots.length && !hasKeyFindingText) {
+      fail('report_missing_slot_claims', {
+        minimumRequiredSlotClaimsInKeyFindings: 1,
+      }, {
+        requiredSlotClaims: requiredSlotClaims.length,
+        requiredSlotClaimsInKeyFindings: 0,
+      });
+    }
+    requiredSlots.forEach((slot, slotIndex) => {
+      const boundClaims = keyClaims.filter((claim) => (
+        asList(claim.boundSlotIds).includes(slot.id)
+      ));
+      if (boundClaims.length > 0) return;
+      fail('report_missing_required_slot_claim', {
+        minimumBoundClaims: 1,
+        slotIndex,
+        slotIdSha256: sha256(slot.id),
+      }, {
+        boundClaims: 0,
+        slotIndex,
+        slotIdSha256: sha256(slot.id),
+      });
+    });
   }
 
   return {
-    ok: flags.length === 0,
-    flags,
+    ok: failedChecks.length === 0,
+    flags: failedChecks.map((item) => item.check),
+    failedChecks,
     keyClaimCount: keyClaims.length,
     requiredSlotClaimCount: requiredSlotClaims.length,
   };
@@ -157,20 +240,32 @@ export function mergeNarrativeIntoPlan(plan = {}, document = {}) {
   const slotClaims = asList(plan.slotClaims);
   const llmGroups = asList(document.keyFindings).map((group) => ({
     heading: group.heading || '',
-    claims: asList(group.claims).map((claim) => (
-      typeof claim === 'string'
+    claims: asList(group.claims).map((claim) => {
+      const normalized = typeof claim === 'string'
         ? { text: claim, kind: 'key_claim', placements: ['key_findings'] }
-        : { ...claim, text: claimText(claim), kind: claim.kind || 'key_claim', placements: asList(claim.placements).length ? claim.placements : ['key_findings'] }
-    )).filter((claim) => claim.text),
+        : { ...claim, text: claimText(claim), kind: claim.kind || 'key_claim', placements: asList(claim.placements).length ? claim.placements : ['key_findings'] };
+      const matchingSlots = slotClaims.filter((slotClaim) => (
+        canonicalKey(slotClaim.text) === canonicalKey(normalized.text)
+      ));
+      if (!matchingSlots.length) return normalized;
+      return {
+        ...matchingSlots[0],
+        ...normalized,
+        canonicalClaimId: matchingSlots[0].canonicalClaimId,
+        boundSlotIds: [...new Set(matchingSlots.flatMap((item) => item.boundSlotIds || []))],
+        citationKeys: [...new Set(matchingSlots.flatMap((item) => item.citationKeys || []))],
+        passageIds: [...new Set(matchingSlots.flatMap((item) => item.passageIds || []))],
+        required: true,
+        origin: 'required_slot',
+      };
+    }).filter((claim) => claim.text),
   })).filter((group) => group.claims.length);
-  const llmTexts = new Set(
-    llmGroups.flatMap((group) => group.claims.map((claim) => canonicalKey(claim.text))),
+  const boundSlotIds = new Set(
+    llmGroups.flatMap((group) => group.claims.flatMap((claim) => claim.boundSlotIds || [])),
   );
-  const llmHasKeyFindings = llmGroups.some((group) => group.claims.length);
-  const missingRequired = slotClaims.filter((claim) => {
-    if (llmTexts.has(canonicalKey(claim.text))) return false;
-    return !llmHasKeyFindings;
-  });
+  const missingRequired = slotClaims.filter((claim) => (
+    !(claim.boundSlotIds || []).some((slotId) => boundSlotIds.has(slotId))
+  ));
   const keyFindings = [...llmGroups];
   if (missingRequired.length) {
     keyFindings.unshift({
@@ -188,7 +283,10 @@ export function mergeNarrativeIntoPlan(plan = {}, document = {}) {
     summary: asList(document.summary),
     backgroundFacts: asList(document.backgroundFacts),
     keyFindings,
-    caveats: asList(document.caveats),
+    caveats: [...new Set([
+      ...asList(plan.requiredLimitations),
+      ...asList(document.caveats),
+    ])],
     documentOrigin: document.origin || plan.documentOrigin || 'llm',
   };
 }
@@ -254,10 +352,16 @@ export function buildReportPlan({
     const live = asList(gaps).find((gap) => gap.id === slot.id) || slot;
     return buildSlotBoundClaim({
       slot: live,
+      findings,
       passages,
       citationMap,
     });
-  });
+  }).filter(Boolean);
+  const supportedSlotIds = new Set(slotClaims.flatMap((claim) => claim.boundSlotIds || []));
+  const unsupportedRequiredSlots = requiredSlots.filter((slot) => !supportedSlotIds.has(slot.id));
+  const requiredLimitations = unsupportedRequiredSlots.map((slot) => (
+    `Required report slot ${slot.id} lacks an anchored, cited answer in the frozen contract.`
+  ));
 
   return {
     schemaVersion: REPORT_PLAN_VERSION,
@@ -274,7 +378,12 @@ export function buildReportPlan({
     keyFindings: slotClaims.length && contract.requiredInKeyFindings
       ? [{ heading: '', claims: slotClaims }]
       : [],
-    caveats: asList(limitations).map((item) => item.text || item.summary || item).filter(Boolean),
+    requiredLimitations,
+    unsupportedRequiredSlotIds: unsupportedRequiredSlots.map((slot) => slot.id),
+    caveats: [
+      ...asList(limitations).map((item) => item.text || item.summary || item).filter(Boolean),
+      ...requiredLimitations,
+    ],
     requiredClaimIds: slotClaims.map((claim) => claim.id),
   };
 }

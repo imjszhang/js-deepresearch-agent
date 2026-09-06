@@ -5,6 +5,7 @@ import {
   containsSourceDump,
   parseMarkdownNarrative,
   renderNarrativeMarkdown,
+  sanitizeNarrativeText,
 } from './report-narrative.mjs';
 
 export { containsSourceDump, SOURCE_DUMP_LINE } from './report-narrative.mjs';
@@ -31,7 +32,7 @@ function formatSection(part) {
 }
 
 function normalizeComparable(value = '') {
-  return String(value).normalize('NFKC').trim().replace(/\s+/g, ' ');
+  return sanitizeNarrativeText(value).normalize('NFKC').trim().replace(/\s+/g, ' ');
 }
 
 export function looksLikeDumpSection(part = {}, query = '') {
