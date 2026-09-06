@@ -173,6 +173,33 @@ async function enrichOneSource(source, {
     transportMemory,
     recorder,
   });
+  if (
+    fetched.accessStatus === 'blocked'
+    || fetched.bodyQuality === 'waf'
+    || fetched.status === 'blocked'
+  ) {
+    return {
+      ...withSourceProvenance(source, fetched),
+      ...(fetched.finalUrl ? { finalUrl: fetched.finalUrl } : {}),
+      ...(fetched.title ? { title: fetched.title } : {}),
+      retrievedVia: fetched.retrievedVia || 'headless',
+      retrievedAt: fetched.retrievedAt || null,
+      fetchStatus: 'failed',
+      content: '',
+      summary: '',
+      contentOrigin: source.contentOrigin,
+      fetchError: fetched.error || 'Challenge or access-denied page',
+      fetchErrorType: fetched.errorType || 'challenge',
+      httpStatus: fetched.httpStatus ?? null,
+      fetchAttempts: fetched.fetchAttempts ?? 1,
+      retryable: false,
+      backend: fetched.backend || requestedBackend,
+      retrievalPath: fetched.retrievalPath || fetched.retrievedVia || 'headless',
+      accessStatus: 'blocked',
+      accessNotes: fetched.accessNotes || fetched.error || 'blocked',
+      bodyQuality: 'waf',
+    };
+  }
   if (fetched.status !== 'ok' || fetched.evidenceRole === 'metadata') {
     return {
       ...withSourceProvenance(source, fetched),

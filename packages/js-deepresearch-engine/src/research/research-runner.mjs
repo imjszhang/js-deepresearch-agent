@@ -13,6 +13,7 @@ import { evaluatePreReport } from './quality-gates.mjs';
 import { applyAsOfGate, resolveCompletionStatus } from './as-of.mjs';
 import { applySlotStatusToClaims } from './report-evidence.mjs';
 import { archiveDisclosureText } from './alternate-evidence.mjs';
+import { closeHeadlessPool } from './headless-backend.mjs';
 import { buildResearchLimitations } from './limitations.mjs';
 import { resolveFocusedSettings } from './focused-settings.mjs';
 import { createResearchProviders } from './research-providers.mjs';
@@ -119,6 +120,7 @@ export class ResearchRunner {
       trace,
     });
 
+    try {
     emit({ stage: 'research_started' });
     let findings;
     try {
@@ -708,6 +710,9 @@ export class ResearchRunner {
         ...(strategy === 'exploratory' ? [{ step: trace.length + 2, action: 'stop', reasonCode: budget.controllerStopReason || budget.stopReason || 'research_sufficient', budgetAfter: budget.snapshot(), createdAt: new Date().toISOString() }] : []),
       ],
     };
+    } finally {
+      await closeHeadlessPool().catch(() => {});
+    }
   }
 }
 

@@ -30,6 +30,7 @@
     "undici": "^7.25.0"
   },
   "optionalDependencies": {
-    "@firecrawl/anydoc": "^0.2.3"
+    "@firecrawl/anydoc": "^0.2.3",
+    "playwright": "^1.55.0"
   }
 }

@@ -76,18 +76,153 @@ function blockedResult(content, extra = {}) {
   };
 }
 
-async function launchPlaywright(headless) {
-  let playwright;
+async function launchPlaywright(headless = {}) {
+  let chromium;
   try {
-    ({ chromium: playwright } = await import('playwright'));
+    ({ chromium } = await import('playwright'));
   } catch {
     return null;
   }
-  const launch = {
-    headless: true,
-  };
-  if (headless.proxy) launch.proxy = { server: headless.proxy };
-  return playwright.launch(launch);
+  try {
+    const launch = { headless: true };
+    if (headless.proxy) launch.proxy = { server: headless.proxy };
+    return await chromium.launch(launch);
+  } catch {
+    return null;
+  }
+}
+
+function abortError(message = 'Research aborted') {
+  const error = new Error(message);
+  error.name = 'AbortError';
+  return error;
+}
+
+export class HeadlessPool {
+  constructor({
+    maxConcurrency = 2,
+    launchImpl = launchPlaywright,
+  } = {}) {
+    this.maxConcurrency = Math.max(1, Number(maxConcurrency) || 2);
+    this.launchImpl = launchImpl;
+    this.browser = null;
+    this.launching = null;
+    this.inUse = 0;
+    this.waiters = [];
+    this.closed = false;
+  }
+
+  async #browser(headless) {
+    if (this.closed) throw abortError('Headless pool closed');
+    if (this.browser) return this.browser;
+    if (!this.launching) {
+      this.launching = Promise.resolve()
+        .then(() => this.launchImpl(headless))
+        .then((browser) => {
+          this.browser = browser;
+          this.launching = null;
+          return browser;
+        })
+        .catch((error) => {
+          this.launching = null;
+          throw error;
+        });
+    }
+    return this.launching;
+  }
+
+  #waitForSlot(signal) {
+    if (this.inUse < this.maxConcurrency) {
+      this.inUse += 1;
+      return Promise.resolve();
+    }
+    return new Promise((resolve, reject) => {
+      const waiter = { resolve, reject };
+      const onAbort = () => {
+        const index = this.waiters.indexOf(waiter);
+        if (index >= 0) this.waiters.splice(index, 1);
+        reject(abortError());
+      };
+      if (signal?.aborted) {
+        reject(abortError());
+        return;
+      }
+      if (signal) {
+        signal.addEventListener('abort', onAbort, { once: true });
+        waiter.resolve = (value) => {
+          signal.removeEventListener('abort', onAbort);
+          resolve(value);
+        };
+      }
+      this.waiters.push(waiter);
+    }).then(() => {
+      this.inUse += 1;
+    });
+  }
+
+  #releaseSlot() {
+    this.inUse = Math.max(0, this.inUse - 1);
+    const next = this.waiters.shift();
+    next?.resolve();
+  }
+
+  async acquire(headless = {}, { signal } = {}) {
+    if (signal?.aborted) throw abortError();
+    const browser = await this.#browser(headless);
+    if (!browser) return null;
+    await this.#waitForSlot(signal);
+    if (this.closed || signal?.aborted) {
+      this.#releaseSlot();
+      throw abortError();
+    }
+    try {
+      const context = await browser.newContext();
+      const page = await context.newPage();
+      return {
+        browser,
+        context,
+        page,
+        release: async () => {
+          await page.close?.().catch(() => {});
+          await context.close?.().catch(() => {});
+          this.#releaseSlot();
+        },
+      };
+    } catch (error) {
+      this.#releaseSlot();
+      throw error;
+    }
+  }
+
+  async close() {
+    this.closed = true;
+    const waiters = this.waiters.splice(0);
+    for (const waiter of waiters) waiter.reject(abortError('Headless pool closed'));
+    const browser = this.browser;
+    this.browser = null;
+    this.launching = null;
+    this.inUse = 0;
+    if (browser) await browser.close?.().catch(() => {});
+  }
+}
+
+let sharedPool = null;
+
+export function getSharedHeadlessPool(headless = {}) {
+  if (!sharedPool || sharedPool.closed) {
+    sharedPool = new HeadlessPool({ maxConcurrency: headless.maxConcurrency });
+    return sharedPool;
+  }
+  if (Number(headless.maxConcurrency) > 0) {
+    sharedPool.maxConcurrency = Number(headless.maxConcurrency);
+  }
+  return sharedPool;
+}
+
+export async function closeHeadlessPool() {
+  const pool = sharedPool;
+  sharedPool = null;
+  if (pool) await pool.close();
 }
 
 export async function fetchHeadlessContent(url, context = {}) {
@@ -101,34 +236,28 @@ export async function fetchHeadlessContent(url, context = {}) {
     return { status: 'unsupported', backend: 'headless', error: 'Headless backend disabled' };
   }
 
-  const browser = await launchPlaywright(headless);
-  if (!browser) {
-    return {
-      status: 'unsupported',
-      backend: 'headless',
-      error: 'Playwright/Chromium is not installed',
-      errorType: 'backend_unavailable',
-      retryable: false,
-    };
-  }
-
-  let page;
+  const pool = context.headlessPool || getSharedHeadlessPool(headless);
+  let session;
   const onAbort = () => {
-    page?.close?.().catch(() => {});
-    browser.close().catch(() => {});
+    session?.page?.close?.().catch(() => {});
   };
   if (context.signal) {
-    if (context.signal.aborted) {
-      await browser.close();
-      const error = new Error('Research aborted');
-      error.name = 'AbortError';
-      throw error;
-    }
+    if (context.signal.aborted) throw abortError();
     context.signal.addEventListener('abort', onAbort, { once: true });
   }
 
   try {
-    page = await browser.newPage();
+    session = await pool.acquire(headless, { signal: context.signal });
+    if (!session) {
+      return {
+        status: 'unsupported',
+        backend: 'headless',
+        error: 'Playwright/Chromium is not installed',
+        errorType: 'backend_unavailable',
+        retryable: false,
+      };
+    }
+    const { page } = session;
     await page.route('**/*', (route) => {
       const request = route.request();
       const type = request.resourceType();
@@ -157,11 +286,7 @@ export async function fetchHeadlessContent(url, context = {}) {
       retrievedVia: 'headless',
     }, url);
   } catch (error) {
-    if (error?.name === 'AbortError' || context.signal?.aborted) {
-      const abortError = new Error('Research aborted');
-      abortError.name = 'AbortError';
-      throw abortError;
-    }
+    if (error?.name === 'AbortError' || context.signal?.aborted) throw abortError();
     return {
       status: 'failed',
       backend: 'headless',
@@ -172,8 +297,7 @@ export async function fetchHeadlessContent(url, context = {}) {
     };
   } finally {
     context.signal?.removeEventListener?.('abort', onAbort);
-    await page?.close?.().catch(() => {});
-    await browser.close().catch(() => {});
+    await session?.release?.();
   }
 }
 
