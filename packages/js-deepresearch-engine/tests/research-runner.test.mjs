@@ -266,6 +266,119 @@ describe('ResearchRunner', () => {
     assert.ok(events.some((event) => /retrying/.test(event.message)));
   });
 
+  it('cleans internal references, reasoning tags, and empty bullets before deterministic re-rendering', async () => {
+    const result = await new ResearchRunner().run({
+      query: 'clean report topic',
+      settings: { llm: {}, search: {}, research: { strategy: 'quick', iterations: 1, questionsPerIteration: 0 } },
+      search: { async search() { return [{ title: 'S', url: 'https://example.test', snippet: 'evidence' }]; } },
+      llm: { async complete({ purpose }) {
+        if (purpose === 'search_query_planning') return JSON.stringify({ queries: [] });
+        return `${validReport('cleanable [gap-2] report </think>')}\n\n-   \n`;
+      } },
+    });
+
+    assert.match(result.report, /cleanable report/);
+    assert.doesNotMatch(result.report, /\[gap-2\]|<\/?think\b/i);
+    assert.doesNotMatch(result.report, /^\s*(?:[-*]|\d+[.)])\s*$/m);
+  });
+
+  it('retries parse failures without consuming semantic-contract attempts', async () => {
+    let reportAttempts = 0;
+    const events = [];
+    const semanticallyInvalid = JSON.stringify({
+      title: 'Long but invalid report',
+      summary: ['；'],
+      keyFindings: [{
+        heading: 'Finding',
+        claims: [`This finding is long enough to exceed the report minimum but its empty summary still violates the semantic contract. ${'Supporting wording. '.repeat(12)} [1.1]`],
+      }],
+      caveats: [],
+    });
+    const result = await new ResearchRunner().run({
+      query: 'parse retry topic',
+      settings: { llm: {}, search: {}, research: { strategy: 'quick', iterations: 1, questionsPerIteration: 0 } },
+      search: { async search() { return [{ title: 'S', url: 'https://example.test', snippet: 'evidence' }]; } },
+      llm: { async complete({ purpose }) {
+        if (purpose === 'search_query_planning') return JSON.stringify({ queries: [] });
+        reportAttempts += 1;
+        if (reportAttempts === 1) return '{"title":"malformed"';
+        if (reportAttempts === 2) return semanticallyInvalid;
+        return validReport('parse retry recovery');
+      } },
+      onProgress: (event) => events.push(event),
+    });
+
+    assert.equal(reportAttempts, 3);
+    assert.match(result.report, /parse retry recovery/);
+    assert.ok(result.trace.some((entry) => entry.action === 'report_retry_requested' && entry.phase === 'parse'));
+    assert.ok(result.trace.some((entry) => entry.action === 'report_retry_requested' && entry.phase === 'semantic-contract'));
+    assert.equal(
+      result.trace.find((entry) => entry.action === 'report_retry_requested' && entry.phase === 'parse')?.attemptCounts?.parse,
+      1,
+    );
+    assert.equal(
+      result.trace.find((entry) => entry.action === 'report_retry_requested' && entry.phase === 'semantic-contract')?.attemptCounts?.semanticContract,
+      1,
+    );
+    assert.ok(events.some((event) => /\[parse\]/.test(event.message)));
+    assert.ok(events.some((event) => /\[semantic-contract\]/.test(event.message)));
+  });
+
+  it('reports actual failing semantic checks when output exceeds the character minimum', async () => {
+    const invalid = JSON.stringify({
+      title: 'Long but invalid report',
+      summary: ['；'],
+      keyFindings: [{
+        heading: 'Finding',
+        claims: [`This report body is deliberately long enough to exceed the minimum while the summary remains a placeholder. ${'Detailed cited wording. '.repeat(16)} [1.1]`],
+      }],
+      caveats: [],
+    });
+    await assert.rejects(
+      new ResearchRunner().run({
+        query: 'semantic failure topic',
+        settings: { llm: {}, search: {}, research: { strategy: 'quick', iterations: 1, questionsPerIteration: 0 } },
+        search: { async search() { return [{ title: 'S', url: 'https://example.test', snippet: 'evidence' }]; } },
+        llm: { async complete({ purpose }) {
+          return purpose === 'search_query_planning' ? JSON.stringify({ queries: [] }) : invalid;
+        } },
+      }),
+      (error) => {
+        assert.equal(error.phase, 'semantic-contract');
+        assert.ok(error.outputChars > error.minChars);
+        assert.equal(error.attemptCounts.semanticContract, 2);
+        assert.equal(error.attemptCounts.parse, 0);
+        assert.ok(error.failedChecks.some((item) => (
+          item.check === 'report_empty_summary'
+          && item.actual.significantCharacters === 0
+        )));
+        assert.match(error.message, /report_empty_summary/);
+        assert.match(error.message, /significantCharacters/);
+        assert.doesNotMatch(error.message, /minimum 200 characters; received/);
+        return true;
+      },
+    );
+  });
+
+  it('classifies persistently malformed structured output as parse failure', async () => {
+    await assert.rejects(
+      new ResearchRunner().run({
+        query: 'parse failure topic',
+        settings: { llm: {}, search: {}, research: { strategy: 'quick', iterations: 1, questionsPerIteration: 0 } },
+        search: { async search() { return [{ title: 'S', url: 'https://example.test', snippet: 'evidence' }]; } },
+        llm: { async complete({ purpose }) {
+          return purpose === 'search_query_planning' ? JSON.stringify({ queries: [] }) : '{"title":"malformed"';
+        } },
+      }),
+      (error) => (
+        error.phase === 'parse'
+        && error.attemptCounts.parse === 2
+        && error.attemptCounts.semanticContract === 0
+        && error.failedChecks.some((item) => item.check === 'narrative_not_json')
+      ),
+    );
+  });
+
   it('rejects a persistently empty report instead of completing', async () => {
     await assert.rejects(
       new ResearchRunner().run({
@@ -274,7 +387,15 @@ describe('ResearchRunner', () => {
         search: { async search() { return [{ title: 'S', url: 'https://example.test', snippet: 'evidence' }]; } },
         llm: { async complete({ purpose }) { return purpose === 'search_query_planning' ? JSON.stringify({ queries: [] }) : ''; } },
       }),
-      (error) => error.name === 'ReportGenerationError' && error.code === 'REPORT_OUTPUT_INVALID' && error.attempts === 2 && error.phase === 'provider',
+      (error) => (
+        error.name === 'ReportGenerationError'
+        && error.code === 'REPORT_OUTPUT_INVALID'
+        && error.attempts === 2
+        && error.phase === 'provider'
+        && error.attemptCounts.provider === 2
+        && error.attemptCounts.parse === 0
+        && error.attemptCounts.semanticContract === 0
+      ),
     );
   });
 

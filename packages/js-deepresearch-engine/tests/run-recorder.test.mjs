@@ -7,6 +7,7 @@ import { afterEach, describe, it } from 'node:test';
 import {
   BudgetManager,
   FileRunRecorder,
+  ReportGenerationError,
   ResearchRunner,
   loadLatestCheckpoint,
   readEventJournal,
@@ -91,6 +92,39 @@ describe('durable run recorder', () => {
     const events = readEventJournal(sessionDir);
     assert.ok(events.some((event) => event.type === 'session_finished'));
     assert.ok(events.every((event) => event.operationId && 'parentOperationId' in event));
+  });
+
+  it('records report failed checks and the last failure phase in failure.json', () => {
+    const sessionDir = makeSession();
+    const recorder = new FileRunRecorder({
+      sessionDir,
+      runId: 'run-report-diagnostics',
+      strategy: 'quick',
+      query: 'diagnostic query',
+    });
+    const failedChecks = [{
+      check: 'report_empty_summary',
+      expected: { minimumSignificantCharacters: 12 },
+      actual: { significantCharacters: 0 },
+    }];
+    recorder.finalize('failed', {
+      error: new ReportGenerationError({
+        attempts: 2,
+        minChars: 200,
+        outputChars: 2623,
+        flags: ['report_empty_summary'],
+        failedChecks,
+        phase: 'semantic-contract',
+        attemptCounts: { provider: 0, parse: 0, semanticContract: 2, render: 0 },
+      }),
+    });
+
+    const failure = JSON.parse(fs.readFileSync(path.join(sessionDir, 'failure.json'), 'utf8'));
+    assert.equal(failure.phase, 'semantic-contract');
+    assert.deepEqual(failure.failedChecks, failedChecks);
+    assert.equal(failure.error.phase, 'semantic-contract');
+    assert.deepEqual(failure.error.failedChecks, failedChecks);
+    assert.equal(failure.error.attemptCounts.semanticContract, 2);
   });
 
   it('records the provider-normalized LLM request before dispatch and omits reasoning text', async () => {

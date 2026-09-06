@@ -5,6 +5,7 @@ import {
   ResearchRunner,
   applySlotStatusToClaims,
   assembleReport,
+  classifyReportFailurePhase,
   extractQualityClaims,
   keepNarrativeSections,
   looksTruncated,
@@ -55,6 +56,24 @@ llama.cpp 支持 1.`;
     const check = validateReportOutput(empty, { minChars: 20, mode: 'narrative', findings });
     assert.equal(check.ok, false);
     assert.ok(check.flags.includes('report_empty_summary'));
+  });
+
+  it('classifies residual-token and empty-list checks as render failures', () => {
+    const dirty = `# Research Report
+
+## Summary
+${'A sufficiently detailed summary remains semantically valid after deterministic formatting cleanup. '.repeat(3)} [1.1] [gap-2]</think>
+
+## Key Findings
+-
+- ${'A cited key finding contains enough complete narrative detail for the report contract. '.repeat(2)} [1.1]
+`;
+    const check = validateReportOutput(dirty, { minChars: 200, mode: 'narrative', findings });
+    assert.equal(check.ok, false);
+    assert.ok(check.flags.includes('report_internal_reference_token'));
+    assert.ok(check.flags.includes('report_reasoning_token'));
+    assert.ok(check.flags.includes('report_empty_bullets'));
+    assert.equal(classifyReportFailurePhase(check), 'render');
   });
 
   it('rejects a narrative that dumps source bodies into Key Findings', () => {

@@ -364,10 +364,18 @@ export class ResearchRunner {
       return {
         ok: narrativeCheck.ok && fullCheck.ok,
         flags: [...new Set([...(narrativeCheck.flags || []), ...(fullCheck.flags || [])])],
+        failedChecks: [
+          ...(narrativeCheck.failedChecks || []),
+          ...(fullCheck.failedChecks || []).filter((item) => (
+            !(narrativeCheck.failedChecks || []).some((existing) => existing.check === item.check)
+          )),
+        ],
         outputChars: narrativeCheck.outputChars,
       };
     };
     const draft = await generateNarrative();
+    let reportProviderCalls = draft.diagnostics?.providerCalls || 1;
+    let reportAttemptCounts = mergeReportAttemptCounts(draft.diagnostics?.attemptCounts);
     let narrativeDocument = draft.document || parseMarkdownNarrative(draft.text);
     let narrativeDraft = draft.text;
     reportPlan = mergeNarrativeIntoPlan(reportPlan, narrativeDocument);
@@ -392,13 +400,16 @@ export class ResearchRunner {
     if (!evidenceOptions.claimAlignment && findings.length > 0) {
       const assembledCheck = checkReportPair(narrativeDraft, report);
       if (!assembledCheck.ok) {
+        reportAttemptCounts.render += 1;
         throw new ReportGenerationError({
-          attempts: reportSettings.maxAttempts,
+          attempts: reportProviderCalls,
           minChars: reportSettings.minChars,
           outputChars: assembledCheck.outputChars,
           flags: assembledCheck.flags,
-          phase: 'rendering',
+          failedChecks: assembledCheck.failedChecks,
+          phase: 'render',
           contract: reportContract,
+          attemptCounts: reportAttemptCounts,
         });
       }
     }
@@ -481,18 +492,24 @@ export class ResearchRunner {
           return {
             ok: retryRender.ok,
             flags: retryRender.flags,
+            failedChecks: retryRender.failedChecks,
             outputChars: retryRender.outputChars,
-            phase: retryRender.ok ? null : 'rendering',
+            phase: retryRender.ok ? null : 'render',
           };
         }
+        const planFailedChecks = (planCheck.failedChecks || []).filter((item) => (
+          !(renderCheck.failedChecks || []).some((existing) => existing.check === item.check)
+        ));
         return {
           ok: planCheck.ok && renderCheck.ok,
           flags: [...new Set([...(planCheck.flags || []), ...(renderCheck.flags || [])])],
+          failedChecks: [...planFailedChecks, ...(renderCheck.failedChecks || [])],
           outputChars: renderCheck.outputChars,
-          phase: !planCheck.ok ? 'semantic-contract' : (!renderCheck.ok ? 'rendering' : null),
+          phase: !planCheck.ok ? 'semantic-contract' : (!renderCheck.ok ? 'render' : null),
         };
       };
       let revisedCheck = await reviseFrom(narrativeDraft, narrativeDocument);
+      if (!revisedCheck.ok) incrementReportAttemptCount(reportAttemptCounts, revisedCheck.phase);
       if (!revisedCheck.ok && findings.length > 0) {
         const retryEvent = {
           flags: revisedCheck.flags,
@@ -519,19 +536,43 @@ export class ResearchRunner {
               boundSlotIds: claim.boundSlotIds || [],
             })),
         };
-        const retried = await generateNarrative(retrySeeds);
+        let retried;
+        try {
+          retried = await generateNarrative(retrySeeds);
+        } catch (error) {
+          if (!(error instanceof ReportGenerationError)) throw error;
+          throw new ReportGenerationError({
+            attempts: reportProviderCalls + error.attempts,
+            minChars: error.minChars,
+            outputChars: error.outputChars,
+            diagnostic: error.diagnostic,
+            flags: error.flags,
+            failedChecks: error.failedChecks,
+            phase: error.phase,
+            contract: reportContract,
+            attemptCounts: mergeReportAttemptCounts(reportAttemptCounts, error.attemptCounts),
+          });
+        }
+        reportProviderCalls += retried.diagnostics?.providerCalls || 1;
+        reportAttemptCounts = mergeReportAttemptCounts(
+          reportAttemptCounts,
+          retried.diagnostics?.attemptCounts,
+        );
         narrativeDocument = retried.document || parseMarkdownNarrative(retried.text);
         narrativeDraft = retried.text;
         reportPlan = mergeNarrativeIntoPlan(reportPlan, narrativeDocument);
         revisedCheck = await reviseFrom(narrativeDraft, narrativeDocument);
         if (!revisedCheck.ok) {
+          incrementReportAttemptCount(reportAttemptCounts, revisedCheck.phase);
           throw new ReportGenerationError({
-            attempts: reportSettings.maxAttempts + 1,
+            attempts: reportProviderCalls,
             minChars: reportSettings.minChars,
             outputChars: revisedCheck.outputChars,
             flags: revisedCheck.flags,
+            failedChecks: revisedCheck.failedChecks,
             phase: revisedCheck.phase || 'semantic-contract',
             contract: reportContract,
+            attemptCounts: reportAttemptCounts,
           });
         }
       }
@@ -714,4 +755,25 @@ function admissibleReportSeeds(claims = []) {
       .map((claim) => String(claim.text || '').trim())
       .filter(Boolean),
   };
+}
+
+function mergeReportAttemptCounts(...counts) {
+  const merged = {
+    provider: 0,
+    parse: 0,
+    semanticContract: 0,
+    render: 0,
+  };
+  for (const item of counts) {
+    if (!item) continue;
+    for (const key of Object.keys(merged)) merged[key] += Number(item[key]) || 0;
+  }
+  return merged;
+}
+
+function incrementReportAttemptCount(counts, phase) {
+  if (phase === 'provider') counts.provider += 1;
+  else if (phase === 'parse') counts.parse += 1;
+  else if (phase === 'render') counts.render += 1;
+  else counts.semanticContract += 1;
 }

@@ -47,6 +47,8 @@
  * @property {FocusedSettings} [focused]
  * @property {Record<string, number>} [budget]
  * @property {Record<string, unknown>} [exploratory]
+ * @property {{ minChars?: number, maxAttempts?: number }} [reportValidation]
+ * @property {{ maxOutputTokens?: number, maxAttempts?: number }} [report]
  */
 
 /**
@@ -93,6 +95,17 @@
  * @property {string} message
  * @property {number|null} [progress]
  * @property {'info'|'error'} [level]
+ */
+
+/**
+ * @typedef {'provider'|'parse'|'semantic-contract'|'render'} ReportFailurePhase
+ */
+
+/**
+ * @typedef {Object} ReportFailedCheck
+ * @property {string} check
+ * @property {unknown} expected
+ * @property {unknown} actual
  */
 
 /**

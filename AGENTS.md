@@ -202,7 +202,7 @@ npm exec --package=. -- jdr research "监管处罚" \
 
 `--json` 模式下进度只走 stderr，stdout 仅为 JSON，便于 Agent 解析。
 
-报告由最终研究状态（brief + gaps + readiness + evidence）生成 `ReportContract` / `ReportPlan`，LLM 只负责措辞。研究合同是否满足看 plan，不看 Markdown 标题或跨节去重。格式/排版问题会确定性重渲染；只有 provider 连续无内容，或完成态合同重试后仍无可支持回答，才抛 `REPORT_OUTPUT_INVALID` 并将任务标为 `failed`。默认至少 200 字符且包含 Markdown 标题。进度会记录 LLM 阶段、耗时、输出字符数和安全的响应元数据，但不会记录 prompt、推理文本或密钥。`focused` 会为缺失的原始问题/官方证据保留 gap 与 limitation；只有成功读取的正文才能生成 direct-evidence passage，snippet 只能标记为 `search_snippet`。
+报告由最终研究状态（brief + gaps + readiness + evidence）生成 `ReportContract` / `ReportPlan`，LLM 只负责措辞。研究合同是否满足看 plan，不看 Markdown 标题或跨节去重。`[gap-*]`、`<think>` 标签残留和空列表项会先确定性清洗并重渲染。其余 `REPORT_OUTPUT_INVALID` 按 `provider`（连续空响应）、`parse`（结构化输出畸形）、`semantic-contract`（合同未满足）和 `render`（无法恢复的排版检查）分类；parse 有独立重试计数，不消耗 semantic retry。错误与 `failure.json` 记录实际 `failedChecks` 的 expected/actual 和最后 `phase`。默认至少 200 字符且包含 Markdown 标题，但只有长度检查真实失败时才把字符下限列为原因。进度会记录 LLM 阶段、耗时、输出字符数和安全的响应元数据，但不会记录 prompt、推理文本或密钥。`focused` 会为缺失的原始问题/官方证据保留 gap 与 limitation；只有成功读取的正文才能生成 direct-evidence passage，snippet 只能标记为 `search_snippet`。
 
 ### 取消调研（Ctrl+C）
 

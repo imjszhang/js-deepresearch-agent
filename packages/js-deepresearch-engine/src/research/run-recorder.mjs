@@ -162,6 +162,9 @@ function errorRecord(error) {
     name: normalized.name || 'Error',
     message: normalized.message || String(normalized),
     code: normalized.code || null,
+    phase: normalized.phase || null,
+    failedChecks: Array.isArray(normalized.failedChecks) ? normalized.failedChecks : [],
+    attemptCounts: normalized.attemptCounts || null,
     cause: normalized.cause ? {
       name: normalized.cause.name || 'Error',
       message: normalized.cause.message || String(normalized.cause),
@@ -363,11 +366,14 @@ export class FileRunRecorder {
       : 'failed';
     const completedAt = new Date().toISOString();
     if (error) {
+      const recordedError = errorRecord(error);
       atomicWrite(path.join(this.sessionDir, 'failure.json'), {
         ...sanitizeRecordedValue(metadata),
         schemaVersion: RUN_RECORD_SCHEMA_VERSION,
         status: normalized,
-        error: errorRecord(error),
+        phase: recordedError?.phase || null,
+        failedChecks: recordedError?.failedChecks || [],
+        error: recordedError,
         completedAt,
       }, { sanitized: true });
     }

@@ -131,7 +131,8 @@ export function flattenPlanClaims(plan = {}) {
 }
 
 export function validateReportPlan(plan = {}, contract = {}) {
-  const flags = [];
+  const failedChecks = [];
+  const fail = (check, expected, actual) => failedChecks.push({ check, expected, actual });
   const keyClaims = flattenPlanClaims(plan).filter((claim) => (
     claim.kind === 'key_claim'
     && (claim.placements || []).includes('key_findings')
@@ -141,13 +142,23 @@ export function validateReportPlan(plan = {}, contract = {}) {
   const requiredSlotClaims = asList(plan.slotClaims).filter((claim) => claim.required);
 
   if (contract.requiredInKeyFindings || contract.narrativeMode === 'closed_judgment') {
-    if (!hasKeyFindingText) flags.push('report_missing_key_claims');
-    if (requiredSlotClaims.length && !hasKeyFindingText) flags.push('report_missing_slot_claims');
+    if (!hasKeyFindingText) {
+      fail('report_missing_key_claims', { minimumKeyClaims: 1 }, { keyClaims: keyClaims.length });
+    }
+    if (requiredSlotClaims.length && !hasKeyFindingText) {
+      fail('report_missing_slot_claims', {
+        minimumRequiredSlotClaimsInKeyFindings: 1,
+      }, {
+        requiredSlotClaims: requiredSlotClaims.length,
+        requiredSlotClaimsInKeyFindings: 0,
+      });
+    }
   }
 
   return {
-    ok: flags.length === 0,
-    flags,
+    ok: failedChecks.length === 0,
+    flags: failedChecks.map((item) => item.check),
+    failedChecks,
     keyClaimCount: keyClaims.length,
     requiredSlotClaimCount: requiredSlotClaims.length,
   };

@@ -1,7 +1,26 @@
 import { classifyClaimSection } from './claim-quality.mjs';
-import { parseCitations } from './citations.mjs';
+import { parseCitations, stripInternalReferenceTokens } from './citations.mjs';
 
 export const SOURCE_DUMP_LINE = /\[[0-9]+(?:\.[0-9]+)?\][^\n]*\((?:source body|snippet only|source summary)\)\s*:/i;
+const THINK_BLOCK = /<think\b[^>]*>[\s\S]*?<\/think\s*>/gi;
+const THINK_TAG = /<\/?think\b[^>]*>/gi;
+const EMPTY_LIST_ITEM = /^\s*(?:[-*]|\d+[.)])\s*$/;
+
+export function sanitizeNarrativeText(text = '') {
+  return stripInternalReferenceTokens(
+    String(text || '')
+      .replace(THINK_BLOCK, '')
+      .replace(THINK_TAG, ''),
+  );
+}
+
+export function sanitizeNarrativeResponse(text = '') {
+  return sanitizeNarrativeText(text)
+    .split(/\r?\n/)
+    .filter((line) => !EMPTY_LIST_ITEM.test(line))
+    .join('\n')
+    .trim();
+}
 
 export function containsSourceDump(text = '') {
   return SOURCE_DUMP_LINE.test(String(text));
@@ -22,10 +41,13 @@ export function extractJsonObject(text = '') {
 function asStringList(value) {
   if (Array.isArray(value)) {
     return value.map((item) => (
-      typeof item === 'string' ? item.trim() : String(item?.text || '').trim()
-    )).filter(Boolean);
+      sanitizeNarrativeText(typeof item === 'string' ? item : item?.text || '').trim()
+    )).filter((item) => item && !EMPTY_LIST_ITEM.test(item));
   }
-  if (typeof value === 'string' && value.trim()) return [value.trim()];
+  if (typeof value === 'string') {
+    const text = sanitizeNarrativeText(value).trim();
+    if (text && !EMPTY_LIST_ITEM.test(text)) return [text];
+  }
   return [];
 }
 
@@ -152,11 +174,12 @@ function extractBodyItems(lines = []) {
     }
     if (LIST_PREFIX.test(line)) {
       flush();
-      const item = String(line).replace(LIST_PREFIX, '').trim();
+      const item = sanitizeNarrativeText(String(line).replace(LIST_PREFIX, '')).trim();
       if (item) items.push(item);
       continue;
     }
-    paragraph.push(String(line).trim());
+    const item = sanitizeNarrativeText(String(line)).trim();
+    if (item && !EMPTY_LIST_ITEM.test(item)) paragraph.push(item);
   }
   flush();
   return items;
