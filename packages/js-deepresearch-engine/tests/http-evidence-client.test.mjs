@@ -221,7 +221,11 @@ before(async () => {
 });
 
 after(async () => {
-  await closeServer(server);
+  resetHttpFetchCache();
+  server.closeAllConnections?.();
+  await withTimeout(closeServer(server), 'HTTP fixture server close hung').catch(() => {
+    server.close();
+  });
 });
 
 afterEach(() => {
