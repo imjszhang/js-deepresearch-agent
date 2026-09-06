@@ -22,8 +22,7 @@ export function collectTransportMetrics({ findings = [], transportMemory = null 
     (source) => source.fetchErrorType || source.errorType || source.accessStatus || 'failed',
   );
   return {
-    fetchAttempted: sources.filter((source) => source.fetchStatus || source.fetchAttempts).length
-      + (facts.attemptedUrls || []).length,
+    fetchAttempted: sources.filter((source) => source.fetchStatus || source.fetchAttempts).length,
     fetchOk: sources.filter((source) => source.fetchStatus === 'ok').length,
     fetchBlocked: Object.keys(fetchBlocked).length ? fetchBlocked : null,
     backendEscalations: sources.filter((source) => source.retrievedVia && source.retrievedVia !== 'direct').length,

@@ -62,11 +62,6 @@ function safeAttemptResult(result = {}) {
   };
 }
 
-function refusalAttemptCount(record = {}) {
-  const parsed = Number(record.fetchAttempts);
-  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 1;
-}
-
 export function plannerFactsFromSnapshot(snap = {}) {
   const blockedHosts = Object.entries(snap.hosts || {})
     .filter(([, state]) => state.open)
@@ -238,10 +233,9 @@ export class TransportMemory {
     };
     if (previous.open) return;
     const reason = refusalReason(record);
-    const refusalAttempts = reason ? refusalAttemptCount(record) : 0;
     const next = {
       ...previous,
-      consecutiveRefusals: reason ? previous.consecutiveRefusals + refusalAttempts : 0,
+      consecutiveRefusals: reason ? previous.consecutiveRefusals + 1 : 0,
       lastReason: reason,
       lastAttemptedAt: record.completedAt,
     };

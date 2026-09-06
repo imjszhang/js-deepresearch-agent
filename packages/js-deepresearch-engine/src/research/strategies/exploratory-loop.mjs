@@ -1667,10 +1667,6 @@ export async function runExploratoryLoop(context) {
         const eligibleSourceIds = requestedSourceIds
           .filter((id) => !rejectedSourceIds.includes(id))
           .filter((id) => !state.readSourceIds.has(id))
-          .filter((id) => {
-            const candidate = state.candidates.get(id);
-            return !state.transportMemory?.isHostBlocked?.(candidate?.url || candidate?.finalUrl);
-          })
           .slice(0, maxReads);
         if (rejectedSourceIds.length) {
           addTrace(trace, state, 'read_sources_filtered', {

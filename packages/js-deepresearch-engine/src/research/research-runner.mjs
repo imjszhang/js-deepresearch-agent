@@ -251,15 +251,21 @@ export class ResearchRunner {
       snippetOnlyKeys,
       contractUnavailable,
       secondaryOnly: Boolean(exploratoryLoop?.secondaryOnlyClaims?.length),
+      reprintOnly: findings.flatMap((finding) => finding.sources || []).some((source) => (
+        source.evidenceTier === 'reprint'
+        || source.retrievedVia === 'archive'
+        || source.retrievedVia === 'google_cache'
+        || source.tier === 'reprint'
+      )),
+      blockedHosts: plannerFactsFromSnapshot(exploratoryLoop?.transportMemory || focusedControl?.transportMemory || {}).blockedHosts,
+      unmetRequiredHosts: (readiness?.failures || [])
+        .filter((failure) => failure.code === 'required_host_missing')
+        .flatMap((failure) => failure.hostDiagnostics || []),
       degraded: findings.some((finding) => finding?.degraded),
       extra: [
         exploratoryLoop?.blockedHosts?.length
           ? `Blocked or unread required hosts: ${exploratoryLoop.blockedHosts.join(', ')}.`
           : null,
-        ...plannerFactsFromSnapshot(exploratoryLoop?.transportMemory || focusedControl?.transportMemory || {})
-          .blockedHosts.map((host) => (
-            `Required or attempted host ${host.hostname} was unreachable (${host.reason}).`
-          )),
         exploratoryLoop?.unresolvedGaps?.length
           ? `Unresolved gaps: ${exploratoryLoop.unresolvedGaps.map((gap) => `${gap.id} (${gap.status}) ${gap.question}`).join('; ')}`
           : null,

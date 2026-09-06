@@ -76,6 +76,23 @@ describe('canonical research limitations', () => {
     assert.equal(built.limitations.filter((item) => item.includes('judgment remains open')).length, 1);
   });
 
+  it('lists circuit hosts, unmet required hosts, and reprint-only evidence', () => {
+    const built = buildResearchLimitations({
+      strategy: 'focused',
+      reprintOnly: true,
+      blockedHosts: [{ hostname: 'walled.test', reason: 'http_403' }],
+      unmetRequiredHosts: [
+        { host: 'official.test', reason: 'fetch_blocked' },
+        { host: 'ok.test', reason: 'body_rejected' },
+      ],
+    });
+    const text = built.limitations.join('\n');
+    assert.match(text, /Circuit is open for walled.test/);
+    assert.match(text, /Required host official.test was not retrieved \(fetch_blocked\)/);
+    assert.doesNotMatch(text, /ok.test/);
+    assert.match(text, /reprint sources/);
+  });
+
   it('keeps slotEvidenceLimitations as a thin slot/repair wrapper', () => {
     const texts = slotEvidenceLimitations([judgmentGap()]);
     assert.ok(texts.some((item) => /first-party bodies were read/i.test(item)));
