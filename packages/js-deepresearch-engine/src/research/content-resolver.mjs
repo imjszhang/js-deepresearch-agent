@@ -3,6 +3,7 @@ import {
   createEvidenceHttpFetch,
   DEFAULT_ALLOWED_CONTENT_TYPES,
 } from '../http/create-http-fetch.mjs';
+import { recoverAlternateEvidence } from './alternate-evidence.mjs';
 import { fetchUrlContent, truncateContent } from './content-fetcher.mjs';
 import { resolveFocusedSettings } from './focused-settings.mjs';
 import { isWafShellText } from './body-quality.mjs';
@@ -100,7 +101,7 @@ function memoryOutcome(result = {}) {
   return result;
 }
 
-async function runRememberedAttempt(url, context, {
+export async function runRememberedAttempt(url, context, {
   backend,
   retrievalPath = 'direct',
   run,
@@ -199,7 +200,7 @@ async function runRememberedAttempt(url, context, {
  * @param {ContentFetchContext} context
  * @returns {Promise<ContentFetchResult>}
  */
-export async function resolveUrlContent(url, context = {}) {
+async function resolveDirectUrlContent(url, context = {}) {
   const { settings, maxChars } = context;
   const { fetchBackend } = resolveFocusedSettings(settings);
   const retrievalPath = context.retrievalPath || 'direct';
@@ -244,4 +245,23 @@ export async function resolveUrlContent(url, context = {}) {
     retrievalPath,
     run: () => fetchUrlContent(url, httpFetchOptions(context)),
   });
+}
+
+export async function resolveUrlContent(url, context = {}) {
+  const direct = await resolveDirectUrlContent(url, context);
+  if (context.skipAlternateEvidence || context.retrievalPath && context.retrievalPath !== 'direct') {
+    return direct;
+  }
+  if (context.settings?.research?.read?.alternateEvidence?.enabled === false) {
+    return direct;
+  }
+  const recovered = await recoverAlternateEvidence(url, { direct, context });
+  if (!recovered) return direct;
+  return {
+    ...direct,
+    ...recovered,
+    httpStatus: recovered.httpStatus ?? direct.httpStatus,
+    originalError: direct.error || null,
+    originalErrorType: direct.errorType || null,
+  };
 }

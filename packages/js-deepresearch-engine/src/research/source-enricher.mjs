@@ -28,13 +28,27 @@ const SKIPPED_ASSESSMENT = Object.freeze({
  * Assessment outcome fields, kept separate from the transport fact
  * (`fetchStatus`) and from the deterministic body verdict (`bodyQuality`).
  */
-function assessmentFields(outcome) {
+function lockReprintAssessment(assessment, fetched = {}) {
+  const reprint = fetched.evidenceTier === 'reprint'
+    || fetched.retrievedVia === 'archive'
+    || fetched.retrievedVia === 'google_cache';
+  if (!reprint) return assessment;
+  return {
+    ...(assessment || {}),
+    evidenceTier: 'reprint',
+  };
+}
+
+function assessmentFields(outcome, fetched = {}) {
   const status = outcome?.status || ASSESSMENT_STATUS.skipped;
   if (status === ASSESSMENT_STATUS.skipped) {
-    return { assessment: outcome?.assessment || null, assessmentStatus: status };
+    return {
+      assessment: lockReprintAssessment(outcome?.assessment || null, fetched),
+      assessmentStatus: status,
+    };
   }
   return {
-    assessment: outcome.assessment,
+    assessment: lockReprintAssessment(outcome.assessment, fetched),
     assessmentStatus: status,
     assessmentAttempts: Number(outcome.attempts) || 1,
     assessmentRetried: outcome.retried === true,
@@ -52,7 +66,7 @@ function blockedAssessmentResult(fetchedSource, outcome) {
   return {
     ...fetchedSource,
     summary: '',
-    ...assessmentFields(outcome),
+    ...assessmentFields(outcome, fetchedSource),
     fetchStatus: 'ok',
     bodyQuality: 'waf',
     skipReason: outcome?.assessment?.reason || 'assessment_unreadable',
@@ -102,6 +116,7 @@ async function enrichOneSource(source, {
   observedHosts,
   recorder,
   transportMemory,
+  fetchImpl,
 }) {
   const url = String(source.url || '').trim();
   if (!url) {
@@ -152,14 +167,24 @@ async function enrichOneSource(source, {
     settings,
     signal,
     maxChars: maxFetchChars || maxContentChars,
+    fetchImpl,
     transportMemory,
     recorder,
   });
-  if (fetched.status !== 'ok') {
+  if (fetched.status !== 'ok' || fetched.evidenceRole === 'metadata') {
     return {
       ...withSourceProvenance(source, fetched),
       ...(fetched.finalUrl ? { finalUrl: fetched.finalUrl } : {}),
-      fetchStatus: fetched.status === 'skipped' ? 'skipped' : 'failed',
+      ...(fetched.title ? { title: fetched.title } : {}),
+      ...(fetched.publishedAt ? { publishedAt: fetched.publishedAt } : {}),
+      retrievedVia: fetched.retrievedVia || 'direct',
+      retrievedAt: fetched.retrievedAt || null,
+      evidenceRole: fetched.evidenceRole || null,
+      snapshotUrl: fetched.snapshotUrl || null,
+      fetchStatus: fetched.evidenceRole === 'metadata'
+        ? 'failed'
+        : (fetched.status === 'skipped' ? 'skipped' : 'failed'),
+      contentOrigin: fetched.evidenceRole === 'metadata' ? 'metadata' : source.contentOrigin,
       fetchError: fetched.error || 'Fetch failed',
       fetchErrorType: fetched.errorType || null,
       httpStatus: fetched.httpStatus ?? null,
@@ -187,8 +212,14 @@ async function enrichOneSource(source, {
     content: fetched.content,
     contentOrigin: 'fetched',
     fetchStatus: 'ok',
+    retrievedVia: fetched.retrievedVia || 'direct',
+    retrievedAt: fetched.retrievedAt || fetched.accessedAt || null,
+    evidenceRole: fetched.evidenceRole || 'body',
+    snapshotUrl: fetched.snapshotUrl || null,
+    snapshotTime: fetched.snapshotTime || null,
+    assessment: fetched.evidenceTier ? { evidenceTier: fetched.evidenceTier } : source.assessment,
     backend: fetched.backend || requestedBackend,
-    retrievalPath: fetched.retrievalPath || 'direct',
+    retrievalPath: fetched.retrievalPath || fetched.retrievedVia || 'direct',
     fetchAttempts: fetched.fetchAttempts ?? 1,
     retryDelaysMs: fetched.retryDelaysMs || [],
     timeoutPolicy: fetched.timeoutPolicy || null,
@@ -259,7 +290,7 @@ async function enrichOneSource(source, {
     }
     return {
       ...fetchedSource,
-      ...assessmentFields(outcome),
+      ...assessmentFields(outcome, fetchedSource),
       fetchStatus: 'ok',
       relatedLinks: relatedLinksFromFetch(fetched, settings),
     };
@@ -275,7 +306,7 @@ async function enrichOneSource(source, {
       ...fetchedSource,
       summary: String(summary || '').trim() || source.snippet,
       extractionMethod: embedding ? 'embedding' : 'overlap',
-      ...assessmentFields(outcome),
+      ...assessmentFields(outcome, fetchedSource),
       fetchStatus: 'ok',
       relatedLinks: relatedLinksFromFetch(fetched, settings),
     };
@@ -301,7 +332,7 @@ async function enrichOneSource(source, {
   return {
     ...fetchedSource,
     summary: outcome.assessment?.summary || source.snippet,
-    ...assessmentFields(outcome),
+    ...assessmentFields(outcome, fetchedSource),
     fetchStatus: 'ok',
     relatedLinks: relatedLinksFromFetch(fetched, settings),
   };
@@ -328,6 +359,7 @@ export async function enrichFindingSources(finding, options = {}) {
     observedHosts,
     recorder,
     transportMemory,
+    fetchImpl,
     seenUrls = new Set(),
     enrichedCount = { value: 0 },
   } = options;
@@ -391,6 +423,7 @@ export async function enrichFindingSources(finding, options = {}) {
           observedHosts,
           recorder,
           transportMemory,
+          fetchImpl,
         });
         enrichedByUrl.set(source.url, enriched);
         if (enriched.fetchStatus === 'ok') {

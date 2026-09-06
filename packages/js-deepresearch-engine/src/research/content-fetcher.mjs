@@ -203,6 +203,7 @@ function failedFetchResult({
   finalUrl,
   contentType,
   documentFormat,
+  previewHtml,
 } = {}) {
   return {
     status: 'failed',
@@ -220,6 +221,7 @@ function failedFetchResult({
     ...(finalUrl ? { finalUrl } : {}),
     ...(contentType ? { contentType } : {}),
     ...(documentFormat ? { documentFormat } : {}),
+    ...(previewHtml ? { previewHtml } : {}),
   };
 }
 
@@ -422,6 +424,17 @@ async function fetchUrlContentOnce(url, {
     appliedTimeoutPolicy = timeoutPolicy;
 
     if (!response.ok) {
+      const contentType = response.headers.get('content-type') || '';
+      let previewHtml;
+      if (/html/i.test(contentType)) {
+        try {
+          const bytes = await readResponseBytes(response, Math.min(maxResponseBytes, 256 * 1024));
+          bodyConsumed = true;
+          previewHtml = decodeText(bytes);
+        } catch {
+          previewHtml = undefined;
+        }
+      }
       const failure = classifyFetchFailure({ httpStatus: response.status });
       return failedFetchResult({
         error: `HTTP ${response.status}`,
@@ -431,6 +444,8 @@ async function fetchUrlContentOnce(url, {
         accessedAt,
         timeoutPolicy,
         finalUrl,
+        contentType,
+        previewHtml,
       });
     }
 

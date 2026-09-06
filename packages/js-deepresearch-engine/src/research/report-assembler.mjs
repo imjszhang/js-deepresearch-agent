@@ -1,4 +1,5 @@
 import { classifyClaimSection } from './claim-quality.mjs';
+import { archiveDisclosureText } from './alternate-evidence.mjs';
 import { getSourceEvidenceClass } from './focused-settings.mjs';
 import { DEFAULT_MAX_PASSAGE_CHARS, selectDisplayedEvidence } from './evidence-chain.mjs';
 import {
@@ -94,7 +95,11 @@ export function renderEvidenceSection(findings = [], {
       const klass = getSourceEvidenceClass(source);
       const text = selectDisplayedEvidence(source, { passages, maxChars: maxPassageChars }) || 'No extracted evidence.';
       const title = source.title || source.url || key;
-      return `*   **[${key}] ${title}** (${klass.replaceAll('_', ' ')}): ${text}`;
+      const archiveNote = archiveDisclosureText(source);
+      const via = source.retrievedVia && source.retrievedVia !== 'direct'
+        ? ` via ${source.retrievedVia}`
+        : '';
+      return `*   **[${key}] ${title}** (${klass.replaceAll('_', ' ')}${via}): ${text}${archiveNote ? ` ${archiveNote}` : ''}`;
     });
     const question = finding.question || `Finding ${findingIndex + 1}`;
     return `### ${question}\n\n${items.join('\n') || '*   No sources.'}`;
@@ -112,6 +117,9 @@ export function renderSourcesSection(findings = []) {
         source.publishedAt && `published: ${source.publishedAt}`,
         source.updatedAt && `updated: ${source.updatedAt}`,
         source.accessedAt && `accessed: ${source.accessedAt}`,
+        source.retrievedVia && `retrievedVia: ${source.retrievedVia}`,
+        source.retrievedAt && `retrievedAt: ${source.retrievedAt}`,
+        source.snapshotUrl && `snapshot: ${source.snapshotUrl}`,
         source.sourceType && `type: ${source.sourceType}`,
         source.jurisdiction && `jurisdiction: ${source.jurisdiction}`,
         source.productVersion && `version: ${source.productVersion}`,

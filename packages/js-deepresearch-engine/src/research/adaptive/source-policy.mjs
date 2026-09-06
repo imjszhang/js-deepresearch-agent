@@ -263,6 +263,13 @@ function matchesAny(hostname, patterns) {
 }
 
 export function classifySourceTier(source = {}, gap = {}) {
+  if (
+    source.retrievedVia === 'archive'
+    || source.retrievedVia === 'google_cache'
+    || source.evidenceTier === 'reprint'
+  ) {
+    return 'reprint';
+  }
   const host = hostnameOf(source.url || source.id);
   if (!host) return 'unknown';
   const required = gap.requiredHosts || [];

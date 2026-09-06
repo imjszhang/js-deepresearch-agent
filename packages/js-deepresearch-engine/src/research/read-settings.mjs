@@ -29,6 +29,9 @@ export function resolveReadSettings(settings = {}, { strategy = 'focused' } = {}
     sourceAssessment: {
       enabled: raw.sourceAssessment?.enabled === true,
     },
+    alternateEvidence: {
+      enabled: raw.alternateEvidence?.enabled !== false,
+    },
     transport: {
       maxAttempts: positiveInteger(raw.transport?.maxAttempts, 3),
       hostCircuitThreshold: nonNegativeInteger(raw.transport?.hostCircuitThreshold, 3),
