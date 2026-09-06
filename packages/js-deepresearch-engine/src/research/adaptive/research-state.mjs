@@ -156,6 +156,8 @@ export class ResearchState {
       rerankMissingResults: 0,
       bodyIrrelevant: 0,
       readAccepted: 0,
+      assessmentUnavailable: 0,
+      admittedWithoutAssessment: 0,
     };
     this.recovery = {
       invalidSteps: 0,
@@ -173,6 +175,9 @@ export class ResearchState {
       transientStreak: 0,
       duplicateStreak: 0,
       semanticNoYieldStreak: 0,
+      transportFailures: 0,
+      transportStreak: 0,
+      transportBlockedHosts: {},
     };
     this.rerankCache = new Map();
     this.cycle = {
@@ -496,6 +501,26 @@ export class ResearchState {
   recordTransientSearch(error = null) {
     this.recovery.transientFailures += 1;
     this.recovery.providerRetries += Number(error?.retries || error?.providerRetries || 0);
+  }
+
+  /**
+   * A read failed at the transport layer (refused, challenged or never
+   * delivered). Tracked apart from semantic invalid steps so that an
+   * unreachable host cannot look like a stalled research loop.
+   */
+  recordTransportFailure({ hostname = '', url = '', reason = 'transport_failed' } = {}) {
+    this.recovery.transportFailures += 1;
+    this.recovery.transportStreak += 1;
+    const host = String(hostname || policyHostnameOf(url) || '').trim().toLowerCase();
+    if (!host) return;
+    const blocked = this.recovery.transportBlockedHosts || {};
+    const entry = blocked[host] || { count: 0, lastReason: null };
+    blocked[host] = { count: entry.count + 1, lastReason: reason };
+    this.recovery.transportBlockedHosts = blocked;
+  }
+
+  clearTransportStreak() {
+    this.recovery.transportStreak = 0;
   }
 
   noteProgressKind(kind) {

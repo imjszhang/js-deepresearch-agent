@@ -6,10 +6,12 @@ import {
   isRawBinaryDocumentText,
   isRetryableReadFailure,
   isSuccessfulBody,
+  isTransportReadFailure,
   isWafOrErrorBody,
   sanitizeUnusableSourceBody,
   MIN_FETCHED_BODY_CHARS,
   sourceHasObservableDate,
+  transportFailureReason,
 } from '../src/research/body-quality.mjs';
 
 describe('body quality helper', () => {
@@ -58,11 +60,6 @@ describe('body quality helper', () => {
       title: 'No date field',
       content: 'The filing published 2026-03-31 includes revenue and shareholder tables.',
     }), true);
-    assert.equal(isSuccessfulBody({
-      fetchStatus: 'ok',
-      content: 'Official annual report revenue and controlling shareholder disclosure with enough text.',
-      assessment: { method: 'fail_closed', readability: 'unreadable' },
-    }), false);
     assert.equal(classifyFetchedBody({
       fetchStatus: 'ok',
       content: 'Official annual report revenue and controlling shareholder disclosure with enough text.',
@@ -72,6 +69,65 @@ describe('body quality helper', () => {
       title: 'Undated note',
       content: 'A successful body without any calendar date.',
     }), false);
+  });
+
+  it('falls back to the rule layer when the assessment never returned a verdict', () => {
+    const fetched = {
+      fetchStatus: 'ok',
+      contentOrigin: 'fetched',
+      assessmentStatus: 'unavailable',
+      assessment: { method: 'fail_closed', readability: 'uncertain', reason: 'invalid_or_empty_json' },
+    };
+    const usable = {
+      ...fetched,
+      content: 'Official annual report revenue and controlling shareholder disclosure with enough text.',
+    };
+    assert.equal(isSuccessfulBody(usable), true);
+    assert.equal(classifyFetchedBody(usable).successful, true);
+
+    const shell = { ...fetched, content: 'Just a moment... Cloudflare' };
+    assert.equal(isSuccessfulBody(shell), false);
+    assert.equal(classifyFetchedBody(shell).reason, 'waf_or_shell');
+  });
+
+  it('separates transport refusals from semantic read failures', () => {
+    assert.equal(isTransportReadFailure(
+      { fetchStatus: 'failed', httpStatus: 403, fetchErrorType: 'http_4xx' },
+      { status: 'failed', successful: false },
+    ), true);
+    assert.equal(isTransportReadFailure(
+      { fetchStatus: 'failed', fetchErrorType: 'timeout' },
+      { status: 'failed', successful: false },
+    ), true);
+    assert.equal(isTransportReadFailure(
+      { fetchStatus: 'ok', contentOrigin: 'fetched' },
+      { status: 'waf', successful: false, reason: 'waf_or_shell' },
+    ), true);
+    // An LLM verdict is a content judgment, not a transport fact.
+    assert.equal(isTransportReadFailure(
+      { fetchStatus: 'ok' },
+      { status: 'waf', successful: false, reason: 'assessment_unreadable' },
+    ), false);
+    assert.equal(isTransportReadFailure(
+      { fetchStatus: 'irrelevant' },
+      { status: 'irrelevant', successful: false },
+    ), false);
+    assert.equal(isTransportReadFailure({ fetchStatus: 'ok' }, { status: 'read', successful: true }), false);
+
+    assert.equal(transportFailureReason({ httpStatus: 403 }, { status: 'failed' }), 'http_403');
+    assert.equal(transportFailureReason({ fetchErrorType: 'timeout' }, { status: 'failed' }), 'timeout');
+    assert.equal(transportFailureReason({}, { status: 'waf' }), 'challenge');
+  });
+
+  it('does not let an LLM unreadable verdict rewrite the transport status', () => {
+    const cleaned = sanitizeUnusableSourceBody({
+      url: 'https://zhipuai.cn/about',
+      content: 'Body that the model called unreadable.',
+      fetchStatus: 'ok',
+    }, { status: 'waf', successful: false, reason: 'assessment_unreadable' });
+    assert.equal(cleaned.content, '');
+    assert.equal(cleaned.fetchStatus, 'ok');
+    assert.equal(cleaned.bodyQuality, 'waf');
   });
 
   it('keeps WAF diagnostics and strips the fake fetched body', () => {

@@ -4,7 +4,11 @@ import { focusedSourceSelection } from './focused-settings.mjs';
 import { selectRelevantPassages } from './passage-selector.mjs';
 import { withSourceProvenance } from './source-provenance.mjs';
 import { evaluateSourceRelevance } from './adaptive/source-policy.mjs';
-import { assessSourceBody, assessmentBlocksSuccessfulBody } from './source-assessment.mjs';
+import {
+  ASSESSMENT_STATUS,
+  assessSourceBody,
+  assessmentBlocksSuccessfulBody,
+} from './source-assessment.mjs';
 
 function relatedLinksFromFetch(fetched, settings) {
   const selection = focusedSourceSelection(settings);
@@ -16,14 +20,43 @@ function isAbortError(error) {
   return error?.name === 'AbortError';
 }
 
-function blockedAssessmentResult(fetchedSource, assessment) {
+const SKIPPED_ASSESSMENT = Object.freeze({
+  assessment: null,
+  status: ASSESSMENT_STATUS.skipped,
+});
+
+/**
+ * Assessment outcome fields, kept separate from the transport fact
+ * (`fetchStatus`) and from the deterministic body verdict (`bodyQuality`).
+ */
+function assessmentFields(outcome) {
+  const status = outcome?.status || ASSESSMENT_STATUS.skipped;
+  if (status === ASSESSMENT_STATUS.skipped) {
+    return { assessment: outcome?.assessment || null, assessmentStatus: status };
+  }
+  return {
+    assessment: outcome.assessment,
+    assessmentStatus: status,
+    assessmentAttempts: Number(outcome.attempts) || 1,
+    assessmentRetried: outcome.retried === true,
+    assessmentReason: status === ASSESSMENT_STATUS.unavailable
+      ? (outcome.assessment?.reason || 'assessment_unavailable')
+      : null,
+  };
+}
+
+/**
+ * A real LLM verdict of `unreadable` is a content judgment, so it lands in
+ * `bodyQuality`. The transport fact stays untouched: the bytes did arrive.
+ */
+function blockedAssessmentResult(fetchedSource, outcome) {
   return {
     ...fetchedSource,
     summary: '',
-    assessment,
-    fetchStatus: 'failed',
+    ...assessmentFields(outcome),
+    fetchStatus: 'ok',
     bodyQuality: 'waf',
-    skipReason: assessment?.reason || 'assessment_unreadable',
+    skipReason: outcome?.assessment?.reason || 'assessment_unreadable',
   };
 }
 
@@ -37,8 +70,8 @@ async function maybeAssessSource(source, fetched, {
   relevanceGap,
   observedHosts,
 }) {
-  if (!llm?.complete) return null;
-  const { assessment } = await assessSourceBody({
+  if (!llm?.complete) return SKIPPED_ASSESSMENT;
+  return assessSourceBody({
     llm,
     signal,
     query,
@@ -50,7 +83,6 @@ async function maybeAssessSource(source, fetched, {
     preferredHosts: relevanceGap?.preferredHosts || [],
     observedHosts: observedHosts || [],
   });
-  return assessment;
 }
 
 async function enrichOneSource(source, {
@@ -186,7 +218,7 @@ async function enrichOneSource(source, {
   };
 
   const extraAssessment = async () => {
-    if (!assessmentEnabled) return null;
+    if (!assessmentEnabled) return SKIPPED_ASSESSMENT;
     return maybeAssessSource(source, assessmentFetched, {
       llm,
       signal,
@@ -200,13 +232,13 @@ async function enrichOneSource(source, {
   };
 
   if (fetchMode === 'full') {
-    const assessment = await extraAssessment();
-    if (assessmentBlocksSuccessfulBody(assessment)) {
-      return blockedAssessmentResult(fetchedSource, assessment);
+    const outcome = await extraAssessment();
+    if (assessmentBlocksSuccessfulBody(outcome.assessment)) {
+      return blockedAssessmentResult(fetchedSource, outcome);
     }
     return {
       ...fetchedSource,
-      assessment,
+      ...assessmentFields(outcome),
       fetchStatus: 'ok',
       relatedLinks: relatedLinksFromFetch(fetched, settings),
     };
@@ -214,21 +246,21 @@ async function enrichOneSource(source, {
 
   if (fetchMode === 'extract') {
     const summary = analysisContent;
-    const assessment = await extraAssessment();
-    if (assessmentBlocksSuccessfulBody(assessment)) {
-      return blockedAssessmentResult(fetchedSource, assessment);
+    const outcome = await extraAssessment();
+    if (assessmentBlocksSuccessfulBody(outcome.assessment)) {
+      return blockedAssessmentResult(fetchedSource, outcome);
     }
     return {
       ...fetchedSource,
       summary: String(summary || '').trim() || source.snippet,
       extractionMethod: embedding ? 'embedding' : 'overlap',
-      assessment,
+      ...assessmentFields(outcome),
       fetchStatus: 'ok',
       relatedLinks: relatedLinksFromFetch(fetched, settings),
     };
   }
 
-  const assessment = await maybeAssessSource(source, assessmentFetched, {
+  const outcome = await maybeAssessSource(source, assessmentFetched, {
     llm,
     signal,
     query,
@@ -238,22 +270,17 @@ async function enrichOneSource(source, {
     relevanceGap,
     observedHosts,
   });
-  if (assessment && assessmentBlocksSuccessfulBody(assessment)) {
-    return blockedAssessmentResult(fetchedSource, assessment);
-  }
-  if (!assessment) {
-    return {
-      ...fetchedSource,
-      summary: source.snippet,
-      fetchStatus: 'ok',
-      relatedLinks: relatedLinksFromFetch(fetched, settings),
-    };
+  if (assessmentBlocksSuccessfulBody(outcome.assessment)) {
+    return blockedAssessmentResult(fetchedSource, outcome);
   }
 
+  // No verdict available (assessment skipped or unparseable): keep the fetched
+  // body and fall back to the snippet for display. The deterministic
+  // body-quality rules still decide whether this counts as evidence.
   return {
     ...fetchedSource,
-    summary: assessment.summary || source.snippet,
-    assessment,
+    summary: outcome.assessment?.summary || source.snippet,
+    ...assessmentFields(outcome),
     fetchStatus: 'ok',
     relatedLinks: relatedLinksFromFetch(fetched, settings),
   };

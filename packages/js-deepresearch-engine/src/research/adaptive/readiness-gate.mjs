@@ -2,6 +2,8 @@ import { isSuccessfulBody, sourceHasObservableDate } from '../body-quality.mjs';
 import {
   classifySourceTier,
   documentMatchesQuerySubject,
+  hostnameOf,
+  hostnamesMatch,
   independentEvidenceKeysFromSources,
   requiredHostCoverage,
 } from './source-policy.mjs';
@@ -14,6 +16,47 @@ export const GAP_CLOSED_STATUSES = new Set(['verified']);
 
 function successfulSources(findings = []) {
   return findings.flatMap((finding) => (finding.sources || []).filter(isSuccessfulBody));
+}
+
+/**
+ * Why a required host has no usable body. "Fetched but rejected" and "never
+ * retrieved" call for different repairs, so they must not share one message.
+ */
+function hostAttemptDiagnostics(hosts = [], findings = []) {
+  const attempts = findings.flatMap((finding) => finding.sources || []);
+  return hosts.map((host) => {
+    const forHost = attempts.filter((source) => hostnamesMatch(hostnameOf(source?.url || source?.id), host));
+    if (!forHost.length) return { host, reason: 'not_retrieved' };
+    if (forHost.some((source) => source.fetchStatus === 'ok')) {
+      const rejected = forHost.find((source) => source.fetchStatus === 'ok');
+      return {
+        host,
+        reason: 'body_rejected',
+        bodyQuality: rejected.bodyQuality || null,
+        assessmentStatus: rejected.assessmentStatus || null,
+        detail: rejected.skipReason || rejected.accessNotes || null,
+      };
+    }
+    const blocked = forHost[0];
+    return {
+      host,
+      reason: 'fetch_blocked',
+      detail: blocked.fetchErrorType || blocked.fetchError || null,
+      httpStatus: blocked.httpStatus ?? null,
+    };
+  });
+}
+
+function hostFailureMessage(diagnostics = []) {
+  const rejected = diagnostics.filter((item) => item.reason === 'body_rejected');
+  const blocked = diagnostics.filter((item) => item.reason === 'fetch_blocked');
+  if (rejected.length && !blocked.length && rejected.length === diagnostics.length) {
+    return 'Required primary hosts were retrieved but no body passed the evidence checks.';
+  }
+  if (blocked.length && blocked.length === diagnostics.length) {
+    return 'Required primary hosts refused the request and were never retrieved.';
+  }
+  return 'Required primary hosts were not successfully read.';
 }
 
 function requiredHostsRead(gap, findings, extras = {}) {
@@ -184,10 +227,16 @@ export function evaluateReadinessGate({
     }
   }
   if (missingRequired.length) {
+    const hosts = missingRequired.flatMap((item) => item.hosts);
+    const hostDiagnostics = hostAttemptDiagnostics(
+      hosts.filter((host) => !String(host).startsWith('criterion:') && host !== 'primary_filing'),
+      resolvedFindings,
+    );
     failures.push({
       code: 'required_host_missing',
-      message: 'Required primary hosts were not successfully read.',
-      hosts: missingRequired.flatMap((item) => item.hosts),
+      message: hostFailureMessage(hostDiagnostics),
+      hosts,
+      hostDiagnostics,
     });
     flags.push('required_host_missing');
   }

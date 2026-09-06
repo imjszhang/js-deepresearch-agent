@@ -116,11 +116,12 @@ describe('source enricher relevance gate', () => {
     );
   });
 
-  it('fail-closes unreadable assessment JSON and does not treat it as a successful body', async () => {
+  it('keeps the fetched body when the assessment JSON is unusable', async () => {
+    const body = '智谱AI发布了有关算法备案、数据安全和监管合规工作的正式说明。';
     registerContentFetchHandler(async () => ({
       status: 'ok',
       title: '智谱AI合规公告',
-      content: '智谱AI发布了有关算法备案、数据安全和监管合规工作的正式说明。',
+      content: body,
     }));
     const [finding] = await enrichFindings([{
       gapId: 'gap-2',
@@ -140,7 +141,55 @@ describe('source enricher relevance gate', () => {
       entities: ['智谱AI', '智谱'],
       budget: { claim() {}, canClaim() { return true; } },
     });
-    assert.equal(finding.sources[0].fetchStatus, 'failed');
+    // An unparseable assessment is an LLM plumbing failure. It must not rewrite
+    // the transport fact, and it must not destroy the body we already fetched.
+    assert.equal(finding.sources[0].fetchStatus, 'ok');
+    assert.equal(finding.sources[0].content, body);
+    assert.equal(finding.sources[0].assessmentStatus, 'unavailable');
     assert.equal(finding.sources[0].assessment.method, 'fail_closed');
+    assert.equal(finding.sources[0].assessmentRetried, true);
+    assert.notEqual(finding.sources[0].bodyQuality, 'waf');
+  });
+
+  it('keeps the transport fact when the model calls a fetched body unreadable', async () => {
+    registerContentFetchHandler(async () => ({
+      status: 'ok',
+      title: '智谱AI合规公告',
+      content: '智谱AI发布了有关算法备案、数据安全和监管合规工作的正式说明。',
+    }));
+    const [finding] = await enrichFindings([{
+      gapId: 'gap-2',
+      question: '智谱AI监管合规情况',
+      sources: [{ url: 'https://example.com/zhipu', title: '智谱AI公告' }],
+    }], {
+      query: '研究智谱AI',
+      fetchMode: 'summary',
+      maxUrlsPerIteration: 1,
+      maxUrlsTotal: 1,
+      maxContentChars: 8000,
+      enrichConcurrency: 1,
+      llm: {
+        async complete() {
+          return JSON.stringify({
+            summary: '',
+            readability: 'unreadable',
+            contentKind: 'obfuscated',
+            publisherType: 'unknown',
+            firstParty: false,
+            evidenceTier: 'unknown',
+            reason: 'obfuscated body',
+          });
+        },
+      },
+      settings: { research: { focused: { fetchBackend: 'auto' } } },
+      relevance: { enabled: true, entityGuard: true, bodyValidation: true, minRerankScore: 0.01 },
+      relevanceGap: { id: 'gap-2', question: '智谱AI监管合规情况', requiredHosts: [] },
+      entities: ['智谱AI', '智谱'],
+      budget: { claim() {}, canClaim() { return true; } },
+    });
+    assert.equal(finding.sources[0].fetchStatus, 'ok');
+    assert.equal(finding.sources[0].bodyQuality, 'waf');
+    assert.equal(finding.sources[0].assessmentStatus, 'ok');
+    assert.equal(finding.sources[0].skipReason, 'obfuscated body');
   });
 });

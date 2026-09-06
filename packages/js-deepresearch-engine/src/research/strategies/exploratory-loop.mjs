@@ -9,7 +9,14 @@ import { applyContractGaps, planAndNormalizeContract } from '../research-contrac
 import { applySlotSupportJudgments, judgeOpenSlotSupport } from '../gap-slot-support.mjs';
 import { evidenceStatusOf, isRepairTerminal } from '../gap-state.mjs';
 import { mergeResearchBrief, researchBriefFromInput } from '../research-brief.mjs';
-import { classifyFetchedBody, isRetryableReadFailure, MAX_RETRYABLE_READ_ATTEMPTS, sanitizeUnusableSourceBody } from '../body-quality.mjs';
+import {
+  classifyFetchedBody,
+  isRetryableReadFailure,
+  isTransportReadFailure,
+  MAX_RETRYABLE_READ_ATTEMPTS,
+  sanitizeUnusableSourceBody,
+  transportFailureReason,
+} from '../body-quality.mjs';
 import {
   evaluateSourceRelevance,
   inferEvidenceScope,
@@ -256,8 +263,10 @@ function persistPlannerExhaustion(state, stopDetail) {
   }
 }
 
-function safetyStopDetail(state, { trigger } = {}) {
-  if (trigger === 'consecutive_invalid') return 'consecutive_invalid_steps';
+function safetyStopDetail(state, { trigger, transportOnly = false } = {}) {
+  if (trigger === 'consecutive_invalid') {
+    return transportOnly ? 'transport_blocked' : 'consecutive_invalid_steps';
+  }
   if (trigger === 'all_unresolved_blocked') {
     const last = state.recovery.lastPlannerFailure;
     if (last && typeof last === 'object' && last.step === state.step && last.gapId) {
@@ -633,6 +642,8 @@ export async function runExploratoryLoop(context) {
     }))[0];
     const classifiedSources = [];
     let successful = 0;
+    let transportFailures = 0;
+    let attempted = 0;
     for (const source of finding.sources || []) {
       const id = source.id || source.url;
       let quality = classifyFetchedBody(source);
@@ -706,8 +717,22 @@ export async function runExploratoryLoop(context) {
         stored.status = 'unread';
         stored.skipReason = quality.reason;
       }
+      attempted += 1;
+      if (source.assessmentStatus === 'unavailable') {
+        state.relevance.assessmentUnavailable += 1;
+        if (quality.successful) state.relevance.admittedWithoutAssessment += 1;
+      }
+      if (isTransportReadFailure(source, quality)) {
+        transportFailures += 1;
+        state.recordTransportFailure({
+          hostname: source.hostname,
+          url: source.url || id,
+          reason: transportFailureReason(source, quality),
+        });
+      }
       if (quality.successful) {
         successful += 1;
+        state.clearTransportStreak();
         state.relevance.readAccepted += 1;
         state.noteSuccessfulBody();
         state.addKnowledge({ gapId: finding.gapId, sourceId: id, learned: next.summary || next.content || next.snippet });
@@ -828,7 +853,14 @@ export async function runExploratoryLoop(context) {
         selectReason: reasonCode,
       })),
     }, budget);
-    return successful;
+    return {
+      successful,
+      transportFailures,
+      attempted,
+      // Every attempted read failed, and every failure was the target refusing
+      // or never delivering the bytes.
+      transportOnly: successful === 0 && attempted > 0 && transportFailures === attempted,
+    };
   }
 
   const profileTokensBefore = budget?.usage?.llmTokens || 0;
@@ -1529,12 +1561,12 @@ export async function runExploratoryLoop(context) {
           while (budget && autoReadCount > 0 && !budget.canClaim('sourceReads', autoReadCount)) autoReadCount -= 1;
           const picks = autoReadCount > 0 ? pickUnreadCandidates(state, autoReadCount, gapId) : [];
           if (picks.length) {
-            successfulAutoReads += await performRead({
+            successfulAutoReads += (await performRead({
               sourceIds: picks.map((candidate) => candidate.id).slice(0, autoReadCount),
               gapId,
               reasonCode: 'auto_read_top_ranked',
               harvest: true,
-            });
+            })).successful;
             if (duplicateSerp) {
               addTrace(trace, state, 'duplicate_serp_redirect', {
                 reasonCode: 'read_unread_candidate',
@@ -1618,17 +1650,29 @@ export async function runExploratoryLoop(context) {
             sourceIds: rejectedSourceIds,
           }, budget, 'skipped');
         }
-        const successfulReads = await performRead({
+        const readOutcome = await performRead({
           sourceIds: eligibleSourceIds,
           gapId: targetGapId,
           reasonCode: action.reasonCode || 'agent_read',
           harvest: false,
         });
+        const successfulReads = readOutcome.successful;
         if (successfulReads > 0) {
           consecutiveInvalidSteps = 0;
           const readGap = state.getGap(action.gapId);
           if (readGap && !readGap.rollup) readGap.repairFailures = 0;
           state.clearPlannerFailure({ gapId: action.gapId });
+        } else if (readOutcome.transportOnly && belowMin) {
+          // The targets refused or never delivered the bytes. That is not the
+          // loop failing to find valid actions, and it must not burn the
+          // safety valve while the exploration floor is still unmet.
+          addTrace(trace, state, 'recovery', {
+            reasonCode: 'transport_blocked_read',
+            recoveryState: 'transport_blocked',
+            targetGapIds: [targetGapId].filter(Boolean),
+            transportFailures: readOutcome.transportFailures,
+            blockedHosts: Object.keys(state.recovery.transportBlockedHosts || {}),
+          }, budget, 'retry');
         } else if (!(belowMin && gate?.pass)) {
           consecutiveInvalidSteps += 1;
           state.recovery.invalidSteps += 1;
@@ -1638,7 +1682,10 @@ export async function runExploratoryLoop(context) {
               state.markRepairTerminal(failedGap.id, 'repair_exhausted', { phase: 'read' });
             }
             stopReason = STOP_REASONS.safetyCap;
-            stopDetail = safetyStopDetail(state, { trigger: 'consecutive_invalid' });
+            stopDetail = safetyStopDetail(state, {
+              trigger: 'consecutive_invalid',
+              transportOnly: readOutcome.transportOnly,
+            });
             addTrace(trace, state, 'stop', {
               reasonCode: stopReason,
               stopDetail,

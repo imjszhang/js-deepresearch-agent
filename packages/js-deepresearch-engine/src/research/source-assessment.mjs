@@ -40,10 +40,22 @@ const CONTENT_KINDS = new Set(CONTENT_KIND_VALUES);
 const PUBLISHER_TYPES = new Set(PUBLISHER_TYPE_VALUES);
 const EVIDENCE_TIERS = new Set(EVIDENCE_TIER_VALUES);
 
+export const ASSESSMENT_STATUS = Object.freeze({
+  ok: 'ok',
+  unavailable: 'unavailable',
+  skipped: 'skipped',
+});
+
+/**
+ * Assessment placeholder used when the LLM never produced a usable verdict.
+ *
+ * `readability` stays `uncertain` because nothing was actually judged; only a
+ * real LLM verdict may claim `unreadable`.
+ */
 export function failClosedAssessment(reason = 'invalid_or_empty_json') {
   return {
     summary: '',
-    readability: 'unreadable',
+    readability: 'uncertain',
     contentKind: 'other',
     publisherType: 'unknown',
     firstParty: false,
@@ -114,18 +126,36 @@ export async function assessSourceBody({
   if (!result.ok) {
     return {
       assessment: failClosedAssessment(result.reason || 'invalid_or_empty_json'),
+      status: ASSESSMENT_STATUS.unavailable,
       attempts: result.attempts,
       retried: result.retried,
     };
   }
+  const assessment = normalizeSourceAssessment(result.parsed);
   return {
-    assessment: normalizeSourceAssessment(result.parsed),
+    assessment,
+    status: isAssessmentUnavailable(assessment)
+      ? ASSESSMENT_STATUS.unavailable
+      : ASSESSMENT_STATUS.ok,
     attempts: result.attempts,
     retried: result.retried,
   };
 }
 
+/**
+ * True when the assessment step itself never produced a verdict (unparseable or
+ * out-of-enum LLM output). This is a plumbing outcome, not a content judgment.
+ */
+export function isAssessmentUnavailable(assessment) {
+  return assessment?.method === 'fail_closed';
+}
+
+/**
+ * Only a real LLM verdict may declare a body unusable. An unavailable
+ * assessment leaves the decision to the deterministic body-quality rules.
+ */
 export function assessmentBlocksSuccessfulBody(assessment) {
   if (!assessment) return false;
-  return assessment.method === 'fail_closed' || assessment.readability === 'unreadable';
+  if (isAssessmentUnavailable(assessment)) return false;
+  return assessment.readability === 'unreadable';
 }

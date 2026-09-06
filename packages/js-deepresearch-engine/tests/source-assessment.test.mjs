@@ -27,10 +27,11 @@ describe('source assessment', () => {
     assert.equal(ok.method, 'llm');
     assert.equal(ok.readability, 'readable');
     assert.equal(normalizeSourceAssessment({ summary: 'x' }).method, 'fail_closed');
-    assert.equal(failClosedAssessment().readability, 'unreadable');
+    // Nothing was judged, so the placeholder must not claim a readability verdict.
+    assert.equal(failClosedAssessment().readability, 'uncertain');
   });
 
-  it('retries once and fail-closes when JSON stays invalid', async () => {
+  it('retries once, then reports the assessment as unavailable without discarding the body', async () => {
     let calls = 0;
     const result = await assessSourceBody({
       llm: {
@@ -43,16 +44,18 @@ describe('source assessment', () => {
     });
     assert.equal(calls, 2);
     assert.equal(result.assessment.method, 'fail_closed');
-    assert.equal(isSuccessfulBody({
+    assert.equal(result.status, 'unavailable');
+    assert.equal(result.attempts, 2);
+    assert.equal(result.retried, true);
+    // The rule layer decides instead: this body is long enough and clean.
+    const source = {
       fetchStatus: 'ok',
+      assessmentStatus: 'unavailable',
       content: 'enough characters to look like a body '.repeat(4),
       assessment: result.assessment,
-    }), false);
-    assert.equal(classifyFetchedBody({
-      fetchStatus: 'ok',
-      content: 'enough characters to look like a body '.repeat(4),
-      assessment: result.assessment,
-    }).reason, 'assessment_fail_closed');
+    };
+    assert.equal(isSuccessfulBody(source), true);
+    assert.equal(classifyFetchedBody(source).reason, 'body_ok');
   });
 
   it('marks LLM-unreadable bodies as unsuccessful without adding WAF needles', async () => {
