@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { normalizeSourceUrl } from './source-candidates.mjs';
+import { isSuccessfulBody, sourceBodyText } from './body-quality.mjs';
 import { buildClaimEvaluation, extractClaimsFromDocument, extractQualityClaims } from './claim-quality.mjs';
 import { buildCitationMap, parseCitations, resolveCitedSourceIds } from './citations.mjs';
 import { sourceHasFetchedBody } from './focused-settings.mjs';
@@ -25,6 +26,16 @@ export function stableSourceId(source = {}) {
 function mergeSourceRecord(existing, incoming) {
   if (!existing) return { ...incoming };
   const merged = { ...existing };
+  const existingBodyUsable = isSuccessfulBody(existing);
+  const incomingBodyUsable = isSuccessfulBody(incoming);
+  const preferIncomingBody = (
+    incomingBodyUsable
+    && (!existingBodyUsable || sourceBodyText(incoming).length > sourceBodyText(existing).length)
+  ) || (
+    !existingBodyUsable
+    && !incomingBodyUsable
+    && incoming.fetchStatus === 'ok'
+  );
   for (const field of [
     'title', 'url', 'snippet', 'engine', 'platform', 'publisher', 'author',
     'publishedAt', 'date', 'updatedAt', 'accessedAt', 'sourceType',
@@ -32,8 +43,6 @@ function mergeSourceRecord(existing, incoming) {
   ]) {
     if (!merged[field] && incoming[field]) merged[field] = incoming[field];
   }
-  if (String(incoming.summary || '').length > String(merged.summary || '').length) merged.summary = incoming.summary;
-  if (String(incoming.content || '').length > String(merged.content || '').length) merged.content = incoming.content;
   if (incoming.fetchStatus === 'ok') {
     // A later successful read supersedes stale transport diagnostics from an
     // earlier failed attempt for the same canonical URL.
@@ -44,14 +53,6 @@ function mergeSourceRecord(existing, incoming) {
     merged.fetchErrorType = null;
     merged.httpStatus = null;
     merged.fetchAttempts = incoming.fetchAttempts ?? null;
-    for (const field of [
-      'contentOrigin', 'assessment', 'assessmentStatus', 'assessmentAttempts',
-      'assessmentRetried', 'assessmentReason', 'bodyQuality',
-      'bodyQualityReason', 'relevanceDecision', 'relevanceDecisionByGap',
-      'tier',
-    ]) {
-      merged[field] = incoming[field] ?? null;
-    }
   } else if (merged.fetchStatus !== 'ok') {
     if (!merged.fetchStatus && incoming.fetchStatus) merged.fetchStatus = incoming.fetchStatus;
     for (const field of [
@@ -59,6 +60,16 @@ function mergeSourceRecord(existing, incoming) {
       'httpStatus', 'fetchAttempts',
     ]) {
       if (merged[field] == null && incoming[field] != null) merged[field] = incoming[field];
+    }
+  }
+  if (preferIncomingBody) {
+    for (const field of [
+      'content', 'summary', 'contentOrigin', 'assessment', 'assessmentStatus',
+      'assessmentAttempts', 'assessmentRetried', 'assessmentReason',
+      'bodyQuality', 'bodyQualityReason', 'relevanceDecision',
+      'relevanceDecisionByGap', 'tier',
+    ]) {
+      merged[field] = incoming[field] ?? null;
     }
   }
   return merged;

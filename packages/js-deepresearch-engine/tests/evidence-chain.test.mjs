@@ -357,6 +357,53 @@ describe('passage artifacts and report claim alignment', () => {
     assert.ok(split.passages.length > 0);
   });
 
+  it('keeps a usable body when a later successful transport returns a rejected shell', () => {
+    const url = 'https://vendor.test/official';
+    const validContent = 'Official product documentation with enough specific evidence to remain the canonical usable body.';
+    const split = buildPassageArtifacts({
+      query: 'official product documentation',
+      findings: [
+        {
+          question: 'usable read',
+          sources: [{
+            title: 'Official source',
+            url,
+            fetchStatus: 'ok',
+            accessStatus: 'ok',
+            contentOrigin: 'fetched',
+            content: validContent,
+            bodyQuality: 'read',
+            bodyQualityReason: 'body_ok',
+            assessmentStatus: 'ok',
+            assessment: { method: 'llm', readability: 'readable', firstParty: true },
+          }],
+        },
+        {
+          question: 'later rejected read',
+          sources: [{
+            title: 'Official source',
+            url,
+            fetchStatus: 'ok',
+            accessStatus: 'ok',
+            contentOrigin: 'fetched',
+            content: 'Access denied. Please complete the captcha before continuing to the requested page.',
+            bodyQuality: 'waf',
+            bodyQualityReason: 'waf_or_shell',
+            assessmentStatus: 'ok',
+            assessment: { method: 'llm', readability: 'unreadable', firstParty: true },
+          }],
+        },
+      ],
+    });
+    assert.equal(split.sources.length, 1);
+    const source = split.sources[0];
+    assert.equal(source.fetchStatus, 'ok');
+    assert.equal(source.content, validContent);
+    assert.equal(source.bodyQuality, 'read');
+    assert.equal(source.assessment.readability, 'readable');
+    assert.ok(split.passages.length > 0);
+  });
+
   it('keeps bylines as candidates but displays the semantically preferred body', async () => {
     const content = [
       '# ​代持操作手册 #1610',
