@@ -1129,7 +1129,7 @@ describe('exploratory agent loop', () => {
     assert.ok(!result.trace.some((entry) => entry.action === 'reflect' && entry.reasonCode === 'should_not_run'));
   });
 
-  it('retries a URL after a failed fetch instead of treating it as already read', async () => {
+  it('does not schedule the same URL/backend again after a failed fetch', async () => {
     const { registerContentFetchHandler, resetContentFetchHandlers } = await import('../src/research/content-resolver.mjs');
     let fetches = 0;
     registerContentFetchHandler(async (url) => {
@@ -1165,21 +1165,14 @@ describe('exploratory agent loop', () => {
         } },
         llm: llmFor(decisions),
       });
-      assert.ok(fetches >= 2);
+      assert.equal(fetches, 1);
       assert.ok(result.trace.some((entry) => (
-        entry.action === 'read'
-        && entry.reasonCode === 'read_retry'
-        && entry.status !== 'rejected'
-      )));
-      assert.ok(!result.trace.some((entry) => (
-        entry.action === 'read'
-        && entry.reasonCode === 'read_retry'
-        && entry.status === 'rejected'
-        && entry.reasonCode === 'repeat_action'
+        entry.action === 'transport_memory'
+        && entry.reasonCode === 'transport_attempt_completed'
       )));
       const sources = (result.findings || []).flatMap((finding) => finding.sources || [])
         .filter((item) => String(item.url || item.id).includes('commerce-agents'));
-      assert.ok(sources.some((item) => item.fetchStatus === 'ok' || item.bodyQuality === 'read'));
+      assert.ok(sources.every((item) => item.fetchStatus !== 'ok' && item.bodyQuality !== 'read'));
     } finally {
       resetContentFetchHandlers();
     }

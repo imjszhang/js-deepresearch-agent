@@ -43,10 +43,12 @@
  * @property {number} [questionsPerIteration]
  * @property {number} [concurrency]
  * @property {string} [workDir]
- * @property {{ fetchMode?: string, maxContentChars?: number, enrichConcurrency?: number, sourceAssessment?: { enabled?: boolean } }} [read]
+ * @property {{ fetchMode?: string, maxContentChars?: number, enrichConcurrency?: number, sourceAssessment?: { enabled?: boolean }, transport?: { maxAttempts?: number, hostCircuitThreshold?: number, responseHeadersTimeoutMs?: number, htmlTotalTimeoutMs?: number, documentTotalTimeoutMs?: number, largeFileThresholdBytes?: number } }} [read]
  * @property {FocusedSettings} [focused]
  * @property {Record<string, number>} [budget]
  * @property {Record<string, unknown>} [exploratory]
+ * @property {{ minChars?: number, maxAttempts?: number }} [reportValidation]
+ * @property {{ maxOutputTokens?: number, maxAttempts?: number }} [report]
  */
 
 /**
@@ -85,6 +87,16 @@
  * @property {string} [fetchError]
  * @property {string} [fetchErrorType]
  * @property {number|null} [httpStatus]
+ * @property {number} [fetchAttempts]
+ * @property {boolean} [retryable]
+ * @property {number|null} [retryAfterMs]
+ * @property {number[]} [retryDelaysMs]
+ * @property {'response_headers'|'total'|null} [timeoutStage]
+ * @property {Object|null} [timeoutPolicy]
+ * @property {string} [backend]
+ * @property {string} [retrievalPath]
+ * @property {boolean} [transportMemorySkipped]
+ * @property {Object|null} [circuit]
  * @property {string} [accessStatus]
  * @property {'read'|'waf'|'failed'|'irrelevant'} [bodyQuality]
  * @property {string} [bodyQualityReason]
@@ -110,6 +122,18 @@
  * @property {string} message
  * @property {number|null} [progress]
  * @property {'info'|'error'} [level]
+ */
+
+/**
+ * @typedef {'provider'|'parse'|'semantic-contract'|'render'} ReportFailurePhase
+ */
+
+/**
+ * @typedef {Object} ReportFailedCheck
+ * @property {string} check
+ * @property {ReportFailurePhase} [phase]
+ * @property {Record<string, boolean|number|string|object|null>} expected Safe structured diagnostics only.
+ * @property {Record<string, boolean|number|string|object|null>} actual Safe structured diagnostics only; free text is represented by length/hash.
  */
 
 /**

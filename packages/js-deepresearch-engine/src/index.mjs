@@ -36,6 +36,11 @@ export {
 export { getSourceEvidence, getSourceEvidenceClass, sourceHasFetchedBody, resolveFocusedSettings } from './research/focused-settings.mjs';
 export { resolveReadSettings } from './research/read-settings.mjs';
 export {
+  TransportMemory,
+  TRANSPORT_MEMORY_SCHEMA_VERSION,
+  resolveTransportMemorySettings,
+} from './research/transport-memory.mjs';
+export {
   resolveExploratorySettings,
   DEFAULT_EXPLORATORY_MIN_LLM_TOKENS,
   DEFAULT_EXPLORATORY_MAX_LLM_TOKENS,
@@ -176,10 +181,15 @@ export {
   isPlaceholderSummary,
   emptyBulletLines,
   extractLabeledNarrativeText,
+  classifyReportFailurePhase,
+  sanitizeReportFailedChecks,
+  looksLikeStructuredNarrative,
+  REPORT_FAILURE_PHASES,
 } from './research/report-builder.mjs';
 export {
   isWafOrErrorBody,
   isSuccessfulBody,
+  isTransportReadSkip,
   isRawBinaryDocumentText,
   classifyFetchedBody,
   sanitizeUnusableSourceBody,
@@ -263,6 +273,8 @@ export {
   parseNarrativeResponse,
   parseMarkdownNarrative,
   normalizeNarrativeDocument,
+  sanitizeNarrativeText,
+  sanitizeNarrativeResponse,
   containsSourceDump as narrativeContainsSourceDump,
 } from './research/report-narrative.mjs';
 export {

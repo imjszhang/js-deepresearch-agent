@@ -1,5 +1,5 @@
 const CITATION_BLOCK_PATTERN = /\[(\d+\.\d+(?:\s*(?:[-,，])\s*\d+\.\d+)*)\]/g;
-const INTERNAL_REFERENCE_PATTERN = /\[((?:gap|slot|source|passage|claim)(?:[-_:][A-Za-z0-9_.:-]+)+)\](?!\()/gi;
+const INTERNAL_REFERENCE_PATTERN = /\[(gap-\d+)\](?!\()/gi;
 
 function addCitationKey(citations, seen, findingIndex, sourceIndex) {
   const key = `${findingIndex}.${sourceIndex}`;

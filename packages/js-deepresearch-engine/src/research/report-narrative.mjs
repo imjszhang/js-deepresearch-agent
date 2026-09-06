@@ -1,7 +1,30 @@
 import { classifyClaimSection } from './claim-quality.mjs';
-import { parseCitations } from './citations.mjs';
+import { parseCitations, stripInternalReferenceTokens } from './citations.mjs';
 
 export const SOURCE_DUMP_LINE = /\[[0-9]+(?:\.[0-9]+)?\][^\n]*\((?:source body|snippet only|source summary)\)\s*:/i;
+const LEADING_THINK_BLOCK = /^\s*<think\b[^>]*>[\s\S]*?<\/think\s*>\s*/i;
+const LEADING_THINK_CLOSE = /^\s*<\/think\s*>\s*/i;
+const EMPTY_LIST_ITEM = /^\s*(?:[-*]|\d+[.)])\s*$/;
+
+export function sanitizeNarrativeText(text = '') {
+  let sanitized = String(text || '');
+  let previous;
+  do {
+    previous = sanitized;
+    sanitized = sanitized
+      .replace(LEADING_THINK_BLOCK, '')
+      .replace(LEADING_THINK_CLOSE, '');
+  } while (sanitized !== previous);
+  return stripInternalReferenceTokens(sanitized);
+}
+
+export function sanitizeNarrativeResponse(text = '') {
+  return sanitizeNarrativeText(text)
+    .split(/\r?\n/)
+    .filter((line) => !EMPTY_LIST_ITEM.test(line))
+    .join('\n')
+    .trim();
+}
 
 export function containsSourceDump(text = '') {
   return SOURCE_DUMP_LINE.test(String(text));
@@ -22,10 +45,13 @@ export function extractJsonObject(text = '') {
 function asStringList(value) {
   if (Array.isArray(value)) {
     return value.map((item) => (
-      typeof item === 'string' ? item.trim() : String(item?.text || '').trim()
-    )).filter(Boolean);
+      sanitizeNarrativeText(typeof item === 'string' ? item : item?.text || '').trim()
+    )).filter((item) => item && !EMPTY_LIST_ITEM.test(item));
   }
-  if (typeof value === 'string' && value.trim()) return [value.trim()];
+  if (typeof value === 'string') {
+    const text = sanitizeNarrativeText(value).trim();
+    if (text && !EMPTY_LIST_ITEM.test(text)) return [text];
+  }
   return [];
 }
 
@@ -53,11 +79,11 @@ function normalizeKeyFindings(value) {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item) => {
     if (typeof item === 'string') {
-      const text = item.trim();
+      const text = sanitizeNarrativeText(item).trim();
       return text ? [{ heading: '', claims: [text] }] : [];
     }
     if (!item || typeof item !== 'object') return [];
-    const heading = String(item.heading || item.title || '').trim();
+    const heading = sanitizeNarrativeText(item.heading || item.title || '').trim();
     const claims = asStringList(item.claims || item.items);
     return claims.length ? [{ heading, claims }] : [];
   });
@@ -71,7 +97,7 @@ export function validateNarrativeObject(value, { requireCitedKeyFindings = false
   if (value.evidence != null || value.sources != null || value.Evidence != null || value.Sources != null) {
     flags.push('narrative_has_generated_sections');
   }
-  const title = String(value.title || '').trim();
+  const title = sanitizeNarrativeText(value.title || '').trim();
   if (!title) flags.push('narrative_missing_title');
   const summary = asStringList(value.summary);
   if (!summary.length || summary.every((item) => isWeakText(item))) flags.push('narrative_empty_summary');
@@ -152,11 +178,12 @@ function extractBodyItems(lines = []) {
     }
     if (LIST_PREFIX.test(line)) {
       flush();
-      const item = String(line).replace(LIST_PREFIX, '').trim();
+      const item = sanitizeNarrativeText(String(line).replace(LIST_PREFIX, '')).trim();
       if (item) items.push(item);
       continue;
     }
-    paragraph.push(String(line).trim());
+    const item = sanitizeNarrativeText(String(line)).trim();
+    if (item && !EMPTY_LIST_ITEM.test(item)) paragraph.push(item);
   }
   flush();
   return items;

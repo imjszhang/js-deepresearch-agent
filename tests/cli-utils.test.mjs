@@ -89,6 +89,22 @@ describe('CLI utilities', () => {
     assert.equal(settings.research.focused.fetchBackend, 'js-eyes');
   });
 
+  it('maps read transport circuit and timeout flags', () => {
+    const settings = applyResearchFlags({ research: {} }, {
+      'read-host-circuit-threshold': '4',
+      'read-response-headers-timeout-ms': '9000',
+      'read-html-timeout-ms': '14000',
+      'read-document-timeout-ms': '75000',
+    });
+
+    assert.deepEqual(settings.research.read.transport, {
+      hostCircuitThreshold: 4,
+      responseHeadersTimeoutMs: 9000,
+      htmlTotalTimeoutMs: 14000,
+      documentTotalTimeoutMs: 75000,
+    });
+  });
+
   it('defaults quick research to a single iteration unless --iterations is set', () => {
     const implied = applyResearchFlags({ research: { iterations: 2 } }, { strategy: 'quick' });
     assert.equal(implied.research.strategy, 'quick');

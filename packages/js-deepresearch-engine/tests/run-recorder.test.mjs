@@ -7,6 +7,7 @@ import { afterEach, describe, it } from 'node:test';
 import {
   BudgetManager,
   FileRunRecorder,
+  ReportGenerationError,
   ResearchRunner,
   loadLatestCheckpoint,
   readEventJournal,
@@ -14,6 +15,7 @@ import {
   resetContentFetchHandlers,
   replayRecordedLlmCall,
   sanitizeRecordedValue,
+  validateReportOutput,
 } from '../src/index.mjs';
 import { OpenAICompatibleProvider } from '../src/llm/providers/openai-compatible.mjs';
 import { wrapProvidersWithBudget } from '../src/research/budget-manager.mjs';
@@ -91,6 +93,57 @@ describe('durable run recorder', () => {
     const events = readEventJournal(sessionDir);
     assert.ok(events.some((event) => event.type === 'session_finished'));
     assert.ok(events.every((event) => event.operationId && 'parentOperationId' in event));
+  });
+
+  it('records report failed checks and the last failure phase in failure.json', () => {
+    const sessionDir = makeSession();
+    const recorder = new FileRunRecorder({
+      sessionDir,
+      runId: 'run-report-diagnostics',
+      strategy: 'quick',
+      query: 'diagnostic query',
+    });
+    const secret = 'DO-NOT-PERSIST secret customer sentence without terminal punctuation';
+    const validation = validateReportOutput(`# Diagnostic report
+
+## Summary
+${'A valid summary establishes enough context before the deliberately truncated final line. '.repeat(3)}
+${secret}
+`, { minChars: 100, mode: 'narrative' });
+    const failedChecks = validation.failedChecks;
+    const truncated = failedChecks.find((item) => item.check === 'report_truncated');
+    assert.equal(truncated.actual.lastContentLine, undefined);
+    assert.equal(truncated.actual.lastContentLength, secret.length);
+    assert.match(truncated.actual.lastContentSha256, /^[a-f0-9]{64}$/);
+    const error = new ReportGenerationError({
+      attempts: 2,
+      minChars: 100,
+      outputChars: validation.outputChars,
+      flags: validation.flags,
+      failedChecks,
+      phase: 'semantic-contract',
+      attemptCounts: { provider: 0, parse: 0, semanticContract: 2, render: 0 },
+    });
+    assert.doesNotMatch(error.message, new RegExp(secret));
+    recorder.finalize('failed', {
+      error,
+    });
+
+    const failure = JSON.parse(fs.readFileSync(path.join(sessionDir, 'failure.json'), 'utf8'));
+    assert.equal(failure.phase, 'semantic-contract');
+    assert.ok(failure.failedChecks.every((item) => item.phase === 'semantic-contract'));
+    assert.equal(failure.error.phase, 'semantic-contract');
+    assert.deepEqual(failure.error.failedChecks, failure.failedChecks);
+    assert.equal(failure.error.attemptCounts.semanticContract, 2);
+    const run = JSON.parse(fs.readFileSync(path.join(sessionDir, 'run.json'), 'utf8'));
+    assert.deepEqual(run.failedChecks, failure.failedChecks);
+    assert.equal(run.phase, 'semantic-contract');
+    const allArtifacts = fs.readdirSync(sessionDir, { recursive: true })
+      .map((name) => path.join(sessionDir, name))
+      .filter((file) => fs.statSync(file).isFile())
+      .map((file) => fs.readFileSync(file, 'utf8'))
+      .join('\n');
+    assert.doesNotMatch(allArtifacts, new RegExp(secret));
   });
 
   it('records the provider-normalized LLM request before dispatch and omits reasoning text', async () => {
@@ -370,10 +423,32 @@ describe('durable run recorder', () => {
     state.candidates.set('source-1', { id: 'source-1', url: 'https://example.com' });
     state.urlPool.add({ id: 'source-1', url: 'https://example.com' });
     state.rerankCache.set('cache-key', { score: 0.8 });
+    const transportAttempt = state.transportMemory.begin('https://blocked.example.com/one', {
+      backend: 'http',
+    });
+    state.transportMemory.finish(transportAttempt, {
+      status: 'failed',
+      errorType: 'http_4xx',
+      httpStatus: 403,
+      fetchAttempts: 1,
+    });
     const checkpoint = state.exportCheckpoint({
       queryMemory: memory,
       loopLocal: { consecutiveInvalidSteps: 2 },
     });
+    const sessionDir = makeSession();
+    const recorder = new FileRunRecorder({
+      sessionDir,
+      runId: 'run-transport-checkpoint',
+      strategy: 'exploratory',
+      query: 'alpha',
+    });
+    recorder.checkpoint('exploratory-step-complete', checkpoint);
+    const persisted = loadLatestCheckpoint(sessionDir);
+    assert.equal(
+      persisted.state.transportMemory.attempts[0].url,
+      'https://blocked.example.com/one',
+    );
 
     const restoredBudget = new BudgetManager({ research: { budget: {} }, llm: {} });
     const restoredMemory = new QueryMemory({ enabled: true });
@@ -388,6 +463,10 @@ describe('durable run recorder', () => {
     assert.equal(restored.candidates.get('source-1').url, 'https://example.com');
     assert.equal(restored.urlPool.get('source-1').url, 'https://example.com');
     assert.equal(restored.rerankCache.get('cache-key').score, 0.8);
+    assert.equal(
+      restored.transportMemory.check('https://blocked.example.com/one', { backend: 'http' }).reason,
+      'url_backend_already_attempted',
+    );
     assert.equal(restoredBudget.usage.llmTokens, 25);
     assert.equal(restoredMemory.entries[0].query, 'alpha');
     assert.deepEqual(restoredMemory.vectorCache.get('alpha'), [0.1, 0.2]);

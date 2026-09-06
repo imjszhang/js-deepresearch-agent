@@ -95,6 +95,14 @@ export const defaultSettings = Object.freeze({
       sourceAssessment: {
         enabled: false,
       },
+      transport: {
+        maxAttempts: 3,
+        hostCircuitThreshold: 3,
+        responseHeadersTimeoutMs: 10000,
+        htmlTotalTimeoutMs: 15000,
+        documentTotalTimeoutMs: 60000,
+        largeFileThresholdBytes: 5242880,
+      },
       relevance: {
         enabled: true,
         siteConstraint: true,
@@ -256,6 +264,10 @@ export function mergeSettings(overrides = {}) {
         sourceAssessment: {
           ...defaultSettings.research.read.sourceAssessment,
           ...(researchOverrides.read?.sourceAssessment || {}),
+        },
+        transport: {
+          ...defaultSettings.research.read.transport,
+          ...(researchOverrides.read?.transport || {}),
         },
       },
       focused: {

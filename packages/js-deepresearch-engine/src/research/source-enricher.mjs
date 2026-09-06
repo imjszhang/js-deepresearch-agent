@@ -1,4 +1,3 @@
-import crypto from 'node:crypto';
 import { resolveUrlContent } from './content-resolver.mjs';
 import { focusedSourceSelection } from './focused-settings.mjs';
 import { selectRelevantPassages } from './passage-selector.mjs';
@@ -102,6 +101,7 @@ async function enrichOneSource(source, {
   entityAliases,
   observedHosts,
   recorder,
+  transportMemory,
 }) {
   const url = String(source.url || '').trim();
   if (!url) {
@@ -112,56 +112,67 @@ async function enrichOneSource(source, {
     };
   }
 
-  budget?.claim('sourceReads');
-  const callId = `fetch-${crypto.randomUUID()}`;
-  recorder?.callStarted?.({
-    callId,
-    kind: 'content-fetch',
-    request: {
-      url,
-      sourceId: source.id || null,
-      maxChars: maxFetchChars || maxContentChars,
-      fetchBackend: settings?.research?.read?.fetchBackend
-        || settings?.research?.focused?.fetchBackend
-        || 'auto',
-      viaProxy: Boolean(String(settings?.http?.proxy || '').trim()),
-    },
-  });
-  let fetched;
-  const fetchStartedAt = Date.now();
-  try {
-    fetched = await resolveUrlContent(url, {
-      source,
-      settings,
-      signal,
-      maxChars: maxFetchChars || maxContentChars,
+  const requestedBackend = settings?.research?.read?.fetchBackend
+    || settings?.research?.focused?.fetchBackend
+    || 'auto';
+  if (transportMemory && requestedBackend === 'http') {
+    const decision = transportMemory.check(url, {
+      backend: 'http',
+      retrievalPath: 'direct',
     });
-    recorder?.callFinished?.({
-      callId,
-      kind: 'content-fetch',
-      status: fetched.status === 'ok' ? 'completed' : 'failed',
-      response: fetched,
-      durationMs: Date.now() - fetchStartedAt,
-    });
-  } catch (error) {
-    recorder?.callFinished?.({
-      callId,
-      kind: 'content-fetch',
-      status: error?.name === 'AbortError' ? 'cancelled' : 'failed',
-      error,
-      durationMs: Date.now() - fetchStartedAt,
-    });
-    throw error;
+    if (!decision.allowed) {
+      transportMemory.emit('transport_attempt_skipped', {
+        reason: decision.reason,
+        url: decision.url,
+        hostname: decision.hostname,
+        backend: decision.backend,
+        retrievalPath: decision.retrievalPath,
+      });
+      const skipped = transportMemory.skippedResult(decision);
+      return {
+        ...source,
+        fetchStatus: 'skipped',
+        fetchError: skipped.error,
+        fetchErrorType: skipped.errorType,
+        fetchAttempts: 0,
+        retryable: false,
+        backend: skipped.backend,
+        retrievalPath: skipped.retrievalPath,
+        transportMemorySkipped: true,
+        circuit: skipped.circuit,
+        accessStatus: 'skipped',
+        accessNotes: skipped.error,
+      };
+    }
   }
+
+  budget?.claim('sourceReads');
+  const fetched = await resolveUrlContent(url, {
+    source,
+    settings,
+    signal,
+    maxChars: maxFetchChars || maxContentChars,
+    transportMemory,
+    recorder,
+  });
   if (fetched.status !== 'ok') {
     return {
       ...withSourceProvenance(source, fetched),
       ...(fetched.finalUrl ? { finalUrl: fetched.finalUrl } : {}),
-      fetchStatus: 'failed',
+      fetchStatus: fetched.status === 'skipped' ? 'skipped' : 'failed',
       fetchError: fetched.error || 'Fetch failed',
       fetchErrorType: fetched.errorType || null,
       httpStatus: fetched.httpStatus ?? null,
       fetchAttempts: fetched.fetchAttempts ?? 1,
+      retryable: fetched.retryable === true,
+      retryAfterMs: fetched.retryAfterMs ?? null,
+      retryDelaysMs: fetched.retryDelaysMs || [],
+      timeoutStage: fetched.timeoutStage || null,
+      timeoutPolicy: fetched.timeoutPolicy || null,
+      backend: fetched.backend || requestedBackend,
+      retrievalPath: fetched.retrievalPath || 'direct',
+      transportMemorySkipped: fetched.transportMemorySkipped === true,
+      circuit: fetched.circuit || null,
       accessStatus: fetched.accessStatus || 'failed',
       accessNotes: fetched.accessNotes || fetched.error || 'Fetch failed',
     };
@@ -176,6 +187,11 @@ async function enrichOneSource(source, {
     content: fetched.content,
     contentOrigin: 'fetched',
     fetchStatus: 'ok',
+    backend: fetched.backend || requestedBackend,
+    retrievalPath: fetched.retrievalPath || 'direct',
+    fetchAttempts: fetched.fetchAttempts ?? 1,
+    retryDelaysMs: fetched.retryDelaysMs || [],
+    timeoutPolicy: fetched.timeoutPolicy || null,
   };
   if (relevance && relevance.bodyValidation !== false) {
     const relevanceDecision = evaluateSourceRelevance(fetchedSource, {
@@ -311,6 +327,7 @@ export async function enrichFindingSources(finding, options = {}) {
     entityAliases,
     observedHosts,
     recorder,
+    transportMemory,
     seenUrls = new Set(),
     enrichedCount = { value: 0 },
   } = options;
@@ -373,6 +390,7 @@ export async function enrichFindingSources(finding, options = {}) {
           entityAliases,
           observedHosts,
           recorder,
+          transportMemory,
         });
         enrichedByUrl.set(source.url, enriched);
         if (enriched.fetchStatus === 'ok') {

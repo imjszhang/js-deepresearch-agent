@@ -33,6 +33,10 @@ import { compactSearchSnippets, getSearchMeta } from '../../search/search-result
 import { inferSearchOutcome } from '../search-trace.mjs';
 import { serializeSearchError } from '../../search/search-provider-error.mjs';
 import { isExternalRerankProvider } from './source-policy.mjs';
+import {
+  resolveTransportMemorySettings,
+  TransportMemory,
+} from '../transport-memory.mjs';
 
 export { hostnameOf } from './source-policy.mjs';
 
@@ -126,6 +130,7 @@ export class ResearchState {
     this.urlPool = new UrlPool({ maxPerHostname: MAX_CANDIDATES_PER_HOSTNAME });
     this.readSourceIds = new Set();
     this.observedHosts = new Set();
+    this.transportMemory = new TransportMemory(resolveTransportMemorySettings(this.settings));
     this.knowledge = [];
     this.observations = [];
     this.diary = [];
@@ -178,6 +183,8 @@ export class ResearchState {
       transportFailures: 0,
       transportStreak: 0,
       transportBlockedHosts: {},
+      transportSkips: 0,
+      transportSkipReasons: {},
     };
     this.rerankCache = new Map();
     this.cycle = {
@@ -519,6 +526,13 @@ export class ResearchState {
     this.recovery.transportBlockedHosts = blocked;
   }
 
+  recordTransportSkip(reason = 'transport_memory_skip') {
+    this.recovery.transportSkips = (Number(this.recovery.transportSkips) || 0) + 1;
+    const reasons = this.recovery.transportSkipReasons || {};
+    reasons[reason] = (Number(reasons[reason]) || 0) + 1;
+    this.recovery.transportSkipReasons = reasons;
+  }
+
   clearTransportStreak() {
     this.recovery.transportStreak = 0;
   }
@@ -770,6 +784,7 @@ export class ResearchState {
           repairState: gap.repairState || null,
         })),
       },
+      transportMemory: this.transportMemory.snapshot(),
     };
   }
 
@@ -792,6 +807,7 @@ export class ResearchState {
       urlPool: this.urlPool.exportCheckpoint(),
       readSourceIds: [...this.readSourceIds],
       observedHosts: [...this.observedHosts],
+      transportMemory: this.transportMemory.exportCheckpoint(),
       knowledge: this.knowledge,
       observations: this.observations,
       diary: this.diary,
@@ -835,6 +851,7 @@ export class ResearchState {
     this.urlPool.restoreCheckpoint(checkpoint.urlPool || {});
     this.readSourceIds = new Set(checkpoint.readSourceIds || []);
     this.observedHosts = new Set(checkpoint.observedHosts || []);
+    this.transportMemory.restoreCheckpoint(checkpoint.transportMemory || {});
     this.knowledge = Array.isArray(checkpoint.knowledge) ? checkpoint.knowledge : [];
     this.observations = Array.isArray(checkpoint.observations) ? checkpoint.observations : [];
     this.diary = Array.isArray(checkpoint.diary) ? checkpoint.diary : [];

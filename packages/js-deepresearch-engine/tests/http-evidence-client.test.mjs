@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import http from 'node:http';
 import http2 from 'node:http2';
+import net from 'node:net';
 import { brotliCompressSync, deflateSync, gzipSync } from 'node:zlib';
 import { after, afterEach, before, describe, it } from 'node:test';
 import {
@@ -139,7 +140,7 @@ before(async () => {
     }
     if (url.pathname === '/cross-redirect') {
       response.statusCode = 302;
-      response.setHeader('location', `http://127.0.0.2:${url.searchParams.get('port')}/capture`);
+      response.setHeader('location', `http://localhost:${url.searchParams.get('port')}/capture`);
       response.setHeader('set-cookie', 'source-cookie=private; Path=/');
       response.end();
       return;
@@ -294,7 +295,7 @@ describe('HTTP evidence client', () => {
       const fetchImpl = createEvidenceHttpFetch({
         hostHeaders: {
           '127.0.0.1': { 'Cache-Control': 'source-only' },
-          '127.0.0.2': { 'Accept-Language': 'target-only' },
+          localhost: { 'Accept-Language': 'target-only' },
         },
       });
       const response = await fetchImpl(
@@ -415,30 +416,30 @@ describe('HTTP evidence client', () => {
   it('routes a real local request through an HTTP proxy', async () => {
     const seen = [];
     const proxy = http.createServer((request, response) => {
-      const target = new URL(request.url);
-      seen.push(target.toString());
-      const headers = { ...request.headers, host: target.host };
-      delete headers['proxy-authorization'];
-      const upstream = http.request(target, {
-        method: request.method,
-        headers,
-      }, (upstreamResponse) => {
-        response.writeHead(upstreamResponse.statusCode, upstreamResponse.headers);
-        upstreamResponse.pipe(response);
+      response.writeHead(405);
+      response.end();
+    });
+    proxy.on('connect', (request, socket) => {
+      const [hostname, port] = String(request.url || '').split(':');
+      seen.push(`CONNECT ${request.url}`);
+      const upstream = net.connect(Number(port) || 80, hostname, () => {
+        socket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+        socket.pipe(upstream);
+        upstream.pipe(socket);
       });
-      upstream.on('error', (error) => response.destroy(error));
-      request.pipe(upstream);
+      upstream.on('error', () => socket.destroy());
+      socket.on('error', () => upstream.destroy());
     });
     await new Promise((resolve) => proxy.listen(0, '127.0.0.1', resolve));
     try {
       const fetchImpl = createEvidenceHttpFetch({
         proxy: `http://127.0.0.1:${proxy.address().port}`,
-        http2: true,
+        http2: false,
       });
       const result = await fetchUrlContent(`${baseUrl}/final`, { fetchImpl });
-      assert.equal(result.status, 'ok');
+      assert.equal(result.status, 'ok', result.error);
       assert.match(result.content, /Local fixture body/);
-      assert.deepEqual(seen, [`${baseUrl}/final`]);
+      assert.deepEqual(seen, [`CONNECT ${new URL(baseUrl).host}`]);
     } finally {
       resetHttpFetchCache();
       await closeServer(proxy);

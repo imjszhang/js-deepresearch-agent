@@ -3,6 +3,11 @@ import { positiveInteger } from './strategy-utils.mjs';
 const MODES = new Set(['disabled', 'full', 'summary', 'extract']);
 const SITE_QUERY_MODES = new Set(['confirmed', 'always', 'never']);
 
+function nonNegativeInteger(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : fallback;
+}
+
 export function resolveReadSettings(settings = {}, { strategy = 'focused' } = {}) {
   const shared = settings?.research?.read || {};
   const legacyFocused = settings?.research?.focused || {};
@@ -23,6 +28,14 @@ export function resolveReadSettings(settings = {}, { strategy = 'focused' } = {}
     enrichConcurrency: positiveInteger(raw.enrichConcurrency, 2),
     sourceAssessment: {
       enabled: raw.sourceAssessment?.enabled === true,
+    },
+    transport: {
+      maxAttempts: positiveInteger(raw.transport?.maxAttempts, 3),
+      hostCircuitThreshold: nonNegativeInteger(raw.transport?.hostCircuitThreshold, 3),
+      responseHeadersTimeoutMs: positiveInteger(raw.transport?.responseHeadersTimeoutMs, 10000),
+      htmlTotalTimeoutMs: positiveInteger(raw.transport?.htmlTotalTimeoutMs, 15000),
+      documentTotalTimeoutMs: positiveInteger(raw.transport?.documentTotalTimeoutMs, 60000),
+      largeFileThresholdBytes: positiveInteger(raw.transport?.largeFileThresholdBytes, 5242880),
     },
     relevance: {
       enabled: raw.relevance?.enabled !== false,

@@ -33,7 +33,7 @@ export function createLocalFileContentFetchHandler(options = {}) {
   const fsImpl = options.fs || fs;
   const convertDocument = options.convertDocument;
 
-  return async function localFileContentFetchHandler(url, context = {}) {
+  async function localFileContentFetchHandler(url, context = {}) {
     if (!isFileUrl(url)) {
       return { status: 'unsupported' };
     }
@@ -104,9 +104,13 @@ export function createLocalFileContentFetchHandler(options = {}) {
       return {
         status: 'failed',
         error: error?.message || 'Local file read failed',
+        backend: 'local-file',
       };
     }
-  };
+  }
+  localFileContentFetchHandler.backendId = 'local-file';
+  localFileContentFetchHandler.supports = (url) => isFileUrl(url);
+  return localFileContentFetchHandler;
 }
 
 export async function fetchLocalFileContent(url, settings = {}, options = {}) {
