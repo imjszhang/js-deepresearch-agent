@@ -325,7 +325,7 @@ describe('CLI utilities', () => {
   it('rejects a non-object HTTP host header flag', () => {
     assert.throws(
       () => applyResearchFlags({}, { 'http-host-headers': 'example.com' }),
-      /requires a JSON object/,
+      /requires a valid JSON object/,
     );
   });
 

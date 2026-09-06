@@ -58,6 +58,7 @@
  * @property {string} [acceptLanguage]
  * @property {string} [referer]
  * @property {Record<string, Record<string, string>>} [hostHeaders]
+ * @property {number} [maxRedirects]
  * @property {number} [maxResponseBytes]
  * @property {string[]} [allowedContentTypes]
  */

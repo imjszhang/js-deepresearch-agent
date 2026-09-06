@@ -3,6 +3,7 @@ import { migrateResearchSettings } from '../research/strategy-aliases.mjs';
 import {
   DEFAULT_ALLOWED_CONTENT_TYPES,
   DEFAULT_BROWSER_USER_AGENT,
+  DEFAULT_MAX_REDIRECTS,
   DEFAULT_MAX_RESPONSE_BYTES,
 } from '../http/create-http-fetch.mjs';
 
@@ -15,6 +16,7 @@ export const defaultSettings = Object.freeze({
     acceptLanguage: 'en-US,en;q=0.9',
     referer: '',
     hostHeaders: {},
+    maxRedirects: DEFAULT_MAX_REDIRECTS,
     maxResponseBytes: DEFAULT_MAX_RESPONSE_BYTES,
     allowedContentTypes: DEFAULT_ALLOWED_CONTENT_TYPES,
   },

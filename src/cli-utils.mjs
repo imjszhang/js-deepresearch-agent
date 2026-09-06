@@ -33,12 +33,25 @@ export function parseArgs(argv) {
 
 export function setDeepValue(object, dottedKey, rawValue) {
   const parts = dottedKey.split('.');
+  const unsafe = new Set(['__proto__', 'prototype', 'constructor']);
+  if (parts.some((part) => !part || unsafe.has(part))) {
+    throw new Error('Unsafe configuration path rejected.');
+  }
   let cursor = object;
   for (const part of parts.slice(0, -1)) {
     cursor[part] ||= {};
     cursor = cursor[part];
   }
-  const value = coerceValue(rawValue);
+  let value;
+  if (dottedKey === 'http.hostHeaders' && typeof rawValue === 'string') {
+    try {
+      value = JSON.parse(rawValue);
+    } catch {
+      throw new Error('http.hostHeaders requires a valid JSON object; input values are not displayed.');
+    }
+  } else {
+    value = coerceValue(rawValue);
+  }
   if (
     dottedKey === 'http.hostHeaders'
     && (!value || typeof value !== 'object' || Array.isArray(value))

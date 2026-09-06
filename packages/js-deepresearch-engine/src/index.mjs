@@ -42,10 +42,12 @@ export {
 } from './research/exploratory-settings.mjs';
 export {
   buildBrowserRequestHeaders,
+  cancelResponseBody,
   createEvidenceHttpFetch,
   createHttpFetch,
   DEFAULT_ALLOWED_CONTENT_TYPES,
   DEFAULT_BROWSER_USER_AGENT,
+  DEFAULT_MAX_REDIRECTS,
   DEFAULT_MAX_RESPONSE_BYTES,
   resetHttpFetchCache,
 } from './http/create-http-fetch.mjs';

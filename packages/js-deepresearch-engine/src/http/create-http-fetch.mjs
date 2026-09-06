@@ -13,12 +13,9 @@ const evidenceResponseMetadata = new WeakMap();
 const PROXY_HEADERS_TIMEOUT_MS = 900_000;
 const PROXY_BODY_TIMEOUT_MS = 900_000;
 export const DEFAULT_MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
+export const DEFAULT_MAX_REDIRECTS = 10;
 
-export const DEFAULT_BROWSER_USER_AGENT = [
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)',
-  'AppleWebKit/537.36 (KHTML, like Gecko)',
-  'Chrome/140.0.0.0 Safari/537.36',
-].join(' ');
+export const DEFAULT_BROWSER_USER_AGENT = 'js-deepresearch-agent/1.0 (+https://github.com/imjszhang/js-deepresearch-agent)';
 
 export const DEFAULT_ALLOWED_CONTENT_TYPES = Object.freeze([
   'text/*',
@@ -36,20 +33,18 @@ export const DEFAULT_ALLOWED_CONTENT_TYPES = Object.freeze([
   'application/vnd.oasis.opendocument.*',
 ]);
 
-const FORBIDDEN_OVERRIDE_HEADERS = new Set([
-  'authorization',
-  'cookie',
-  'host',
-  'proxy-authorization',
-  'set-cookie',
-  'connection',
-  'content-length',
-  'keep-alive',
-  'te',
-  'trailer',
-  'transfer-encoding',
-  'upgrade',
+const ALLOWED_OVERRIDE_HEADERS = new Set([
+  'accept',
+  'accept-encoding',
+  'accept-language',
+  'cache-control',
+  'pragma',
+  'referer',
+  'user-agent',
 ]);
+const CREDENTIAL_HEADER = /(?:^|[-_])(?:api[-_]?key|authorization|cookie|credential|password|secret|session|token)(?:$|[-_])/i;
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+const COOKIE_CHALLENGE_STATUSES = new Set([403, 429]);
 
 function agentOptions({
   http2 = false,
@@ -170,21 +165,24 @@ function normalizeHeaderOverrides(hostHeaders = {}) {
   if (typeof hostHeaders !== 'object' || Array.isArray(hostHeaders)) {
     throw new Error('http.hostHeaders must be an object keyed by hostname.');
   }
-  const normalized = {};
+  const normalized = Object.create(null);
+  const unsafeKeys = new Set(['__proto__', 'prototype', 'constructor']);
   for (const [rawHost, rawHeaders] of Object.entries(hostHeaders)) {
     const host = String(rawHost || '').trim().toLowerCase().replace(/\.$/, '');
     const hostname = host.startsWith('*.') ? host.slice(2) : host;
-    if (!hostname || !/^[a-z0-9.-]+$/.test(hostname)) {
-      throw new Error(`Invalid hostname in http.hostHeaders: ${rawHost}`);
+    if (!hostname || unsafeKeys.has(hostname) || !/^[a-z0-9.-]+$/.test(hostname)) {
+      throw new Error('http.hostHeaders contains an invalid hostname key.');
     }
     if (!rawHeaders || typeof rawHeaders !== 'object' || Array.isArray(rawHeaders)) {
-      throw new Error(`http.hostHeaders["${rawHost}"] must be an object.`);
+      throw new Error('Each http.hostHeaders entry must be an object.');
     }
     normalized[host] = {};
     for (const [rawName, rawValue] of Object.entries(rawHeaders)) {
       const name = String(rawName || '').trim().toLowerCase();
-      if (!name || FORBIDDEN_OVERRIDE_HEADERS.has(name)) {
-        throw new Error(`Header "${rawName}" is not allowed in http.hostHeaders.`);
+      if (!name || !ALLOWED_OVERRIDE_HEADERS.has(name) || CREDENTIAL_HEADER.test(name)) {
+        throw new Error(
+          'http.hostHeaders only allows User-Agent, Accept, Accept-Language, Accept-Encoding, Referer, Cache-Control, and Pragma.',
+        );
       }
       if (rawValue === null || rawValue === undefined) continue;
       normalized[host][name] = String(rawValue);
@@ -201,15 +199,6 @@ function overridesForHost(hostname, hostHeaders) {
     }
   }
   return { ...headers, ...(hostHeaders[hostname] || {}) };
-}
-
-function secFetchSite(url, referer) {
-  if (!referer) return 'none';
-  try {
-    return new URL(referer).origin === new URL(url).origin ? 'same-origin' : 'cross-site';
-  } catch {
-    return 'none';
-  }
 }
 
 export function buildBrowserRequestHeaders(url, {
@@ -234,14 +223,6 @@ export function buildBrowserRequestHeaders(url, {
     ].join(','),
     'accept-language': acceptLanguage,
     'accept-encoding': 'gzip, deflate, br',
-    'sec-ch-ua': '"Chromium";v="140", "Not=A?Brand";v="24", "Google Chrome";v="140"',
-    'sec-ch-ua-mobile': '?0',
-    'sec-ch-ua-platform': '"macOS"',
-    'sec-fetch-dest': 'document',
-    'sec-fetch-mode': 'navigate',
-    'sec-fetch-site': secFetchSite(url, matchedOverrides.referer || referer),
-    'sec-fetch-user': '?1',
-    'upgrade-insecure-requests': '1',
     ...matchedOverrides,
   });
   if (referer && !result.has('referer')) result.set('referer', referer);
@@ -281,6 +262,7 @@ function parseSetCookie(line, url) {
     secure: false,
     expiresAt: null,
   };
+  let maxAgeSeen = false;
   for (const attribute of parts.slice(1)) {
     const [rawName, ...rawValueParts] = attribute.trim().split('=');
     const attributeName = rawName.toLowerCase();
@@ -294,8 +276,11 @@ function parseSetCookie(line, url) {
       cookie.secure = true;
     } else if (attributeName === 'max-age') {
       const seconds = Number(attributeValue);
-      if (Number.isFinite(seconds)) cookie.expiresAt = Date.now() + (seconds * 1000);
-    } else if (attributeName === 'expires') {
+      if (Number.isFinite(seconds)) {
+        maxAgeSeen = true;
+        cookie.expiresAt = Date.now() + (seconds * 1000);
+      }
+    } else if (attributeName === 'expires' && !maxAgeSeen) {
       const expiresAt = Date.parse(attributeValue);
       if (!Number.isNaN(expiresAt)) cookie.expiresAt = expiresAt;
     }
@@ -312,17 +297,18 @@ class PerHostCookieJar {
     const target = new URL(url);
     const hostname = target.hostname.toLowerCase();
     const lines = setCookieLines(headers);
-    if (!lines.length) return false;
+    if (!lines.length) return 0;
     const cookies = this.hosts.get(hostname) || new Map();
-    let changed = false;
+    let changed = 0;
     for (const line of lines) {
       const cookie = parseSetCookie(line, target);
       if (!cookie) continue;
-      changed = true;
+      changed += 1;
+      const key = `${cookie.name}\0${cookie.path}`;
       if (cookie.expiresAt !== null && cookie.expiresAt <= Date.now()) {
-        cookies.delete(cookie.name);
+        cookies.delete(key);
       } else {
-        cookies.set(cookie.name, cookie);
+        cookies.set(key, cookie);
       }
     }
     if (cookies.size) this.hosts.set(hostname, cookies);
@@ -336,9 +322,9 @@ class PerHostCookieJar {
     const cookies = this.hosts.get(hostname);
     if (!cookies) return '';
     const values = [];
-    for (const [name, cookie] of cookies) {
+    for (const [key, cookie] of cookies) {
       if (cookie.expiresAt !== null && cookie.expiresAt <= Date.now()) {
-        cookies.delete(name);
+        cookies.delete(key);
         continue;
       }
       if (cookie.secure && target.protocol !== 'https:') continue;
@@ -346,15 +332,52 @@ class PerHostCookieJar {
         target.pathname !== cookie.path
         && !target.pathname.startsWith(cookie.path.endsWith('/') ? cookie.path : `${cookie.path}/`)
       ) continue;
-      values.push(`${cookie.name}=${cookie.value}`);
+      values.push(cookie);
     }
     if (!cookies.size) this.hosts.delete(hostname);
-    return values.join('; ');
+    return values
+      .sort((left, right) => right.path.length - left.path.length)
+      .map((cookie) => `${cookie.name}=${cookie.value}`)
+      .join('; ');
   }
 }
 
 export function getEvidenceResponseMetadata(response) {
-  return evidenceResponseMetadata.get(response) || { requestAttempts: 1, cookieRetried: false };
+  return evidenceResponseMetadata.get(response) || {
+    requestAttempts: 1,
+    cookieRetried: false,
+    redirectCount: 0,
+    finalUrl: response?.url || null,
+  };
+}
+
+export async function cancelResponseBody(response) {
+  if (!response?.body || response.bodyUsed) return;
+  try {
+    await response.body.cancel();
+  } catch {
+    // Cancellation is best effort; callers still return the original result.
+  }
+}
+
+function assertHttpUrl(url, code = 'UNSUPPORTED_URL_SCHEME') {
+  const parsed = new URL(url);
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    const error = new Error('Evidence HTTP requests only support http: and https: URLs.');
+    error.code = code;
+    throw error;
+  }
+  return parsed;
+}
+
+function headersForOrigin(headers, { currentUrl, initialOrigin }) {
+  if (new URL(currentUrl).origin !== initialOrigin) return undefined;
+  return headers;
+}
+
+function redirectedMethod(status, method) {
+  if (status === 303 || ((status === 301 || status === 302) && method === 'POST')) return 'GET';
+  return method;
 }
 
 /**
@@ -366,10 +389,14 @@ export function createEvidenceHttpFetch(httpSettings = {}, {
   fetchImpl,
   tls,
 } = {}) {
+  const configuredMaxRedirects = Number(httpSettings.maxRedirects);
   const normalized = {
     proxy: String(httpSettings.proxy || '').trim(),
     http2: httpSettings.http2 !== false,
     maxResponseBytes: Math.max(1, Number(httpSettings.maxResponseBytes) || DEFAULT_MAX_RESPONSE_BYTES),
+    maxRedirects: Number.isInteger(configuredMaxRedirects) && configuredMaxRedirects >= 0
+      ? configuredMaxRedirects
+      : DEFAULT_MAX_REDIRECTS,
     cookieRetry: httpSettings.cookieRetry !== false,
     userAgent: httpSettings.userAgent || DEFAULT_BROWSER_USER_AGENT,
     acceptLanguage: httpSettings.acceptLanguage || 'en-US,en;q=0.9',
@@ -392,42 +419,90 @@ export function createEvidenceHttpFetch(httpSettings = {}, {
   const cookieJar = new PerHostCookieJar();
 
   const fetchFn = async (input, init = {}) => {
-    const requestUrl = new URL(typeof input === 'string' || input instanceof URL ? input : input.url).toString();
-    const request = async (url) => {
-      const headers = buildBrowserRequestHeaders(url, {
+    const rawUrl = typeof input === 'string' || input instanceof URL ? input : input.url;
+    const initialUrl = assertHttpUrl(rawUrl).toString();
+    const initialOrigin = new URL(initialUrl).origin;
+    const initialHeaders = init.headers || (typeof input === 'object' ? input.headers : undefined);
+    let method = String(init.method || (typeof input === 'object' ? input.method : '') || 'GET').toUpperCase();
+    let body = init.body;
+    let currentUrl = initialUrl;
+    let redirectCount = 0;
+    let requestAttempts = 0;
+    let cookieRetried = false;
+
+    while (true) {
+      const headers = buildBrowserRequestHeaders(currentUrl, {
         hostHeaders: normalized.hostHeaders,
-        headers: init.headers,
+        headers: headersForOrigin(initialHeaders, { currentUrl, initialOrigin }),
         userAgent: normalized.userAgent,
         acceptLanguage: normalized.acceptLanguage,
-        referer: normalized.referer,
+        referer: new URL(currentUrl).origin === initialOrigin ? normalized.referer : '',
       });
-      const cookie = cookieJar.header(url);
-      if (cookie && !headers.has('cookie')) headers.set('cookie', cookie);
-      return baseFetch(url, {
+      const cookie = cookieJar.header(currentUrl);
+      if (cookie) {
+        const existing = headers.get('cookie');
+        headers.set('cookie', existing ? `${existing}; ${cookie}` : cookie);
+      }
+      requestAttempts += 1;
+      const response = await baseFetch(currentUrl, {
         ...init,
+        method,
+        ...(body === undefined ? {} : { body }),
         headers,
-        redirect: init.redirect || 'follow',
+        redirect: 'manual',
       });
-    };
+      const cookiesBefore = cookieJar.header(currentUrl);
+      const storedCookies = cookieJar.store(currentUrl, response.headers);
+      const cookiesAfter = cookieJar.header(currentUrl);
 
-    const response = await request(requestUrl);
-    const responseUrl = response.url || requestUrl;
-    const storedCookie = cookieJar.store(responseUrl, response.headers);
-    const hasUsableCookie = storedCookie && Boolean(cookieJar.header(responseUrl));
-    if (response.ok || !normalized.cookieRetry || !hasUsableCookie) {
-      evidenceResponseMetadata.set(response, { requestAttempts: 1, cookieRetried: false });
+      if (REDIRECT_STATUSES.has(response.status)) {
+        const location = response.headers?.get?.('location');
+        if (!location) {
+          evidenceResponseMetadata.set(response, {
+            requestAttempts,
+            cookieRetried,
+            redirectCount,
+            finalUrl: currentUrl,
+          });
+          return response;
+        }
+        if (redirectCount >= normalized.maxRedirects) {
+          await cancelResponseBody(response);
+          const error = new Error(`Redirect limit exceeded (${normalized.maxRedirects}).`);
+          error.code = 'TOO_MANY_REDIRECTS';
+          throw error;
+        }
+        const nextUrl = new URL(location, currentUrl);
+        assertHttpUrl(nextUrl, 'UNSAFE_REDIRECT_SCHEME');
+        await cancelResponseBody(response);
+        redirectCount += 1;
+        const nextMethod = redirectedMethod(response.status, method);
+        if (nextMethod === 'GET' && method !== 'GET') body = undefined;
+        method = nextMethod;
+        currentUrl = nextUrl.toString();
+        continue;
+      }
+
+      const challengeCanRetry = normalized.cookieRetry
+        && !cookieRetried
+        && COOKIE_CHALLENGE_STATUSES.has(response.status)
+        && storedCookies > 0
+        && Boolean(cookiesAfter)
+        && cookiesAfter !== cookiesBefore;
+      if (challengeCanRetry) {
+        await cancelResponseBody(response);
+        cookieRetried = true;
+        continue;
+      }
+
+      evidenceResponseMetadata.set(response, {
+        requestAttempts,
+        cookieRetried,
+        redirectCount,
+        finalUrl: currentUrl,
+      });
       return response;
     }
-
-    try {
-      await response.body?.cancel?.();
-    } catch {
-      // Best effort: the retry must not be hidden by body cleanup failure.
-    }
-    const retried = await request(responseUrl);
-    cookieJar.store(retried.url || responseUrl, retried.headers);
-    evidenceResponseMetadata.set(retried, { requestAttempts: 2, cookieRetried: true });
-    return retried;
   };
 
   Object.defineProperty(fetchFn, 'transportOptions', {
@@ -436,6 +511,7 @@ export function createEvidenceHttpFetch(httpSettings = {}, {
       http2: normalized.http2,
       http2Fallback: 'http/1.1',
       maxResponseBytes: normalized.maxResponseBytes,
+      maxRedirects: normalized.maxRedirects,
       contentDecoding: Object.freeze(['br', 'gzip', 'deflate']),
       browserHeaders: true,
       cookieRetry: normalized.cookieRetry,

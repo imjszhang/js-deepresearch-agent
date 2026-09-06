@@ -1,6 +1,7 @@
 import { isRawBinaryDocumentText } from './body-quality.mjs';
 import {
   buildBrowserRequestHeaders,
+  cancelResponseBody,
   DEFAULT_ALLOWED_CONTENT_TYPES,
   DEFAULT_MAX_RESPONSE_BYTES,
   getEvidenceResponseMetadata,
@@ -90,6 +91,12 @@ export function classifyFetchFailure({
   if (error?.code === 'RESPONSE_TOO_LARGE' || error?.cause?.code === 'UND_ERR_RES_EXCEEDED') {
     return { errorType: 'response_too_large', retryable: false, httpStatus };
   }
+  if (error?.code === 'TOO_MANY_REDIRECTS') {
+    return { errorType: 'redirect_limit', retryable: false, httpStatus };
+  }
+  if (error?.code === 'UNSAFE_REDIRECT_SCHEME' || error?.code === 'UNSUPPORTED_URL_SCHEME') {
+    return { errorType: 'unsafe_redirect', retryable: false, httpStatus };
+  }
   if (httpStatus === 429) return { errorType: 'http_429', retryable: true, httpStatus };
   if (httpStatus >= 500 && httpStatus <= 599) return { errorType: 'http_5xx', retryable: true, httpStatus };
   if (httpStatus >= 400) return { errorType: 'http_4xx', retryable: false, httpStatus };
@@ -109,6 +116,7 @@ function failedFetchResult({
   accessNotes,
   finalUrl,
   contentType,
+  documentFormat,
 } = {}) {
   return {
     status: 'failed',
@@ -123,6 +131,7 @@ function failedFetchResult({
     accessNotes: accessNotes || error,
     ...(finalUrl ? { finalUrl } : {}),
     ...(contentType ? { contentType } : {}),
+    ...(documentFormat ? { documentFormat } : {}),
   };
 }
 
@@ -130,17 +139,25 @@ async function sleep(ms, signal) {
   const delay = Math.max(0, Number(ms) || 0);
   if (!delay) return;
   await new Promise((resolve, reject) => {
-    const timer = setTimeout(resolve, delay);
-    const onAbort = () => {
+    let timer;
+    const cleanup = () => {
       clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+    };
+    const onDone = () => {
+      cleanup();
+      resolve();
+    };
+    const onAbort = () => {
+      cleanup();
       reject(abortError());
     };
     if (signal?.aborted) {
-      clearTimeout(timer);
       reject(abortError());
       return;
     }
     signal?.addEventListener('abort', onAbort, { once: true });
+    timer = setTimeout(onDone, delay);
   });
 }
 
@@ -195,6 +212,13 @@ async function readResponseBytes(response, maxResponseBytes) {
         }
         chunks.push(chunk);
       }
+    } catch (error) {
+      try {
+        await reader.cancel(error);
+      } catch {
+        // Preserve the original read/decompression error.
+      }
+      throw error;
     } finally {
       reader.releaseLock();
     }
@@ -250,26 +274,31 @@ async function fetchUrlContentOnce(url, {
 } = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const onParentAbort = () => controller.abort();
+  let response = null;
+  let bodyConsumed = false;
+  let finalUrl = url;
+  let contentType = '';
 
   if (signal) {
     if (signal.aborted) {
       clearTimeout(timeout);
       throw abortError();
     }
-    signal.addEventListener('abort', () => controller.abort(), { once: true });
+    signal.addEventListener('abort', onParentAbort, { once: true });
   }
 
   try {
     const accessedAt = new Date().toISOString();
-    const response = await fetchImpl(url, {
+    response = await fetchImpl(url, {
       signal: controller.signal,
       ...(!fetchImpl.transportOptions?.browserHeaders
         ? { headers: buildBrowserRequestHeaders(url) }
         : {}),
       redirect: 'follow',
     });
-    const finalUrl = response.url || url;
     const responseMetadata = getEvidenceResponseMetadata(response);
+    finalUrl = responseMetadata.finalUrl || response.url || url;
     const requestAttempts = responseMetadata.requestAttempts || 1;
 
     if (!response.ok) {
@@ -284,8 +313,9 @@ async function fetchUrlContentOnce(url, {
       });
     }
 
-    const contentType = response.headers.get('content-type') || '';
-    if (!isAllowedContentType(contentType, allowedContentTypes)) {
+    contentType = response.headers.get('content-type') || '';
+    const octetStream = normalizedContentType(contentType) === 'application/octet-stream';
+    if (!isAllowedContentType(contentType, allowedContentTypes) && !octetStream) {
       return failedFetchResult({
         error: `Unsupported content type: ${contentType || '(missing)'}`,
         errorType: 'unsupported_content_type',
@@ -298,7 +328,20 @@ async function fetchUrlContentOnce(url, {
       });
     }
     const bytes = await readResponseBytes(response, maxResponseBytes);
+    bodyConsumed = true;
     const format = detectDocumentFormat({ bytes, contentType, url: finalUrl });
+    if (octetStream && !format) {
+      return failedFetchResult({
+        error: 'Unsupported application/octet-stream body',
+        errorType: 'unsupported_content_type',
+        attempts: requestAttempts,
+        retryable: false,
+        accessedAt,
+        accessStatus: 'unsupported_content_type',
+        finalUrl,
+        contentType,
+      });
+    }
 
     if (format) {
       const converted = await convertDocumentToMarkdown(bytes, {
@@ -306,18 +349,28 @@ async function fetchUrlContentOnce(url, {
         convert: convertDocument,
       });
       if (!converted.ok) {
-        return {
-          status: 'failed',
+        return failedFetchResult({
           error: converted.error,
+          errorType: 'document_conversion',
+          attempts: requestAttempts,
+          retryable: false,
           documentFormat: format,
-        };
+          accessedAt,
+          finalUrl,
+          contentType,
+        });
       }
       if (isRawBinaryDocumentText(converted.markdown)) {
-        return {
-          status: 'failed',
+        return failedFetchResult({
           error: 'Document converter returned raw file bytes',
+          errorType: 'invalid_body',
+          attempts: requestAttempts,
+          retryable: false,
           documentFormat: format,
-        };
+          accessedAt,
+          finalUrl,
+          contentType,
+        });
       }
       const content = truncateContent(
         converted.markdown,
@@ -340,10 +393,15 @@ async function fetchUrlContentOnce(url, {
 
     const raw = decodeText(bytes);
     if (isRawBinaryDocumentText(raw)) {
-      return {
-        status: 'failed',
+      return failedFetchResult({
         error: 'Binary document decoded as text',
-      };
+        errorType: 'invalid_body',
+        attempts: requestAttempts,
+        retryable: false,
+        accessedAt,
+        finalUrl,
+        contentType,
+      });
     }
     const title = extractTitle(raw) || finalUrl;
     const links = contentType.includes('html') ? extractLinks(raw, finalUrl) : [];
@@ -351,10 +409,15 @@ async function fetchUrlContentOnce(url, {
     content = truncateContent(content, maxChars);
 
     if (!content) {
-      return {
-        status: 'failed',
+      return failedFetchResult({
         error: 'Empty page content',
-      };
+        errorType: 'empty_content',
+        attempts: requestAttempts,
+        retryable: false,
+        accessedAt,
+        finalUrl,
+        contentType,
+      });
     }
 
     return {
@@ -385,9 +448,13 @@ async function fetchUrlContentOnce(url, {
     return failedFetchResult({
       error: error?.message || 'Fetch failed',
       ...classifyFetchFailure({ error }),
+      finalUrl,
+      contentType,
     });
   } finally {
     clearTimeout(timeout);
+    signal?.removeEventListener('abort', onParentAbort);
+    if (response && !bodyConsumed) await cancelResponseBody(response);
   }
 }
 
