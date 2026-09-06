@@ -152,6 +152,47 @@ describe('source enricher relevance gate', () => {
     assert.notEqual(finding.sources[0].bodyQuality, 'waf');
   });
 
+  it('keeps the fetched body when the assessment provider throws', async () => {
+    const body = '智谱AI发布了有关算法备案、数据安全和监管合规工作的正式说明。';
+    registerContentFetchHandler(async () => ({
+      status: 'ok',
+      accessStatus: 'ok',
+      title: '智谱AI合规公告',
+      content: body,
+    }));
+    const [finding] = await enrichFindings([{
+      gapId: 'gap-2',
+      question: '智谱AI监管合规情况',
+      sources: [{ url: 'https://example.com/zhipu-provider-error', title: '智谱AI公告' }],
+    }], {
+      query: '研究智谱AI',
+      fetchMode: 'summary',
+      maxUrlsPerIteration: 1,
+      maxUrlsTotal: 1,
+      maxContentChars: 8000,
+      enrichConcurrency: 1,
+      llm: {
+        async complete() {
+          const error = new Error('provider unavailable');
+          error.code = 'ECONNRESET';
+          throw error;
+        },
+      },
+      settings: { research: { focused: { fetchBackend: 'auto' } } },
+      relevance: { enabled: true, entityGuard: true, bodyValidation: true, minRerankScore: 0.01 },
+      relevanceGap: { id: 'gap-2', question: '智谱AI监管合规情况', requiredHosts: [] },
+      entities: ['智谱AI', '智谱'],
+      budget: { claim() {}, canClaim() { return true; } },
+    });
+    const source = finding.sources[0];
+    assert.equal(source.fetchStatus, 'ok');
+    assert.equal(source.accessStatus, 'ok');
+    assert.equal(source.content, body);
+    assert.equal(source.assessmentStatus, 'unavailable');
+    assert.equal(source.assessment.method, 'fail_closed');
+    assert.equal(source.assessment.reason, 'assessment_provider_econnreset');
+  });
+
   it('keeps the transport fact when the model calls a fetched body unreadable', async () => {
     registerContentFetchHandler(async () => ({
       status: 'ok',

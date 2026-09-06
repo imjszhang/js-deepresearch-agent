@@ -58,6 +58,25 @@ describe('source assessment', () => {
     assert.equal(classifyFetchedBody(source).reason, 'body_ok');
   });
 
+  it('propagates cancellation instead of degrading it to unavailable', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await assert.rejects(
+      () => assessSourceBody({
+        signal: controller.signal,
+        llm: {
+          async complete() {
+            const error = new Error('cancelled');
+            error.name = 'AbortError';
+            throw error;
+          },
+        },
+        content: 'body',
+      }),
+      { name: 'AbortError' },
+    );
+  });
+
   it('marks LLM-unreadable bodies as unsuccessful without adding WAF needles', async () => {
     const result = await assessSourceBody({
       llm: {

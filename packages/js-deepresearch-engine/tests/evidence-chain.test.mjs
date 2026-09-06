@@ -14,6 +14,7 @@ import {
   buildPassageArtifactsAsync,
 } from '../src/index.mjs';
 import { compareRankedPassages, isMediaOnlyPassage } from '../src/research/passage-utils.mjs';
+import { passageSatisfiesCriterion } from '../src/research/evidence-criteria.mjs';
 
 const wikipedia = {
   title: 'Ollama',
@@ -280,6 +281,32 @@ describe('passage artifacts and report claim alignment', () => {
     });
     assert.deepEqual(reassembled.sources.map((item) => item.id), split.sources.map((item) => item.id));
     assert.equal(reassembled.passages.length, split.passages.length);
+  });
+
+  it('preserves unavailable assessment status in final passage artifacts', () => {
+    const source = {
+      title: 'Official documentation',
+      url: 'https://docs.vendor.test/official',
+      content: 'The vendor publishes this official technical documentation with enough body text for evidence.',
+      fetchStatus: 'ok',
+      contentOrigin: 'fetched',
+      assessmentStatus: 'unavailable',
+      assessment: {
+        method: 'fail_closed',
+        readability: 'uncertain',
+        firstParty: false,
+      },
+    };
+    const split = buildPassageArtifacts({
+      query: 'What does docs.vendor.test publish?',
+      findings: [{ question: 'official evidence', sources: [source] }],
+      options: { maxPassagesPerSource: 2, maxPassageChars: 300 },
+    });
+    assert.ok(split.passages.length > 0);
+    assert.equal(split.passages[0].assessmentStatus, 'unavailable');
+    assert.equal(passageSatisfiesCriterion(split.passages[0], 'first_party', {
+      gap: { requiredHosts: ['docs.vendor.test'] },
+    }), true);
   });
 
   it('keeps bylines as candidates but displays the semantically preferred body', async () => {

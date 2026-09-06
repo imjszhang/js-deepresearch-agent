@@ -67,6 +67,7 @@ function attachRankedPassages({
       passages.push({
         id: idValue,
         sourceId,
+        url: source.url || null,
         findingIds: [findingId],
         text: passage.text,
         startChar: passage.startChar,
@@ -78,6 +79,7 @@ function attachRankedPassages({
         observedAt: new Date().toISOString(),
         contentHash,
         assessment: source.assessment || null,
+        assessmentStatus: source.assessmentStatus || null,
         provenance: pickSourceProvenance(source),
       });
     }

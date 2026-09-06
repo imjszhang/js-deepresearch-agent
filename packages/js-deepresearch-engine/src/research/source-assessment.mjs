@@ -105,24 +105,38 @@ export async function assessSourceBody({
   preferredHosts = [],
   observedHosts = [],
 } = {}) {
-  const result = await completeStructuredJson({
-    llm,
-    signal,
-    purpose: SOURCE_ASSESSMENT_PURPOSE,
-    maxTokens: 700,
-    retryMaxTokens: 700,
-    accept: hasUsableSourceAssessment,
-    messages: sourceAssessmentPrompt({
-      query,
-      question,
-      title,
-      url,
-      content,
-      entities,
-      preferredHosts,
-      observedHosts,
-    }),
-  });
+  let result;
+  try {
+    result = await completeStructuredJson({
+      llm,
+      signal,
+      purpose: SOURCE_ASSESSMENT_PURPOSE,
+      maxTokens: 700,
+      retryMaxTokens: 700,
+      accept: hasUsableSourceAssessment,
+      messages: sourceAssessmentPrompt({
+        query,
+        question,
+        title,
+        url,
+        content,
+        entities,
+        preferredHosts,
+        observedHosts,
+      }),
+    });
+  } catch (error) {
+    if (error?.name === 'AbortError' || signal?.aborted) throw error;
+    const reason = error?.code
+      ? `assessment_provider_${String(error.code).toLowerCase()}`
+      : 'assessment_provider_error';
+    return {
+      assessment: failClosedAssessment(reason),
+      status: ASSESSMENT_STATUS.unavailable,
+      attempts: 1,
+      retried: false,
+    };
+  }
   if (!result.ok) {
     return {
       assessment: failClosedAssessment(result.reason || 'invalid_or_empty_json'),
