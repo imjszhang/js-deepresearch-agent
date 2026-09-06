@@ -354,7 +354,13 @@ export function getEvidenceResponseMetadata(response) {
 export async function cancelResponseBody(response) {
   if (!response?.body || response.bodyUsed) return;
   try {
-    await response.body.cancel();
+    const pending = response.body.cancel?.();
+    if (pending && typeof pending.then === 'function') {
+      await Promise.race([
+        pending.catch(() => {}),
+        new Promise((resolve) => setTimeout(resolve, 100)),
+      ]);
+    }
   } catch {
     // Cancellation is best effort; callers still return the original result.
   }
