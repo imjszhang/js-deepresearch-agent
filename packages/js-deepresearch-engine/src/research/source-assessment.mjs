@@ -126,7 +126,7 @@ export async function assessSourceBody({
       }),
     });
   } catch (error) {
-    if (error?.name === 'AbortError' || signal?.aborted) throw error;
+    if (error?.name === 'AbortError' || error?.name === 'BudgetExceededError' || signal?.aborted) throw error;
     const reason = error?.code
       ? `assessment_provider_${String(error.code).toLowerCase()}`
       : 'assessment_provider_error';

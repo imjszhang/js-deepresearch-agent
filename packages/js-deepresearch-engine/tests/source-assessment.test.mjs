@@ -77,6 +77,23 @@ describe('source assessment', () => {
     );
   });
 
+  it('propagates budget exhaustion instead of bypassing the hard limit', async () => {
+    await assert.rejects(
+      () => assessSourceBody({
+        llm: {
+          async complete() {
+            const error = new Error('Research budget exhausted: llmTokens');
+            error.name = 'BudgetExceededError';
+            error.kind = 'llmTokens';
+            throw error;
+          },
+        },
+        content: 'body',
+      }),
+      (error) => error.name === 'BudgetExceededError' && error.kind === 'llmTokens',
+    );
+  });
+
   it('marks LLM-unreadable bodies as unsuccessful without adding WAF needles', async () => {
     const result = await assessSourceBody({
       llm: {

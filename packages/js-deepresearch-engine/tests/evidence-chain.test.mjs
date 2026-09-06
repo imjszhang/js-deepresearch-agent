@@ -309,6 +309,54 @@ describe('passage artifacts and report claim alignment', () => {
     }), true);
   });
 
+  it('replaces stale transport errors when the same URL later succeeds', () => {
+    const url = 'https://vendor.test/recovered';
+    const failed = {
+      title: 'Recovered source',
+      url,
+      fetchStatus: 'failed',
+      accessStatus: 'http_403',
+      accessNotes: 'HTTP 403',
+      fetchError: 'HTTP 403',
+      fetchErrorType: 'http_4xx',
+      httpStatus: 403,
+      fetchAttempts: 1,
+    };
+    const recovered = {
+      title: 'Recovered source',
+      url,
+      fetchStatus: 'ok',
+      accessStatus: 'ok',
+      contentOrigin: 'fetched',
+      content: 'The source later returned an official body with enough text to produce evidence.',
+      bodyQuality: 'read',
+      bodyQualityReason: 'body_ok',
+      assessmentStatus: 'unavailable',
+      assessment: {
+        method: 'fail_closed',
+        readability: 'uncertain',
+        firstParty: false,
+      },
+    };
+    const split = buildPassageArtifacts({
+      query: 'recovered source',
+      findings: [
+        { question: 'first attempt', sources: [failed] },
+        { question: 'second attempt', sources: [recovered] },
+      ],
+    });
+    assert.equal(split.sources.length, 1);
+    const source = split.sources[0];
+    assert.equal(source.fetchStatus, 'ok');
+    assert.equal(source.accessStatus, 'ok');
+    assert.equal(source.fetchError, null);
+    assert.equal(source.fetchErrorType, null);
+    assert.equal(source.httpStatus, null);
+    assert.equal(source.assessmentStatus, 'unavailable');
+    assert.equal(source.bodyQuality, 'read');
+    assert.ok(split.passages.length > 0);
+  });
+
   it('keeps bylines as candidates but displays the semantically preferred body', async () => {
     const content = [
       '# ​代持操作手册 #1610',

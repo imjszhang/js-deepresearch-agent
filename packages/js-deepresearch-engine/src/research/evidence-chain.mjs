@@ -28,15 +28,39 @@ function mergeSourceRecord(existing, incoming) {
   for (const field of [
     'title', 'url', 'snippet', 'engine', 'platform', 'publisher', 'author',
     'publishedAt', 'date', 'updatedAt', 'accessedAt', 'sourceType',
-    'jurisdiction', 'productVersion', 'accessStatus', 'accessNotes',
+    'jurisdiction', 'productVersion',
   ]) {
     if (!merged[field] && incoming[field]) merged[field] = incoming[field];
   }
   if (String(incoming.summary || '').length > String(merged.summary || '').length) merged.summary = incoming.summary;
   if (String(incoming.content || '').length > String(merged.content || '').length) merged.content = incoming.content;
-  if (incoming.fetchStatus === 'ok' || !merged.fetchStatus) merged.fetchStatus = incoming.fetchStatus || merged.fetchStatus;
-  if (incoming.contentOrigin) merged.contentOrigin = incoming.contentOrigin;
-  if (!merged.fetchError && incoming.fetchError) merged.fetchError = incoming.fetchError;
+  if (incoming.fetchStatus === 'ok') {
+    // A later successful read supersedes stale transport diagnostics from an
+    // earlier failed attempt for the same canonical URL.
+    merged.fetchStatus = 'ok';
+    merged.accessStatus = incoming.accessStatus || 'ok';
+    merged.accessNotes = incoming.accessNotes || null;
+    merged.fetchError = null;
+    merged.fetchErrorType = null;
+    merged.httpStatus = null;
+    merged.fetchAttempts = incoming.fetchAttempts ?? null;
+    for (const field of [
+      'contentOrigin', 'assessment', 'assessmentStatus', 'assessmentAttempts',
+      'assessmentRetried', 'assessmentReason', 'bodyQuality',
+      'bodyQualityReason', 'relevanceDecision', 'relevanceDecisionByGap',
+      'tier',
+    ]) {
+      merged[field] = incoming[field] ?? null;
+    }
+  } else if (merged.fetchStatus !== 'ok') {
+    if (!merged.fetchStatus && incoming.fetchStatus) merged.fetchStatus = incoming.fetchStatus;
+    for (const field of [
+      'accessStatus', 'accessNotes', 'fetchError', 'fetchErrorType',
+      'httpStatus', 'fetchAttempts',
+    ]) {
+      if (merged[field] == null && incoming[field] != null) merged[field] = incoming[field];
+    }
+  }
   return merged;
 }
 
