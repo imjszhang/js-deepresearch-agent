@@ -101,7 +101,7 @@ function memoryOutcome(result = {}) {
   return result;
 }
 
-async function runRememberedAttempt(url, context, {
+export async function runRememberedAttempt(url, context, {
   backend,
   retrievalPath = 'direct',
   run,

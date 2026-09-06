@@ -28,13 +28,27 @@ const SKIPPED_ASSESSMENT = Object.freeze({
  * Assessment outcome fields, kept separate from the transport fact
  * (`fetchStatus`) and from the deterministic body verdict (`bodyQuality`).
  */
-function assessmentFields(outcome) {
+function lockReprintAssessment(assessment, fetched = {}) {
+  const reprint = fetched.evidenceTier === 'reprint'
+    || fetched.retrievedVia === 'archive'
+    || fetched.retrievedVia === 'google_cache';
+  if (!reprint) return assessment;
+  return {
+    ...(assessment || {}),
+    evidenceTier: 'reprint',
+  };
+}
+
+function assessmentFields(outcome, fetched = {}) {
   const status = outcome?.status || ASSESSMENT_STATUS.skipped;
   if (status === ASSESSMENT_STATUS.skipped) {
-    return { assessment: outcome?.assessment || null, assessmentStatus: status };
+    return {
+      assessment: lockReprintAssessment(outcome?.assessment || null, fetched),
+      assessmentStatus: status,
+    };
   }
   return {
-    assessment: outcome.assessment,
+    assessment: lockReprintAssessment(outcome.assessment, fetched),
     assessmentStatus: status,
     assessmentAttempts: Number(outcome.attempts) || 1,
     assessmentRetried: outcome.retried === true,
@@ -52,7 +66,7 @@ function blockedAssessmentResult(fetchedSource, outcome) {
   return {
     ...fetchedSource,
     summary: '',
-    ...assessmentFields(outcome),
+    ...assessmentFields(outcome, fetchedSource),
     fetchStatus: 'ok',
     bodyQuality: 'waf',
     skipReason: outcome?.assessment?.reason || 'assessment_unreadable',
@@ -276,7 +290,7 @@ async function enrichOneSource(source, {
     }
     return {
       ...fetchedSource,
-      ...assessmentFields(outcome),
+      ...assessmentFields(outcome, fetchedSource),
       fetchStatus: 'ok',
       relatedLinks: relatedLinksFromFetch(fetched, settings),
     };
@@ -292,7 +306,7 @@ async function enrichOneSource(source, {
       ...fetchedSource,
       summary: String(summary || '').trim() || source.snippet,
       extractionMethod: embedding ? 'embedding' : 'overlap',
-      ...assessmentFields(outcome),
+      ...assessmentFields(outcome, fetchedSource),
       fetchStatus: 'ok',
       relatedLinks: relatedLinksFromFetch(fetched, settings),
     };
@@ -318,7 +332,7 @@ async function enrichOneSource(source, {
   return {
     ...fetchedSource,
     summary: outcome.assessment?.summary || source.snippet,
-    ...assessmentFields(outcome),
+    ...assessmentFields(outcome, fetchedSource),
     fetchStatus: 'ok',
     relatedLinks: relatedLinksFromFetch(fetched, settings),
   };

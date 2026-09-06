@@ -1,21 +1,45 @@
 import { isWafShellText } from './body-quality.mjs';
 
-const METADATA_PATHS = new Set(['jsonld', 'og', 'meta', 'rss']);
-const BODY_PATHS = new Set(['next_data', 'amp', 'print', 'mobile', 'pdf', 'archive']);
+const METADATA_PATHS = new Set(['jsonld', 'og', 'meta', 'rss', 'sitemap']);
+const BODY_PATHS = new Set([
+  'next_data',
+  'nuxt',
+  'amp',
+  'print',
+  'mobile',
+  'pdf',
+  'docx',
+  'archive',
+  'google_cache',
+]);
+const REPRINT_PATHS = new Set(['archive', 'google_cache']);
 
 export const ALTERNATE_EVIDENCE_ORDER = Object.freeze([
   'jsonld',
   'og',
   'next_data',
+  'nuxt',
   'rss',
+  'sitemap',
   'print',
   'amp',
   'pdf',
+  'docx',
   'archive',
+  'google_cache',
 ]);
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function safeJson(value) {
+  if (value && typeof value === 'object') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
 }
 
 function decodeEntities(value = '') {
@@ -98,6 +122,35 @@ export function extractOpenGraphMetadata(html = '') {
   };
 }
 
+function extractStructuredArticleText(root) {
+  const preferred = [];
+  const fallback = [];
+  const visit = (value, depth = 0, key = '') => {
+    if (!value || depth > 6) return;
+    if (typeof value === 'string') {
+      const text = decodeEntities(value.replace(/<[^>]+>/g, ' ')).trim();
+      const articleKey = /^(body|content|html|text|markdown)$/i.test(key);
+      const min = articleKey ? 8 : 80;
+      if (text.length >= min) (articleKey ? preferred : fallback).push(text);
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item, depth + 1, key);
+      return;
+    }
+    if (typeof value !== 'object') return;
+    for (const childKey of ['body', 'content', 'html', 'text', 'article', 'markdown']) {
+      if (value[childKey]) visit(value[childKey], depth + 1, childKey);
+    }
+    if (value.pageProps) visit(value.pageProps, depth + 1, 'pageProps');
+    if (value.data) visit(value.data, depth + 1, 'data');
+  };
+  visit(root);
+  const pick = (nodes) => nodes.sort((a, b) => b.length - a.length)[0];
+  const content = pick(preferred) || pick(fallback);
+  return content ? { content } : null;
+}
+
 export function extractNextDataRequest(html = '', pageUrl = '') {
   const match = String(html).match(/<script\b[^>]*id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i);
   if (!match) return null;
@@ -106,11 +159,12 @@ export function extractNextDataRequest(html = '', pageUrl = '') {
     const buildId = payload.buildId;
     const path = payload.page || new URL(pageUrl).pathname || '/';
     if (!buildId) {
+      const article = extractStructuredArticleText(payload.props);
       return {
         retrievedVia: 'next_data',
-        evidenceRole: payload.props ? 'body' : 'metadata',
-        title: payload.props?.pageProps?.title || payload.query?.title,
-        content: payload.props ? JSON.stringify(payload.props) : undefined,
+        evidenceRole: article ? 'body' : 'metadata',
+        title: payload.props?.pageProps?.title || payload.query?.title || article?.title,
+        content: article?.content,
         retrievedAt: nowIso(),
       };
     }
@@ -123,6 +177,47 @@ export function extractNextDataRequest(html = '', pageUrl = '') {
   } catch {
     return null;
   }
+}
+
+export function extractNuxtPayload(html = '', pageUrl = '') {
+  const inline = String(html).match(/window\.__NUXT__\s*=\s*(\{[\s\S]*\})\s*;?\s*<\/script>/i)
+    || String(html).match(/<script\b[^>]*id=["']__NUXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i);
+  if (inline) {
+    try {
+      const payload = JSON.parse(inline[1]);
+      const article = extractStructuredArticleText(payload);
+      if (article?.content) {
+        return {
+          retrievedVia: 'nuxt',
+          evidenceRole: 'body',
+          content: article.content,
+          retrievedAt: nowIso(),
+        };
+      }
+    } catch {
+      // Fall through to payload URL.
+    }
+  }
+  if (!/__NUXT__|_payload\.json|nuxt/i.test(html)) return null;
+  try {
+    const parsed = new URL(pageUrl);
+    return {
+      retrievedVia: 'nuxt',
+      requestUrl: new URL(`${parsed.pathname.replace(/\/$/, '') || ''}/_payload.json`, parsed).toString(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function parseSitemapLocs(xml = '') {
+  return [...String(xml).matchAll(/<loc>\s*([^<]+)\s*<\/loc>/gi)]
+    .map((match) => decodeEntities(match[1]))
+    .filter(Boolean);
+}
+
+export function googleCacheUrl(pageUrl = '') {
+  return `https://webcache.googleusercontent.com/search?q=cache:${encodeURIComponent(pageUrl)}`;
 }
 
 export function candidateFeedUrls(pageUrl = '') {
@@ -219,6 +314,16 @@ export function isBodyAlternatePath(retrievedVia) {
   return BODY_PATHS.has(String(retrievedVia || ''));
 }
 
+export function isReprintPath(retrievedVia) {
+  return REPRINT_PATHS.has(String(retrievedVia || ''));
+}
+
+export function isLockedReprint(source = {}) {
+  return source.evidenceTier === 'reprint'
+    || isReprintPath(source.retrievedVia)
+    || source.assessment?.evidenceTier === 'reprint';
+}
+
 function htmlFromDirect(direct = {}) {
   return direct.previewHtml || (direct.status === 'ok' ? direct.content : '') || '';
 }
@@ -239,14 +344,68 @@ function shouldRecover(direct = {}, context = {}) {
   return isWafShellText(content) || direct.bodyQuality === 'waf';
 }
 
-async function fetchAlternate(url, context) {
-  const { fetchUrlContent } = await import('./content-fetcher.mjs');
-  const { resolveContentFetchImpl } = await import('./content-resolver.mjs');
-  return fetchUrlContent(url, {
-    signal: context.signal,
-    maxChars: context.maxChars,
-    fetchImpl: resolveContentFetchImpl(context),
-    maxAttempts: 1,
+function hostnameOf(value = '') {
+  try {
+    return new URL(value).hostname.toLowerCase().replace(/^www\./, '');
+  } catch {
+    return '';
+  }
+}
+
+function sameHost(url, pageUrl) {
+  const left = hostnameOf(url);
+  const right = hostnameOf(pageUrl);
+  return Boolean(left && right && left === right);
+}
+
+function isHostRefusal(direct = {}) {
+  const status = Number(direct.httpStatus) || 0;
+  return status === 403 || status === 429 || direct.challenge === true
+    || ['challenge', 'http_403', 'http_429', 'http_4xx'].includes(String(direct.errorType || ''));
+}
+
+function usableBody(result = {}) {
+  return result?.status === 'ok' && String(result.content || '').trim().length >= 80;
+}
+
+function canIssueAlternateHttp(context = {}, handlerCount = 0) {
+  if (typeof context.fetchImpl === 'function') return true;
+  if (handlerCount > 0) return true;
+  const http = context.settings?.http;
+  return Boolean(http && typeof http === 'object' && Object.keys(http).length > 0);
+}
+
+function shouldTryPublicReprint(direct = {}, context = {}, handlerCount = 0) {
+  if (typeof context.fetchImpl === 'function') return true;
+  if (handlerCount > 0) return false;
+  return isHostRefusal(direct)
+    || direct.bodyQuality === 'waf'
+    || isWafShellText(direct.content || direct.previewHtml || '');
+}
+
+async function fetchAlternate(url, context, retrievalPath) {
+  const {
+    getContentFetchHandlers,
+    resolveUrlContent,
+    runRememberedAttempt,
+  } = await import('./content-resolver.mjs');
+  const injected = getContentFetchHandlers();
+  if (typeof context.fetchImpl !== 'function' && injected.length > 0) {
+    for (const handler of injected) {
+      if (typeof handler.supports === 'function' && !handler.supports(url, context)) continue;
+      const result = await runRememberedAttempt(url, context, {
+        backend: 'http',
+        retrievalPath,
+        run: () => handler(url, context),
+      });
+      if (result?.status && result.status !== 'unsupported') return result;
+    }
+    return { status: 'unsupported', retrievalPath, backend: 'http' };
+  }
+  return resolveUrlContent(url, {
+    ...context,
+    retrievalPath,
+    skipAlternateEvidence: true,
   });
 }
 
@@ -269,13 +428,18 @@ export async function recoverAlternateEvidence(pageUrl, {
     };
   };
 
+  const htmlPresent = Boolean(String(html || '').trim());
+  const skipSameHostHttp = isHostRefusal(direct) || (direct.status !== 'ok' && !htmlPresent);
+  const { getContentFetchHandlers } = await import('./content-resolver.mjs');
+  const handlerCount = getContentFetchHandlers().length;
+  const allowHttp = canIssueAlternateHttp(context, handlerCount);
   const nextHint = html ? extractNextDataRequest(html, pageUrl) : null;
   if (nextHint?.content) {
     return mergeMetadata({ status: 'ok', ...nextHint, retrievedAt });
   }
-  if (nextHint?.requestUrl) {
+  if (allowHttp && nextHint?.requestUrl && (!skipSameHostHttp || !sameHost(nextHint.requestUrl, pageUrl))) {
     const nextResult = await fetchAlternate(nextHint.requestUrl, context, 'next_data');
-    if (nextResult?.status === 'ok' && nextResult.content) {
+    if (usableBody(nextResult)) {
       return mergeMetadata({
         ...nextResult,
         retrievedVia: 'next_data',
@@ -286,31 +450,69 @@ export async function recoverAlternateEvidence(pageUrl, {
     }
   }
 
-  let feedMetadata = null;
-  for (const feedUrl of candidateFeedUrls(pageUrl)) {
-    const feed = await fetchAlternate(feedUrl, context, 'rss');
-    if (feed?.status !== 'ok') continue;
-    const parsed = parseFeedMetadata(feed.content, pageUrl);
-    if (parsed) {
-      feedMetadata = parsed;
-      break;
-    }
+  const nuxtHint = html ? extractNuxtPayload(html, pageUrl) : null;
+  if (nuxtHint?.content) {
+    return mergeMetadata({ status: 'ok', ...nuxtHint, retrievedAt });
   }
-
-  for (const candidate of candidatePresentationUrls(pageUrl)) {
-    const result = await fetchAlternate(candidate.url, context, candidate.retrievedVia);
-    if (result?.status === 'ok' && String(result.content || '').trim().length >= 80) {
+  if (allowHttp && nuxtHint?.requestUrl && (!skipSameHostHttp || !sameHost(nuxtHint.requestUrl, pageUrl))) {
+    const nuxtResult = await fetchAlternate(nuxtHint.requestUrl, context, 'nuxt');
+    const article = extractStructuredArticleText(safeJson(nuxtResult?.content));
+    if (usableBody({ ...nuxtResult, content: article?.content || nuxtResult?.content })) {
       return mergeMetadata({
-        ...result,
-        retrievedVia: candidate.retrievedVia,
+        ...nuxtResult,
+        retrievedVia: 'nuxt',
         evidenceRole: 'body',
-        retrievalPath: candidate.retrievedVia,
+        retrievalPath: 'nuxt',
+        content: article?.content || nuxtResult.content,
         retrievedAt,
       });
     }
   }
 
-  if (/\.pdf(?:$|[?#])/i.test(pageUrl) || /application\/pdf/i.test(direct.contentType || '')) {
+  let feedMetadata = null;
+  if (allowHttp && !skipSameHostHttp) {
+    for (const feedUrl of candidateFeedUrls(pageUrl)) {
+      const path = feedUrl.includes('sitemap') ? 'sitemap' : 'rss';
+      const feed = await fetchAlternate(feedUrl, context, path);
+      if (feed?.status !== 'ok') continue;
+      if (path === 'sitemap') {
+        const match = parseSitemapLocs(feed.content).find((loc) => loc === pageUrl || loc.includes(new URL(pageUrl).pathname));
+        if (match && match !== pageUrl) {
+          const discovered = await fetchAlternate(match, context, 'sitemap');
+          if (usableBody(discovered)) {
+            return mergeMetadata({
+              ...discovered,
+              retrievedVia: 'sitemap',
+              evidenceRole: 'body',
+              retrievalPath: 'sitemap',
+              retrievedAt,
+            });
+          }
+        }
+        continue;
+      }
+      const parsed = parseFeedMetadata(feed.content, pageUrl);
+      if (parsed) {
+        feedMetadata = parsed;
+        break;
+      }
+    }
+
+    for (const candidate of candidatePresentationUrls(pageUrl)) {
+      const result = await fetchAlternate(candidate.url, context, candidate.retrievedVia);
+      if (usableBody(result)) {
+        return mergeMetadata({
+          ...result,
+          retrievedVia: candidate.retrievedVia,
+          evidenceRole: 'body',
+          retrievalPath: candidate.retrievedVia,
+          retrievedAt,
+        });
+      }
+    }
+  }
+
+  if (allowHttp && !skipSameHostHttp && (/\.pdf(?:$|[?#])/i.test(pageUrl) || /application\/pdf/i.test(direct.contentType || ''))) {
     const pdf = await fetchAlternate(pageUrl, context, 'pdf');
     if (pdf?.status === 'ok') {
       return {
@@ -323,17 +525,27 @@ export async function recoverAlternateEvidence(pageUrl, {
     }
   }
 
-  const cdx = await fetchAlternate(waybackCdxUrl(pageUrl), {
-    ...context,
-    skipResolver: true,
-  }, 'archive');
+  if (allowHttp && !skipSameHostHttp && (/\.docx(?:$|[?#])/i.test(pageUrl) || /officedocument\.wordprocessingml/i.test(direct.contentType || ''))) {
+    const docx = await fetchAlternate(pageUrl, context, 'docx');
+    if (docx?.status === 'ok') {
+      return {
+        ...docx,
+        retrievedVia: 'docx',
+        evidenceRole: 'body',
+        retrievalPath: 'docx',
+        retrievedAt,
+      };
+    }
+  }
+
+  const cdx = allowHttp && shouldTryPublicReprint(direct, context, handlerCount)
+    ? await fetchAlternate(waybackCdxUrl(pageUrl), context, 'archive')
+    : null;
   if (cdx?.status === 'ok') {
-    let payload = cdx.content;
-    try { payload = JSON.parse(cdx.content); } catch { /* already text */ }
-    const snapshot = parseWaybackCdx(payload);
+    const snapshot = parseWaybackCdx(safeJson(cdx.content) ?? cdx.content);
     if (snapshot?.snapshotUrl) {
       const archived = await fetchAlternate(snapshot.snapshotUrl, context, 'archive');
-      if (archived?.status === 'ok' && archived.content) {
+      if (usableBody(archived)) {
         return mergeMetadata({
           ...archived,
           retrievedVia: 'archive',
@@ -346,6 +558,20 @@ export async function recoverAlternateEvidence(pageUrl, {
         });
       }
     }
+  }
+
+  const cached = allowHttp && shouldTryPublicReprint(direct, context, handlerCount)
+    ? await fetchAlternate(googleCacheUrl(pageUrl), context, 'google_cache')
+    : null;
+  if (usableBody(cached)) {
+    return mergeMetadata({
+      ...cached,
+      retrievedVia: 'google_cache',
+      evidenceRole: 'body',
+      retrievalPath: 'google_cache',
+      evidenceTier: 'reprint',
+      retrievedAt,
+    });
   }
 
   const fallback = metadata || feedMetadata;

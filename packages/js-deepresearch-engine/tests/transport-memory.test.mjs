@@ -27,6 +27,7 @@ function httpSettings(threshold = 3) {
     research: {
       focused: { fetchBackend: 'http' },
       read: {
+        alternateEvidence: { enabled: false },
         transport: {
           maxAttempts: 3,
           hostCircuitThreshold: threshold,
@@ -287,7 +288,13 @@ describe('run-scoped transport memory', () => {
     registerContentFetchHandler(dynamicHandler);
 
     const context = {
-      settings: { research: { focused: { fetchBackend: 'auto' } } },
+      skipAlternateEvidence: true,
+      settings: {
+        research: {
+          focused: { fetchBackend: 'auto' },
+          read: { alternateEvidence: { enabled: false } },
+        },
+      },
       transportMemory: memory,
     };
     assert.equal((await resolveUrlContent('https://dynamic.test/page', context)).status, 'failed');
