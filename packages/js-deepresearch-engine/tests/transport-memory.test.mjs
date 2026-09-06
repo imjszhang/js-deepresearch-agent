@@ -29,6 +29,7 @@ function httpSettings(threshold = 3) {
       focused: { fetchBackend: 'http' },
       read: {
         alternateEvidence: { enabled: false },
+        cache: { enabled: false },
         transport: {
           maxAttempts: 3,
           hostCircuitThreshold: threshold,

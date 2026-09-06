@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import {
   FileRunRecorder,
   ResearchRunner,
+  collectManualImportHints,
   createWorkSessionDir,
   saveResearchArtifacts,
 } from 'js-deepresearch-engine';
@@ -157,6 +158,17 @@ export async function runCliResearch({
         quality: result.quality,
         completedAt: new Date().toISOString(),
       });
+    }
+
+    if (!flags.json) {
+      for (const hint of collectManualImportHints({
+        gaps: result.gaps || [],
+        readiness: result.readiness || result.quality?.readiness || null,
+        findings: result.findings || [],
+        corpusDirs: settings.search?.local?.dirs || [],
+      })) {
+        onProgressLog('info', '-', hint);
+      }
     }
 
     if (flags.output) {

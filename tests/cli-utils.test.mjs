@@ -369,6 +369,13 @@ describe('CLI utilities', () => {
     );
   });
 
+  it('maps --no-cache and --cache-dir onto research.read.cache', () => {
+    const disabled = applyResearchFlags({ research: {} }, { 'no-cache': true });
+    assert.equal(disabled.research.read.cache.enabled, false);
+    const custom = applyResearchFlags({ research: {} }, { 'cache-dir': '/tmp/jdr-cache' });
+    assert.equal(custom.research.read.cache.dir, '/tmp/jdr-cache');
+  });
+
   it('leaves --search searxng unchanged when corpus dirs are omitted', () => {
     const settings = applyResearchFlags({ search: {} }, { search: 'searxng' });
     assert.equal(settings.search.engine, 'searxng');

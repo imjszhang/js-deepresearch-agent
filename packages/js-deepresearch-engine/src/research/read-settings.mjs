@@ -61,5 +61,16 @@ export function resolveReadSettings(settings = {}, { strategy = 'focused' } = {}
         ? raw.relevance.siteQueryMode
         : 'confirmed',
     },
+    cache: {
+      enabled: raw.cache?.enabled === true
+        || (raw.cache != null && raw.cache.enabled !== false),
+      dir: String(raw.cache?.dir || 'data/content-cache'),
+      ttlMs: {
+        html: Number(raw.cache?.ttlMs?.html) > 0 ? Number(raw.cache.ttlMs.html) : 7 * 24 * 60 * 60 * 1000,
+        default: Number(raw.cache?.ttlMs?.default) > 0 ? Number(raw.cache.ttlMs.default) : 7 * 24 * 60 * 60 * 1000,
+      },
+      negativeTtlMs: Number(raw.cache?.negativeTtlMs) > 0 ? Number(raw.cache.negativeTtlMs) : 30 * 60 * 1000,
+      forceRefreshRequiredHosts: raw.cache?.forceRefreshRequiredHosts !== false,
+    },
   };
 }

@@ -15,6 +15,7 @@ import { applySlotStatusToClaims } from './report-evidence.mjs';
 import { archiveDisclosureText } from './alternate-evidence.mjs';
 import { closeHeadlessPool } from './headless-backend.mjs';
 import { plannerFactsFromSnapshot } from './transport-memory.mjs';
+import { collectManualImportHints } from './manual-import.mjs';
 import { buildResearchLimitations } from './limitations.mjs';
 import { resolveFocusedSettings } from './focused-settings.mjs';
 import { createResearchProviders } from './research-providers.mjs';
@@ -277,6 +278,12 @@ export class ResearchRunner {
         ...findings.flatMap((finding) => [finding, ...(finding.sources || [])])
           .map((entry) => archiveDisclosureText(entry))
           .filter(Boolean),
+        ...collectManualImportHints({
+          gaps,
+          readiness,
+          findings,
+          corpusDirs: settings?.search?.local?.dirs || [],
+        }),
       ].filter(Boolean),
     };
     let canonical = buildResearchLimitations(limitationBase);

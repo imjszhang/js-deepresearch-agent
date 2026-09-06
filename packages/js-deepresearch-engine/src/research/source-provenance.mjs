@@ -13,6 +13,9 @@ const PROVENANCE_FIELDS = Object.freeze([
   'productVersion',
   'accessStatus',
   'accessNotes',
+  'sourceUrl',
+  'contentSha256',
+  'manualImportPath',
 ]);
 
 function present(value) {

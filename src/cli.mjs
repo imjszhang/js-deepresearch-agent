@@ -431,6 +431,7 @@ Commands:
     Optional rerank: --rerank-provider rules|disabled|jina|http|local --rerank-model <name> --rerank-base-url <url> --rerank-api-key <key> --rerank-timeout-ms 30000
     Relevance gate: --read-relevance-enabled true|false --read-relevance-min-score 0.01 --read-body-relevance true|false --site-query-mode confirmed|always|never
     Read transport: --read-host-circuit-threshold 3 --read-response-headers-timeout-ms 10000 --read-html-timeout-ms 15000 --read-document-timeout-ms 60000
+    Content cache: --no-cache --cache-dir data/content-cache
     Search options (passed through to SearXNG; no language/engine routing is applied by this CLI): --search-language zh --search-engines google,brave --search-categories general
     Optional source assessment extra call in full/extract: --source-assessment true
     Focused: --focused-fetch-mode summary|disabled|full|extract --focused-fetch-backend auto|http|js-eyes --focused-max-urls 12 --focused-cluster-results true|false --focused-max-per-hostname 2

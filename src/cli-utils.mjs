@@ -183,6 +183,7 @@ export function applyResearchFlags(settings, flags) {
     'read-backends': 'research.read.backends',
     'headless-enabled': 'research.read.headless.enabled',
     'headless-timeout-ms': 'research.read.headless.timeoutMs',
+    'cache-dir': 'research.read.cache.dir',
     'embedding-provider': 'research.providers.embedding.provider',
     'embedding-model': 'research.providers.embedding.model',
     'embedding-base-url': 'research.providers.embedding.baseUrl',
@@ -270,6 +271,17 @@ export function applyResearchFlags(settings, flags) {
     || flags['source-max-per-hostname'] !== undefined
   ) {
     setDeepValue(settings, 'research.focused.sourceSelection.enabled', 'true');
+  }
+
+  if (flags['no-cache'] === true || flags['no-cache'] === 'true') {
+    settings.research ||= {};
+    settings.research.read ||= {};
+    settings.research.read.cache = {
+      ...(settings.research.read.cache && typeof settings.research.read.cache === 'object'
+        ? settings.research.read.cache
+        : {}),
+      enabled: false,
+    };
   }
 
   applyProviderOverrides(settings, flags);
