@@ -5,7 +5,7 @@ import { archiveResearchResult } from '../../src/storage/intel-store.mjs';
 import { buildEvidenceArtifacts, matchesStrategyFilter, sessionMatchesStrategyFilter } from 'js-deepresearch-engine';
 
 const REQUIRED_FILES = ['report.md', 'findings.json', 'sources.json', 'meta.json'];
-const SESSION_DIR_PATTERN = /^\d{4}-\d{2}-\d{2}_\d{6}$/;
+const SESSION_DIR_PATTERN = /^\d{4}-\d{2}-\d{2}_\d{6}(?:-\d{3})?$/;
 
 export function buildImportedResearchId(strategy, timestamp) {
   return `imported__${strategy}__${timestamp}`;
@@ -118,6 +118,18 @@ export function importWorkDirSessions({
     };
 
     try {
+      const runPath = path.join(sessionDir, 'run.json');
+      const hasRunManifest = fs.existsSync(runPath);
+      const run = readJsonIfPresent(runPath);
+      if (hasRunManifest && (!run || run.status !== 'completed')) {
+        item.status = 'skipped';
+        item.reason = run
+          ? `session status is ${run.status || 'unknown'}`
+          : 'invalid session manifest';
+        summary.skipped += 1;
+        summary.items.push(item);
+        continue;
+      }
       if (!hasRequiredArtifacts(sessionDir)) {
         item.status = 'skipped';
         item.reason = 'missing required artifact files';
@@ -141,7 +153,7 @@ export function importWorkDirSessions({
 
       if (dryRun) {
         item.status = existing ? 'dry-run-upgrade' : 'dry-run';
-        const derived = upgradeExisting && (!artifacts.passages?.length || !artifacts.claims?.length)
+        const derived = upgradeExisting && !artifacts.reportPlan && (!artifacts.passages?.length || !artifacts.claims?.length)
           ? buildEvidenceArtifacts({ query: artifacts.meta?.query ?? '', findings: artifacts.findings, report: artifacts.report, options: { maxPassagesPerSource: 5, maxPassageChars: 1200, claimAlignment: true } })
           : null;
         item.preview = {
@@ -169,9 +181,15 @@ export function importWorkDirSessions({
         claims: artifacts.claims || [],
         quality: artifacts.quality || undefined,
         trace: artifacts.trace || [],
+        reportPlan: artifacts.reportPlan || undefined,
+        reportContract: artifacts.reportPlan?.contract || undefined,
       };
 
-      if (upgradeExisting && result.passages.length === 0 && result.claims.length === 0) {
+      if (artifacts.reportPlan?.claims?.length && (!result.claims.length || upgradeExisting)) {
+        result.claims = artifacts.reportPlan.claims;
+      }
+
+      if (upgradeExisting && result.passages.length === 0 && result.claims.length === 0 && !artifacts.reportPlan) {
         const derived = buildEvidenceArtifacts({
           query: artifacts.meta?.query ?? '',
           findings: result.findings,
@@ -202,6 +220,7 @@ export function importWorkDirSessions({
           claimsPath: path.join(sessionDir, 'claims.json'),
           qualityPath: path.join(sessionDir, 'quality.json'),
           tracePath: path.join(sessionDir, 'trace.json'),
+          reportPlanPath: path.join(sessionDir, 'report-plan.json'),
         },
         settings: { research: artifacts.meta?.settings ?? {} },
         engine,

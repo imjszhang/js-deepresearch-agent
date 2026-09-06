@@ -114,6 +114,114 @@ describe('zhipu contract finish-up', () => {
     assert.equal(classifyInvalidReason('duplicate_query'), 'duplicate');
     assert.equal(classifyInvalidReason('rate_limited'), 'transient');
     assert.equal(classifyInvalidReason('no_repair_action'), 'semantic');
+    assert.equal(classifyInvalidReason('repeat_action'), 'repeat');
+  });
+
+  it('attaches a cross-language follow-up to the required Commerce Agents slot', () => {
+    const state = new ResearchState({
+      query: '店面会话正在变成新的货架。Anthropic 开源 Commerce Agents，是在帮零售商把货架留在自己家里，还是在用「可 fork 的正确做法」把货架标准写成 Claude 的？',
+      brief: { entities: ['Anthropic', 'Commerce Agents', 'Claude'] },
+    });
+    const required = state.addGap(
+      '在店面会话正在变成新的货架的前提下,Anthropic 开源 Commerce Agents 是在帮零售商把货架留在自己家里,还是在用「可 fork 的正确做法」把货架标准写成 Claude 的?',
+      'critical',
+      {
+        id: 'gap-2',
+        requiredSlot: true,
+        contractSlotId: 'judgment',
+        evidenceCriteria: ['first_party'],
+        deduplicate: false,
+      },
+    );
+    const attached = state.addGap('Does the MIT license of Commerce Agents make the forkable shelf standard Claude\'s?');
+    assert.equal(attached, null);
+    assert.equal(state.gaps.filter((gap) => !gap.rollup && gap.id !== 'gap-1').length, 1);
+    assert.ok((required.followUpQuestions || []).some((item) => /MIT license/.test(item)));
+  });
+
+  it('inherits a required slot ceiling when a follow-up finding is cited', () => {
+    const claims = applySlotStatusToClaims([{
+      kind: 'key_claim',
+      text: 'Commerce Agents 用可 fork 蓝图把货架标准写成 Claude 的 [1.1]',
+      citationKeys: ['1.1'],
+      citedSourceIds: ['src-follow'],
+      flags: [],
+      evidence: [],
+    }], {
+      gaps: [
+        { id: 'gap-2', requiredSlot: true, contractSlotId: 'judgment', status: 'body_read' },
+        { id: 'gap-3', requiredSlot: false, parentGapId: 'gap-2', status: 'verified' },
+      ],
+      findings: [{
+        gapId: 'gap-3',
+        parentGapId: 'gap-2',
+        contractSlotId: 'judgment',
+        sources: [{ id: 'src-follow', content: 'Anthropic published Commerce Agents as a forkable official blueprint for retailers.', fetchStatus: 'ok' }],
+      }],
+    });
+    assert.ok(claims[0].flags.includes('slot_limited'));
+    const partitioned = partitionFindingsForReport({
+      findings: [{
+        gapId: 'gap-3',
+        parentGapId: 'gap-2',
+        contractSlotId: 'judgment',
+        sources: [{ content: 'Anthropic published Commerce Agents as a forkable official blueprint for retailers.', fetchStatus: 'ok' }],
+      }],
+      gaps: [
+        { id: 'gap-2', requiredSlot: true, contractSlotId: 'judgment', status: 'body_read' },
+        { id: 'gap-3', requiredSlot: false, parentGapId: 'gap-2', status: 'verified' },
+      ],
+    });
+    assert.equal(partitioned.limited[0].evidenceGrade, 'limited');
+    assert.equal(partitioned.verified.length, 0);
+  });
+
+  it('rejects already-read URLs without counting them as semantic repair', () => {
+    const state = new ResearchState({ query: 'topic' });
+    state.addCandidates([{ id: 'https://claude.com/blog', url: 'https://claude.com/blog', title: 'blog' }], 'gap-1');
+    const candidate = state.candidates.get('https://claude.com/blog');
+    candidate.gapMatches['gap-1'].relevanceDecision = { accepted: true, reasonCode: 'relevance_accepted' };
+    state.readSourceIds.add('https://claude.com/blog');
+    state.lastAction = 'search';
+    assert.equal(state.validate({
+      action: 'read',
+      sourceIds: ['https://claude.com/blog'],
+      gapId: 'gap-1',
+    }), 'repeat_action');
+    assert.equal(classifyInvalidReason('repeat_action'), 'repeat');
+  });
+
+  it('keeps planner-exhaustion repairState after coverage sync', () => {
+    const state = new ResearchState({
+      query: 'Commerce Agents',
+      brief: { entities: ['Commerce Agents'] },
+    });
+    const gap = state.addGap('judgment', 'critical', {
+      id: 'gap-2',
+      requiredSlot: true,
+      evidenceCriteria: ['first_party'],
+    });
+    gap.repairFailures = 3;
+    state.markGapStatus('gap-2', 'blocked', 'query_planner_exhausted');
+    state.findings.push({
+      gapId: 'gap-2',
+      sources: [{
+        id: 'https://www.claude.com/blog',
+        url: 'https://www.claude.com/blog',
+        content: 'Anthropic published Commerce Agents as an official first-party blueprint.',
+        fetchStatus: 'ok',
+        assessment: { firstParty: true, publisherType: 'official', contentKind: 'article' },
+      }],
+    });
+    state.syncGapCoverage();
+    const synced = state.getGap('gap-2');
+    assert.equal(synced.repairState?.exhausted, true);
+    assert.equal(synced.repairState?.terminal, true);
+    assert.equal(synced.repairState?.reason, 'query_planner_exhausted');
+    assert.equal(synced.blockedReason, synced.repairState.reason);
+    assert.equal(synced.status, 'body_read');
+    assert.equal(synced.evidenceStatus, 'body_read');
+    assert.notEqual(synced.status, 'blocked');
   });
 
   it('keeps blocked-slot second-hand numbers out of confirmed claims', () => {

@@ -3,6 +3,15 @@ import { socksDispatcher } from 'fetch-socks';
 
 const dispatcherCache = new Map();
 const fetchCache = new Map();
+const PROXY_HEADERS_TIMEOUT_MS = 900_000;
+const PROXY_BODY_TIMEOUT_MS = 900_000;
+
+function proxyAgentOptions() {
+  return {
+    headersTimeout: PROXY_HEADERS_TIMEOUT_MS,
+    bodyTimeout: PROXY_BODY_TIMEOUT_MS,
+  };
+}
 
 function createDispatcher(proxyUrl) {
   const parsed = new URL(proxyUrl);
@@ -15,11 +24,14 @@ function createDispatcher(proxyUrl) {
       port: Number(parsed.port) || 1080,
       ...(parsed.username ? { userId: decodeURIComponent(parsed.username) } : {}),
       ...(parsed.password ? { password: decodeURIComponent(parsed.password) } : {}),
-    });
+    }, proxyAgentOptions());
   }
 
   if (scheme === 'http' || scheme === 'https') {
-    return new ProxyAgent(proxyUrl);
+    return new ProxyAgent({
+      uri: proxyUrl,
+      ...proxyAgentOptions(),
+    });
   }
 
   throw new Error(`Unsupported HTTP proxy scheme "${scheme}". Use socks5://, socks5h://, http://, or https://.`);
@@ -53,7 +65,20 @@ export function createHttpFetch(proxyUrl) {
   }
 
   const dispatcher = resolveDispatcher(normalized);
-  const fetchFn = (input, init = {}) => undiciFetch(input, { ...init, dispatcher });
+  const fetchFn = (input, init = {}) => undiciFetch(input, {
+    ...init,
+    dispatcher,
+    headersTimeout: init.headersTimeout ?? PROXY_HEADERS_TIMEOUT_MS,
+    bodyTimeout: init.bodyTimeout ?? PROXY_BODY_TIMEOUT_MS,
+  });
+  Object.defineProperty(fetchFn, 'transportOptions', {
+    value: Object.freeze({
+      proxy: true,
+      headersTimeoutMs: PROXY_HEADERS_TIMEOUT_MS,
+      bodyTimeoutMs: PROXY_BODY_TIMEOUT_MS,
+    }),
+    enumerable: false,
+  });
   fetchCache.set(normalized, fetchFn);
   return fetchFn;
 }

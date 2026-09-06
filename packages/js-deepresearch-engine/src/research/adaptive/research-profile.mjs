@@ -369,6 +369,9 @@ export function createGapRecord({
   kind,
   rollup,
   evidenceCriteria,
+  parentGapId,
+  followUpQuestions,
+  repairState,
 } = {}) {
   return {
     schemaVersion: GAP_SCHEMA_VERSION,
@@ -380,6 +383,7 @@ export function createGapRecord({
     rollup: Boolean(rollup),
     requiredSlot: Boolean(requiredSlot),
     status: 'open',
+    evidenceStatus: 'open',
     priority,
     depth,
     requiredSourceTypes: sanitizeSourceTypes(requiredSourceTypes ?? profile.requiredSourceTypes),
@@ -398,6 +402,9 @@ export function createGapRecord({
     confidence: null,
     evidenceCriteria: Array.isArray(evidenceCriteria) ? evidenceCriteria.filter(Boolean) : [],
     contractSlotId: contractSlotId || null,
+    parentGapId: parentGapId || null,
+    followUpQuestions: Array.isArray(followUpQuestions) ? followUpQuestions.filter(Boolean) : [],
+    repairState: repairState || null,
     slotSupport: null,
     missingEvidence: ['successful_body'],
     nextQueries: [],

@@ -21,20 +21,30 @@ export class ResearchRepository {
       error: fields.error ?? current.error,
       completedAt: fields.completedAt ?? current.completedAt,
       quality: fields.quality ?? current.quality,
+      sessionDir: fields.sessionDir ?? current.sessionDir,
     };
 
     this.db.prepare(`
       UPDATE research_history
-      SET status = ?, report = ?, error = ?, completed_at = ?, quality_json = ?, updated_at = ?
+      SET status = ?, report = ?, error = ?, completed_at = ?, quality_json = ?, session_dir = ?, updated_at = ?
       WHERE id = ?
-    `).run(status, next.report, next.error, next.completedAt, next.quality ? JSON.stringify(next.quality) : null, new Date().toISOString(), id);
+    `).run(
+      status,
+      next.report,
+      next.error,
+      next.completedAt,
+      next.quality ? JSON.stringify(next.quality) : null,
+      next.sessionDir,
+      new Date().toISOString(),
+      id,
+    );
 
     return this.get(id);
   }
 
   list() {
     return this.db.prepare(`
-      SELECT id, query, status, strategy, report, error, quality_json, created_at, updated_at, completed_at
+      SELECT id, query, status, strategy, report, error, quality_json, session_dir, created_at, updated_at, completed_at
       FROM research_history
       ORDER BY created_at DESC
     `).all().map(mapResearch);
@@ -42,7 +52,7 @@ export class ResearchRepository {
 
   get(id) {
     const row = this.db.prepare(`
-      SELECT id, query, status, strategy, report, error, quality_json, created_at, updated_at, completed_at
+      SELECT id, query, status, strategy, report, error, quality_json, session_dir, created_at, updated_at, completed_at
       FROM research_history
       WHERE id = ?
     `).get(id);
@@ -64,6 +74,7 @@ function mapResearch(row) {
     report: row.report,
     error: row.error,
     quality: parseJson(row.quality_json),
+    sessionDir: row.session_dir || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     completedAt: row.completed_at,

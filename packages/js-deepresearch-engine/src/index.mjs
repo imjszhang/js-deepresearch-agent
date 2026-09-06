@@ -49,6 +49,20 @@ export {
   saveResearchToWorkDir,
 } from './research/work-output.mjs';
 export {
+  FileRunRecorder,
+  NOOP_RUN_RECORDER,
+  RUN_RECORD_SCHEMA_VERSION,
+  loadLatestCheckpoint,
+  readEventJournal,
+  recorderOrNoop,
+  sanitizeRecordedValue,
+} from './research/run-recorder.mjs';
+export {
+  loadRecordedCallExchange,
+  loadRecordedLlmRequest,
+  replayRecordedLlmCall,
+} from './research/replay-recorded-call.mjs';
+export {
   normalizeSearchConfig,
   sanitizeSearchOptions,
   resolveSearchRequestOptions,
@@ -102,14 +116,21 @@ export {
   slotEvidenceLimitations,
   sourceUsableForAsOf,
 } from './research/as-of.mjs';
+export { buildResearchLimitations } from './research/limitations.mjs';
 export { promoteSuccessfulSources, shouldPromoteSourceToSlot } from './research/slot-promotion.mjs';
 export {
   GAP_SCHEMA_VERSION,
   GAP_STATUSES,
+  EVIDENCE_STATUSES,
   normalizeGapRecord,
+  normalizeRepairState,
   evaluateGapEvidence,
   evaluateGapProvenance,
   synthesizeGapStatus,
+  inferEvidenceStatus,
+  evidenceStatusOf,
+  isRepairTerminal,
+  deriveGapOutcome,
   isMaterialGap,
   isRequiredSlot,
   needsSemanticClose,
@@ -121,6 +142,7 @@ export {
   buildPassageArtifacts,
   buildPassageArtifactsAsync,
   alignReportClaims,
+  alignPlanClaims,
   extractClaims,
   stableSourceId,
   alignClaimToCitedPassages,
@@ -131,11 +153,20 @@ export {
 } from './research/evidence-chain.mjs';
 export {
   parseCitations,
+  parseInternalReferenceTokens,
+  stripInternalReferenceTokens,
   buildCitationMap,
   resolveCitations,
   resolveCitedSourceIds,
 } from './research/citations.mjs';
-export { ReportGenerationError, validateReportOutput, looksTruncated, isPlaceholderSummary, emptyBulletLines } from './research/report-builder.mjs';
+export {
+  ReportGenerationError,
+  validateReportOutput,
+  looksTruncated,
+  isPlaceholderSummary,
+  emptyBulletLines,
+  extractLabeledNarrativeText,
+} from './research/report-builder.mjs';
 export {
   isWafOrErrorBody,
   isSuccessfulBody,
@@ -155,9 +186,17 @@ export {
   hasUsableResearchContract,
 } from './research/adaptive/research-profile.mjs';
 export {
+  EVIDENCE_CRITERIA,
+  FIRST_PARTY_RETRIEVAL_TERMS,
+  evaluateEvidenceCriteria,
+  gapAsksFirstParty,
+  normalizeEvidenceCriteria,
+} from './research/evidence-criteria.mjs';
+export {
   judgeOpenSlotSupport,
   applySlotSupportJudgments,
   failClosedSupport,
+  selectSlotPassages,
   slotSupportFingerprint,
 } from './research/gap-slot-support.mjs';
 export { evaluateReadinessGate, repairGapsFromGate } from './research/adaptive/readiness-gate.mjs';
@@ -165,6 +204,12 @@ export {
   partitionFindingsForReport,
   applySlotStatusToClaims,
   evidenceGradeForGap,
+  owningRequiredGap,
+  isJudgmentContext,
+  hasOpenJudgmentSlot,
+  hasOpenRequiredSlot,
+  claimHasIndependentFirstPartyEvidence,
+  findingHasFirstPartyBody,
 } from './research/report-evidence.mjs';
 export {
   classifySourceTier,
@@ -192,7 +237,10 @@ export { normalizeExploratoryStopReason, EXPLORATORY_STOP_REASONS } from './rese
 export {
   assembleReport,
   reviseUnsupportedKeyClaims,
+  reviseNarrativeDocument,
   shouldMoveWeakKeyClaim,
+  shouldMoveWeakPremiseFact,
+  stripEmptyNarrativeSections,
   keepNarrativeSections,
   containsSourceDump,
   normalizeCaveatKey,
@@ -203,7 +251,24 @@ export {
   validateNarrativeObject,
   renderNarrativeMarkdown,
   parseNarrativeResponse,
+  parseMarkdownNarrative,
+  normalizeNarrativeDocument,
+  containsSourceDump as narrativeContainsSourceDump,
 } from './research/report-narrative.mjs';
+export {
+  REPORT_CONTRACT_VERSION,
+  buildReportContract,
+  formatContractPromptBlock,
+} from './research/report-contract.mjs';
+export {
+  REPORT_PLAN_VERSION,
+  buildReportPlan,
+  validateReportPlan,
+  mergeNarrativeIntoPlan,
+  ensureKeyFindingPlacements,
+  flattenPlanClaims,
+  documentFromPlan,
+} from './research/report-plan.mjs';
 export {
   shouldJudgeClaim,
   applyEntailmentVerdict,
@@ -225,6 +290,10 @@ export {
   classifyClaimSection,
   resolveClaimKindFromHeadingStack,
   extractQualityClaims,
+  extractClaimsFromDocument,
+  mergeCanonicalClaims,
+  placementFromSection,
+  normalizedClaimKey,
   splitAtomicClaimTexts,
   aggregateEvidenceVerdict,
   buildClaimEvaluation,
@@ -238,5 +307,6 @@ export {
   registerContentFetchHandler,
   resetContentFetchHandlers,
   resolveUrlContent,
+  resolveContentFetchImpl,
   getContentFetchHandlers,
 } from './research/content-resolver.mjs';

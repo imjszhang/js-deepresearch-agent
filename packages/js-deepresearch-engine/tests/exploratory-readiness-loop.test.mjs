@@ -11,7 +11,7 @@ import { defaultSearchQueryPlan } from './helpers/search-query-planner-mock.mjs'
 import { allowedSiteHosts, validatePlannedQuery } from '../src/research/search-query-planner.mjs';
 
 function report() {
-  return '# Research Report\n\n## Summary\n\nThe selected source provides enough evidence to answer the requested topic while keeping the agent source choice visible. [1.1]\n\n## Key Findings\n\nThe selected source provides evidence for the requested topic and preserves agent source choice. [1.1]';
+  return '# Research Report\n\n## Summary\n\nThe selected source provides enough evidence to answer the requested topic while keeping the agent source choice visible after the exploration loop stops. [1.1]\n\n## Key Findings\n\nThe selected source provides evidence for the requested topic and preserves agent source choice in the labeled narrative. [1.1]';
 }
 
 const HKEX_PROFILE = {
@@ -824,6 +824,51 @@ describe('exploratory Search-Read-Reason loop', () => {
     assert.ok(result.quality.limitations.some((line) => /blocked slots/i.test(line)));
   });
 
+  it('does not mark repair exhausted below the token floor before an explicit safety cap fires', async () => {
+    let decisions = 0;
+    const result = await new ResearchRunner().run({
+      query: 'SubjectA official status',
+      settings: { llm: {}, search: {}, research: {
+        strategy: 'exploratory',
+        exploratory: {
+          minLlmTokens: 600000,
+          maxLlmTokens: 1000000,
+          maxSteps: 4,
+          maxQueriesPerStep: 2,
+          maxRepairFailuresPerGap: 1,
+          maxConsecutiveInvalidSteps: 100,
+          autoReadTopK: 0,
+        },
+        focused: { fetchMode: 'disabled' },
+      } },
+      search: { async search() { return []; } },
+      llm: {
+        async complete({ purpose, messages }) {
+          if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
+          if (purpose === 'research_profile') {
+            return JSON.stringify({
+              entities: ['SubjectA'],
+              requiredAnswerSlots: [{ answerSlot: 'official_status', question: 'SubjectA official status' }],
+            });
+          }
+          if (purpose === 'agent_decision') {
+            decisions += 1;
+            return JSON.stringify({ action: 'search', query: 'SubjectA official status', gapId: 'gap-1' });
+          }
+          if (purpose === 'gap_support') return JSON.stringify({ judgments: [] });
+          return report();
+        },
+      },
+    });
+    assert.equal(result.quality.stopReason, 'safety_cap');
+    assert.notEqual(result.quality.stopDetail, 'repair_exhausted');
+    assert.ok(decisions >= 2);
+    assert.ok(!(result.gaps || []).some((gap) => gap.blockedReason === 'repair_exhausted'));
+    assert.ok(result.trace.some((entry) => (
+      entry.action === 'stop' && ['max_steps', 'safety_cap'].includes(entry.reasonCode)
+    )));
+  });
+
   it('rejects empty bullets during report validation', () => {
     const check = emptyBulletLines('# Research Report\n\n## Key Findings\n-\n- Real finding [1.1]\n');
     assert.equal(check.length, 1);
@@ -968,5 +1013,80 @@ describe('exploratory Search-Read-Reason loop', () => {
     assert.equal(result.quality.stopReason, 'safety_cap');
     assert.equal(result.quality.completionStatus, 'incomplete');
     assert.ok(['pass_with_warnings', 'fail', 'pass'].includes(result.quality.gate));
+  });
+
+  it('stops with repair_exhausted when required slots are blocked and planner failure is null', async () => {
+    const result = await new ResearchRunner().run({
+      query: 'Anthropic Commerce Agents official design',
+      settings: { llm: {}, search: {}, research: {
+        strategy: 'exploratory',
+        exploratory: {
+          minLlmTokens: 0,
+          maxLlmTokens: 0,
+          maxSteps: 8,
+          maxRepairFailuresPerGap: 1,
+          maxConsecutiveInvalidSteps: 100,
+          autoReadTopK: 0,
+        },
+        focused: { fetchMode: 'disabled' },
+      } },
+      search: { async search() { return []; } },
+      llm: llmFor([
+        { action: 'search', query: 'Anthropic Commerce Agents official design', queryOrigin: 'user_query', gapId: 'gap-2' },
+        { action: 'read', sourceIds: ['https://missing.test'], gapId: 'gap-2', reasonCode: 'repeat_read' },
+        { action: 'read', sourceIds: ['https://missing.test'], gapId: 'gap-2', reasonCode: 'repeat_read' },
+        { action: 'read', sourceIds: ['https://missing.test'], gapId: 'gap-2', reasonCode: 'repeat_read' },
+        { action: 'search', query: 'Anthropic Commerce Agents official design', queryOrigin: 'user_query', gapId: 'gap-2' },
+      ], {
+        onProfile: () => JSON.stringify({
+          requiredAnswerSlots: [{
+            answerSlot: 'judgment_on_commerce_agents_design',
+            question: 'Anthropic Commerce Agents official design',
+            evidenceCriteria: ['first_party'],
+            priority: 'critical',
+          }],
+        }),
+      }),
+    });
+    assert.equal(result.quality.stopReason, 'safety_cap');
+    assert.ok(['repair_exhausted', 'query_planner_exhausted'].includes(result.quality.stopDetail));
+    assert.notEqual(result.quality.stopDetail, 'loop_exception');
+  });
+
+  it('keeps writing artifacts when the search planner throws after a completed call', async () => {
+    let plans = 0;
+    const base = llmFor([
+      { action: 'search', query: 'commerce agents planner crash', gapId: 'gap-1', reasonCode: 'search' },
+      { action: 'search', query: 'commerce agents follow-up', gapId: 'gap-1', reasonCode: 'search' },
+      { action: 'answer', reasonCode: 'done' },
+    ]);
+    const result = await new ResearchRunner().run({
+      query: 'commerce agents planner crash',
+      settings: { llm: {}, search: {}, research: {
+        strategy: 'exploratory',
+        exploratory: { minLlmTokens: 0, maxLlmTokens: 0, maxSteps: 6, maxEvaluationRetries: 0, autoReadTopK: 0 },
+        focused: { fetchMode: 'disabled' },
+      } },
+      search: { async search() {
+        return [{ title: 'Reprint', url: 'https://example.test/commerce-agents', snippet: 'secondary coverage' }];
+      } },
+      llm: {
+        async complete(args) {
+          if (args.purpose === 'search_query_planning') {
+            plans += 1;
+            if (plans >= 2) {
+              throw new TypeError("Cannot read properties of null (reading 'reason')");
+            }
+          }
+          return base.complete(args);
+        },
+      },
+    });
+    assert.ok(result.quality);
+    assert.notEqual(result.quality.stopReason, null);
+    assert.ok(
+      result.quality.stopDetail === 'loop_exception'
+      || result.trace.some((entry) => entry.failure === 'planner_exception' || entry.reasonCode === 'planner_exception'),
+    );
   });
 });

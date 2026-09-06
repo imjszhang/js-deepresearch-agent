@@ -104,6 +104,7 @@ async function enrichWave(findings, context, focused, readPolicy, state) {
       maxUrlsPerIteration: focused.maxUrlsPerIteration,
       maxUrlsTotal: focused.maxUrlsTotal,
       maxContentChars: readPolicy.maxContentChars,
+      maxFetchChars: readPolicy.maxFetchChars,
       enrichConcurrency: readPolicy.enrichConcurrency,
       llm: context.llm,
       signal: context.signal,
@@ -115,6 +116,7 @@ async function enrichWave(findings, context, focused, readPolicy, state) {
       entities: context.brief?.entities || [],
       entityAliases: context.brief?.entityAliases || [],
       observedHosts: [...(state?.observedHosts || [])],
+      recorder: context.recorder,
     });
   const enrichedByUrl = new Map((enriched[0]?.sources || []).map((source) => [canonicalUrl(source), source]));
   return applyBodyClassification(findings.map((finding) => ({
@@ -132,6 +134,8 @@ async function syncState(state, findings, { llm, signal, query, trace } = {}) {
     query: query || state.query,
     gaps: state.gaps,
     findings,
+    brief: state.brief,
+    profile: state.profile,
     cache: state.slotSupportCache,
   });
   applySlotSupportJudgments(state.gaps, support.judgments);
@@ -147,6 +151,16 @@ async function syncState(state, findings, { llm, signal, query, trace } = {}) {
       cacheHits: support.cacheHits,
       cacheMisses: support.cacheMisses,
       gapIds: support.judgments.map((item) => item.gapId).filter(Boolean),
+      selectedSourceIds: (support.selections || []).flatMap((item) => item.selectedSourceIds || []),
+      evidenceTypes: (support.selections || []).flatMap((item) => item.evidenceTypes || []),
+      missingCriteria: (support.selections || []).flatMap((item) => item.missingCriteria || []),
+      selections: (support.selections || []).map((item) => ({
+        gapId: item.gapId,
+        selectedSourceIds: item.selectedSourceIds,
+        evidenceTypes: item.evidenceTypes,
+        missingCriteria: item.missingCriteria,
+        cacheHit: item.cacheHit,
+      })),
     });
   }
   return evaluateReadinessGate({
@@ -213,6 +227,7 @@ export async function runFocusedPipeline(context) {
     budget,
     queryMemory,
     trace = [],
+    recorder,
   } = context;
 
   const focused = resolveFocusedSettings(settings);
@@ -248,6 +263,14 @@ export async function runFocusedPipeline(context) {
       failures: gate.failures,
     });
     budget?.setControllerStopReason?.('contract_unavailable');
+    recorder?.checkpoint?.(
+      'focused-contract-unavailable',
+      state.exportCheckpoint({
+        queryMemory,
+        focusedLocal: { wave: 'contract', queryProvenance: {} },
+      }),
+      { strategy: 'focused', traceLength: trace.length },
+    );
     return attachControl([], {
       schemaVersion: 1,
       brief,
@@ -274,6 +297,21 @@ export async function runFocusedPipeline(context) {
     plannerFailures: 0,
     plannedQueries: 0,
   };
+  const checkpointState = (boundary, focusedLocal = {}) => recorder?.checkpoint?.(
+    boundary,
+    state.exportCheckpoint({
+      queryMemory,
+      focusedLocal: {
+        queryProvenance,
+        ...focusedLocal,
+      },
+    }),
+    {
+      strategy: 'focused',
+      traceLength: trace.length,
+    },
+  );
+  checkpointState('focused-contract-complete', { wave: 'contract' });
   const planWaveQueries = async (wave, targets) => {
     if (!targets.length) return [];
     const mode = wave === 'challenge' ? 'challenge' : (wave === 'repair' ? 'repair' : 'initial');
@@ -448,11 +486,16 @@ export async function runFocusedPipeline(context) {
     emit({ stage: 'enriching_sources', iteration: wave === 'discovery' ? 1 : 2, iterations: 2 });
     const enriched = await enrichWave(selected, context, focused, readPolicy, state);
     findings.push(...enriched);
+    state.findings = findings;
     addTrace(trace, 'search_wave_merged', {
       reasonCode: `${wave}_merge`,
       wave,
       findingCount: enriched.length,
       sourceCount: enriched.reduce((sum, finding) => sum + (finding.sources || []).length, 0),
+    });
+    checkpointState('focused-wave-complete', {
+      wave,
+      targetGapIds: targets.map((gap) => gap.id),
     });
     return enriched;
   };
@@ -463,6 +506,10 @@ export async function runFocusedPipeline(context) {
     reasonCode: gate.pass ? 'evidence_sufficient' : 'repair_required',
     strategy: 'focused',
     failures: gate.failures,
+  });
+  checkpointState('focused-readiness-evaluated', {
+    wave: 'discovery',
+    readinessPass: gate.pass,
   });
 
   const iterationLimit = focused.iterationControl.enabled
@@ -505,6 +552,11 @@ export async function runFocusedPipeline(context) {
     const bodyUrlsBeforeRepair = bodyUrlsFromFindings(findings);
     await executeWave('repair', repairTargets);
     gate = await syncState(state, findings, { llm, signal, query, trace });
+    checkpointState('focused-readiness-evaluated', {
+      wave: 'repair',
+      waveIndex,
+      readinessPass: gate.pass,
+    });
     latestMarginal = waveMetrics(bodyUrlsBeforeRepair, findings, gapsBeforeRepair, state.gaps);
     consecutiveLowYield = latestMarginal.plateau ? consecutiveLowYield + 1 : 0;
     addTrace(trace, 'plateau_evaluated', {
@@ -521,6 +573,10 @@ export async function runFocusedPipeline(context) {
   if (challengeTargets.length && (!budget || budget.canClaim('searchRequests'))) {
     await executeWave('challenge', challengeTargets);
     gate = await syncState(state, findings, { llm, signal, query, trace });
+    checkpointState('focused-readiness-evaluated', {
+      wave: 'challenge',
+      readinessPass: gate.pass,
+    });
     addTrace(trace, 'challenge_completed', {
       reasonCode: 'bounded_consequential_claim_challenge',
       targetGapIds: challengeTargets.map((gap) => gap.id),
@@ -562,6 +618,12 @@ export async function runFocusedPipeline(context) {
       maxSourcesForReport: focused.maxSourcesForReport,
     });
   }
+  state.findings = findings;
+  checkpointState('focused-pipeline-complete', {
+    wave: 'complete',
+    readinessPass: gate.pass,
+    stopReason,
+  });
   return attachControl(findings, {
     schemaVersion: 1,
     brief,

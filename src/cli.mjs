@@ -2,6 +2,10 @@
 import './config/bootstrap-env.mjs';
 import path from 'node:path';
 import {
+  loadRecordedCallExchange,
+  replayRecordedLlmCall,
+} from 'js-deepresearch-engine';
+import {
   askWiki,
   compileWiki,
   initWiki,
@@ -56,6 +60,11 @@ async function main(argv) {
 
   if (command === 'history') {
     historyCommand(rest);
+    return;
+  }
+
+  if (command === 'replay') {
+    await replayCommand(rest);
     return;
   }
 
@@ -135,6 +144,41 @@ function historyCommand(argv) {
   }
 
   throw new Error(`Unknown history command: ${subcommand}`);
+}
+
+async function replayCommand(argv) {
+  const { args, flags } = parseArgs(argv);
+  const sessionDir = args[0];
+  const callId = flags.call;
+  const live = Boolean(flags.live);
+  const offline = Boolean(flags.offline);
+  if (!sessionDir || !callId || live === offline) {
+    throw new Error('Usage: js-deepresearch-agent replay <sessionDir> --call <llm-call-id> (--live|--offline) [--json]');
+  }
+  if (offline) {
+    const exchange = loadRecordedCallExchange({ sessionDir, callId });
+    if (flags.json) {
+      console.log(JSON.stringify(exchange, null, 2));
+      return;
+    }
+    const text = exchange.result?.response?.text;
+    if (text !== undefined && text !== null) {
+      console.log(text);
+      return;
+    }
+    console.log(JSON.stringify(exchange.result, null, 2));
+    return;
+  }
+  const result = await replayRecordedLlmCall({
+    sessionDir,
+    callId,
+    settings: settingsFromFlags(flags),
+  });
+  if (flags.json) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+  console.log(result.response.text);
 }
 
 async function intelCommand(argv) {
@@ -396,6 +440,7 @@ Commands:
   config set <key> <value>
   history [list]
   history show <researchId>
+  replay <sessionDir> --call <llm-call-id> (--live|--offline) [--json]
   intel list [--limit 20] [--intel-dir data/intel] [--json]
   intel show <researchId> [--json]
   intel sources <researchId> [--limit 20] [--json]

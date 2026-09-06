@@ -47,12 +47,16 @@ export function loadArtifacts(workDir) {
     return [name, fs.existsSync(file) ? readJsonFile(file) : fallback];
   }));
 
+  const reportPlanFile = path.join(resolvedDir, 'report-plan.json');
+  const reportPlan = fs.existsSync(reportPlanFile) ? readJsonFile(reportPlanFile) : null;
+
   return {
     workDir: resolvedDir,
     meta,
     findings,
     sources,
     report,
+    reportPlan,
     ...optional,
   };
 }

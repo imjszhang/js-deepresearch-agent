@@ -1,8 +1,8 @@
 import { parseCitations } from './citations.mjs';
 
-export const QUALITY_METRICS_VERSION = 3;
-export const CLAIM_EXTRACTION_VERSION = 5;
-export const CLAIM_EVALUATION_VERSION = 4;
+export const QUALITY_METRICS_VERSION = 4;
+export const CLAIM_EXTRACTION_VERSION = 7;
+export const CLAIM_EVALUATION_VERSION = 5;
 
 export const FACT_CLAIM_KINDS = new Set(['key_claim']);
 export const CLAIM_VERDICTS = Object.freeze([
@@ -17,6 +17,10 @@ const SECTION_ALIASES = Object.freeze({
   key_claim: [
     'summary', 'executive summary', 'key findings', 'findings', 'conclusion',
     '摘要', '总结', '概述', '关键发现', '核心发现', '主要发现', '核心结论', '结论',
+  ],
+  premise_fact: [
+    'confirmed background facts', 'background facts', 'background context',
+    '已确认背景事实', '背景事实', '已核实背景', '背景信息',
   ],
   evidence_entry: ['evidence', 'analysis', 'details', '证据', '分析', '详细信息'],
   caveat: ['caveats', 'limitations', 'risks', '局限', '限制', '风险', '注意事项'],
@@ -71,11 +75,28 @@ function stripMarkdownDecorators(text = '') {
     .trim();
 }
 
-function normalizedClaimKey(text = '') {
+export function normalizedClaimKey(text = '') {
   return stripMarkdownDecorators(text)
     .replace(/\s+/g, ' ')
     .replace(/[.!?。！？]+$/, '')
     .toLowerCase();
+}
+
+const SUMMARY_ALIASES = new Set(['summary', 'executive summary', '摘要', '总结', '概述']);
+
+export function placementFromSection(section = '', kind = '') {
+  if (kind === 'premise_fact') return 'background';
+  if (kind === 'caveat') return 'caveats';
+  if (kind === 'recommendation') return 'recommendations';
+  if (kind === 'evidence_entry') return 'evidence';
+  const normalized = normalizeHeading(section);
+  if (SUMMARY_ALIASES.has(normalized) || [...SUMMARY_ALIASES].some((alias) => (
+    normalized.startsWith(`${alias}:`) || normalized.startsWith(`${alias}：`)
+  ))) {
+    return 'summary';
+  }
+  if (kind === 'key_claim') return 'key_findings';
+  return 'other';
 }
 
 function isSourceEntryText(text = '') {
@@ -189,17 +210,21 @@ export function extractQualityClaims(report = '') {
     const cleaned = stripMarkdownDecorators(text);
     if (cleaned.length < 8 || isSourceEntryText(cleaned)) return;
     const atoms = splitAtomicClaimTexts(cleaned);
+    const placement = placementFromSection(section, kind);
     for (const atom of atoms) {
       const key = normalizedClaimKey(atom.text);
-      if (!key || atom.text.length < 8 || seen.has(key)) continue;
-      seen.add(key);
+      const occurrenceKey = `${kind}|${normalizeHeading(section)}|${key}`;
+      if (!key || atom.text.length < 8 || seen.has(occurrenceKey)) continue;
+      seen.add(occurrenceKey);
       claims.push({
         section,
         text: atom.text,
         lineStart,
         kind,
-        importance: kind === 'key_claim' ? 'key' : 'supporting',
+        importance: kind === 'key_claim' ? 'key' : (kind === 'premise_fact' ? 'premise' : 'supporting'),
         citationKeys: atom.citationKeys,
+        placements: [placement],
+        canonicalClaimId: `canon:${kind}:${key}`,
         ...(atom.text !== cleaned ? { parentClaimText: cleaned } : {}),
       });
     }
@@ -262,7 +287,8 @@ export function aggregateEvidenceVerdict(evidence = []) {
 
 function constrainVerdict(verdict, flags = []) {
   if (flags.includes('uncited') || flags.includes('unresolved_citation') || flags.includes('as_of_incompatible')
-    || flags.includes('slot_blocked') || flags.includes('slot_limited')) {
+    || flags.includes('slot_blocked') || flags.includes('slot_limited')
+    || flags.includes('slot_premise_rejected')) {
     return 'unverifiable';
   }
   if (flags.includes('missing_direct_evidence') && ['supported', 'partially_supported'].includes(verdict)) {
@@ -309,7 +335,7 @@ export function normalizeClaim(claim = {}, options = {}) {
   return {
     ...claim,
     kind,
-    importance: kind === 'key_claim' ? 'key' : (claim.importance || 'supporting'),
+    importance: kind === 'key_claim' ? 'key' : (kind === 'premise_fact' ? 'premise' : (claim.importance || 'supporting')),
     evaluation,
   };
 }
@@ -330,11 +356,87 @@ export function selectCountableClaims(claims = []) {
   return claims.filter((claim) => !isCompoundParentClaim(claim, claims));
 }
 
+export function mergeCanonicalClaims(claims = []) {
+  const groups = new Map();
+  let fallback = 0;
+  for (const claim of claims) {
+    const textKey = normalizedClaimKey(claim.text);
+    const key = claim.canonicalClaimId
+      || (textKey ? `${claim.kind || ''}:${textKey}` : `occurrence:${fallback}`);
+    fallback += 1;
+    const existing = groups.get(key);
+    const placement = (claim.placements || [])[0] || placementFromSection(claim.section, claim.kind);
+    if (!existing) {
+      groups.set(key, {
+        ...claim,
+        canonicalClaimId: key,
+        placements: [...new Set([...(claim.placements || []), placement].filter(Boolean))],
+      });
+      continue;
+    }
+    existing.placements = [...new Set([...(existing.placements || []), placement].filter(Boolean))];
+    if (placement === 'key_findings' && placementFromSection(existing.section, existing.kind) === 'summary') {
+      existing.section = claim.section;
+    }
+  }
+  return [...groups.values()];
+}
+
+export function extractClaimsFromDocument(document = {}) {
+  const claims = [];
+  const push = (text, kind, placement, section, extras = {}) => {
+    const cleaned = stripMarkdownDecorators(text);
+    if (cleaned.length < 8 || isSourceEntryText(cleaned)) return;
+    const atoms = splitAtomicClaimTexts(cleaned);
+    for (const atom of atoms) {
+      const key = normalizedClaimKey(atom.text);
+      if (!key || atom.text.length < 8) continue;
+      claims.push({
+        section,
+        text: atom.text,
+        kind,
+        importance: kind === 'key_claim' ? 'key' : (kind === 'premise_fact' ? 'premise' : 'supporting'),
+        citationKeys: atom.citationKeys,
+        placements: extras.placements || [placement],
+        canonicalClaimId: extras.canonicalClaimId || `canon:${kind}:${key}`,
+        ...(atom.text !== cleaned ? { parentClaimText: cleaned } : {}),
+        ...extras,
+      });
+    }
+  };
+
+  for (const text of Array.isArray(document.summary) ? document.summary : []) {
+    push(text, 'key_claim', 'summary', 'Summary');
+  }
+  for (const text of Array.isArray(document.backgroundFacts) ? document.backgroundFacts : []) {
+    push(text, 'premise_fact', 'background', 'Confirmed Background Facts');
+  }
+  for (const group of Array.isArray(document.keyFindings) ? document.keyFindings : []) {
+    const heading = group.heading || 'Key Findings';
+    for (const claim of group.claims || []) {
+      const text = typeof claim === 'string' ? claim : claim?.text;
+      push(text, typeof claim === 'object' && claim?.kind ? claim.kind : 'key_claim', 'key_findings', heading, typeof claim === 'object' && claim ? {
+        id: claim.id,
+        boundSlotIds: claim.boundSlotIds,
+        origin: claim.origin,
+        claimRole: claim.claimRole,
+        placements: claim.placements || ['key_findings'],
+        canonicalClaimId: claim.canonicalClaimId,
+      } : {});
+    }
+  }
+  for (const text of Array.isArray(document.caveats) ? document.caveats : []) {
+    push(text, 'caveat', 'caveats', 'Caveats');
+  }
+  return claims;
+}
+
 export function calculateQualityMetrics(claims = []) {
   const normalized = claims.map((claim) => normalizeClaim(claim));
-  const countable = selectCountableClaims(normalized);
+  const countable = mergeCanonicalClaims(selectCountableClaims(normalized));
   const facts = countable.filter((claim) => FACT_CLAIM_KINDS.has(claim.kind));
   const keyClaims = facts.filter((claim) => claim.kind === 'key_claim');
+  const premiseFacts = countable.filter((claim) => claim.kind === 'premise_fact');
   const supportingClaims = countable.filter((claim) => claim.kind === 'supporting_claim');
   const verdicts = Object.fromEntries(CLAIM_VERDICTS.map((verdict) => [verdict, 0]));
   for (const claim of facts) verdicts[claim.evaluation.verdict] += 1;
@@ -350,6 +452,8 @@ export function calculateQualityMetrics(claims = []) {
     claimCount: countable.length,
     evaluatedClaimCount: facts.length,
     keyClaimCount: keyClaims.length,
+    premiseFactCount: premiseFacts.length,
+    premiseFactSupportedCount: premiseFacts.filter((claim) => claim.evaluation?.verdict === 'supported').length,
     supportingClaimCount: supportingClaims.length,
     evidenceEntryCount: countable.filter((claim) => claim.kind === 'evidence_entry').length,
     caveatCount: countable.filter((claim) => claim.kind === 'caveat').length,
@@ -371,12 +475,16 @@ export function calculateQualityMetrics(claims = []) {
       unverifiableRate: rate(verdicts.unverifiable, facts.length),
       conflictingRate: rate(verdicts.conflicting, facts.length),
       keyClaimSupportedRate: rate(supportedKeys, keyClaims.length),
+      premiseFactSupportedRate: rate(
+        premiseFacts.filter((claim) => claim.evaluation?.verdict === 'supported').length,
+        premiseFacts.length,
+      ),
     },
   };
 }
 
 export function qualityGateFromClaims(claims = []) {
-  const normalized = selectCountableClaims(claims.map((claim) => normalizeClaim(claim)));
+  const normalized = mergeCanonicalClaims(selectCountableClaims(claims.map((claim) => normalizeClaim(claim))));
   const keyClaims = normalized.filter((claim) => claim.kind === 'key_claim');
   if (normalized.length === 0) return 'fail';
   if (keyClaims.length === 0) return 'pass_with_warnings';

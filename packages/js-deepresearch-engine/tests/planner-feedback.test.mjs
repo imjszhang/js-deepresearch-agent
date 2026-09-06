@@ -24,6 +24,11 @@ describe('planner feedback', () => {
       queryMemoryEntries: [{ query: 'empty angle', status: 'empty' }],
     });
     assert.ok(feedback.rejectedQueries.some((item) => item.reason === 'site_filtered_all'));
+    const withNulls = buildPlannerFeedback({
+      filteredQueries: [null, { query: 'site:example.test 智谱', reason: 'site_filtered_all' }],
+    });
+    assert.equal(withNulls.rejectedQueries.length, 1);
+    assert.equal(withNulls.rejectedQueries[0].reason, 'site_filtered_all');
     assert.ok(feedback.rejectedQueries.some((item) => item.duplicateOf === '智谱 招股书'));
     assert.equal(feedback.recentSearchOutcomes[0].outcome, 'site_filtered_all');
     assert.deepEqual(feedback.recentSearchOutcomes[0].respondedEngines, ['bing']);

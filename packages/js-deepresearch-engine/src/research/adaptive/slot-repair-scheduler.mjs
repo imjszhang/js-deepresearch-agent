@@ -1,3 +1,4 @@
+import { isRepairTerminal } from '../gap-state.mjs';
 import { repairGapsFromGate } from './readiness-gate.mjs';
 
 function unique(values) {
@@ -8,7 +9,7 @@ function targetScore(gap) {
   let score = 0;
   if (gap.priority === 'critical') score += 100;
   if (gap.requiredSlot) score += 50;
-  if ((gap.missingEvidence || []).some((item) => /required_host|required_source|primary_filing/.test(item))) score += 30;
+  if ((gap.missingEvidence || []).some((item) => /required_host|required_source|primary_filing|criterion:/.test(item))) score += 30;
   if (['body_read', 'limited', 'conflicting'].includes(gap.status)) score += 20;
   score -= Number(gap.repairFailures) || 0;
   return score;
@@ -16,7 +17,7 @@ function targetScore(gap) {
 
 export function rankSlotRepairTargets(gate = {}, gaps = []) {
   return repairGapsFromGate(gate || {}, gaps)
-    .filter((gap) => gap.status !== 'blocked')
+    .filter((gap) => !isRepairTerminal(gap))
     .map((gap, index) => ({ gap, index, score: targetScore(gap) }))
     .sort((left, right) => right.score - left.score || left.index - right.index)
     .map((item) => item.gap);
@@ -34,7 +35,7 @@ export function nextSlotRepairAction(state, {
 } = {}) {
   const targets = rankSlotRepairTargets(readiness, state?.gaps || []);
   const blockedWithUnread = (state?.gaps || []).filter((gap) => (
-    gap.status === 'blocked' && !gap.rollup && (state.pickPolicyReads?.(2, gap.id) || []).length
+    isRepairTerminal(gap) && !gap.rollup && (state.pickPolicyReads?.(2, gap.id) || []).length
   ));
   for (const gap of [...targets, ...blockedWithUnread]) {
     const unread = state.pickPolicyReads?.(2, gap.id) || [];
@@ -47,7 +48,7 @@ export function nextSlotRepairAction(state, {
         repairTarget: gap.id,
       };
     }
-    if (gap.status === 'blocked') continue;
+    if (isRepairTerminal(gap)) continue;
     return {
       action: 'search',
       gapId: gap.id,

@@ -6,7 +6,7 @@ import { buildAngleChangeSearch, fallbackAdaptiveAction } from '../src/research/
 import { defaultSearchQueryPlan } from './helpers/search-query-planner-mock.mjs';
 
 function report() {
-  return '# Research Report\n\n## Summary\n\nThe selected source provides enough evidence to answer the requested topic while keeping the agent source choice visible. [1.1]\n\n## Key Findings\n\nThe selected source provides evidence for the requested topic and preserves agent source choice. [1.1]';
+  return '# Research Report\n\n## Summary\n\nThe selected source provides enough evidence to answer the requested topic while keeping the agent source choice visible after the exploration loop stops. [1.1]\n\n## Key Findings\n\nThe selected source provides evidence for the requested topic and preserves agent source choice in the labeled narrative. [1.1]';
 }
 
 function defaultContractProfile(extra = {}) {
@@ -86,6 +86,33 @@ describe('exploratory agent loop', () => {
     // A search that returned zero results may be retried with a new query.
     state.observations.push({ type: 'search_result', query: 'empty query', resultCount: 0 });
     assert.equal(state.validate({ action: 'search', query: 'different query' }), null);
+  });
+
+  it('keeps eligible sources when a mixed read batch also contains a rejected source', () => {
+    const state = new ResearchState({ query: 'topic', maxSteps: 10 });
+    state.addCandidates([
+      { url: 'https://eligible.test', title: 'Eligible' },
+      { url: 'https://rejected.test', title: 'Rejected' },
+    ], 'gap-1');
+    state.candidates.get('https://eligible.test').gapMatches['gap-1'].relevanceDecision = {
+      accepted: true,
+      reasonCode: 'relevance_accepted',
+    };
+    state.candidates.get('https://rejected.test').gapMatches['gap-1'].relevanceDecision = {
+      accepted: false,
+      reasonCode: 'entity_mismatch',
+    };
+
+    assert.equal(state.validate({
+      action: 'read',
+      gapId: 'gap-1',
+      sourceIds: ['https://rejected.test', 'https://eligible.test'],
+    }), null);
+    assert.equal(state.validate({
+      action: 'read',
+      gapId: 'gap-1',
+      sourceIds: ['https://rejected.test'],
+    }), 'entity_mismatch');
   });
 
   it('accumulates freq, caps candidates per hostname and exposes knowledge in snapshots', () => {
@@ -961,7 +988,7 @@ describe('exploratory agent loop', () => {
     registerContentFetchHandler(async (_url, context) => ({
       status: 'ok',
       title: context.source?.title || 'Source',
-      content: context.source?.content || 'Official body evidence with enough characters to count as a successful fetched page.',
+      content: `${context.source?.content || 'Official page'} Additional official body evidence with enough characters to count as a successful fetched page.`,
       backend: 'test',
     }));
     let searchIndex = 0;
@@ -996,11 +1023,14 @@ describe('exploratory agent loop', () => {
           return [1, 2, 3].map((n) => ({
             title: `${subject} ${n}`,
             url: `https://${subject}-${n}.example/page`,
-            content: `${subject} official documentation item ${n} with enough fetched body text for evidence.`,
+            content: `${subject} official documentation item ${n} with enough fetched body text for evidence and a longer official statement.`,
             fetchStatus: 'ok',
           }));
         } },
-        llm: llmFor(decisions, { onDecompose: () => 'no json' }),
+        llm: llmFor(decisions, {
+          onDecompose: () => 'no json',
+          onProfile: () => defaultContractProfile({ minIndependentSources: 9 }),
+        }),
       });
       assert.ok(result.quality.budget.usage.sourceReads > 8);
       assert.equal(result.quality.budget.limits.sourceReads, 0);
@@ -1097,5 +1127,102 @@ describe('exploratory agent loop', () => {
     )));
     assert.ok(!result.trace.some((entry) => entry.action === 'reflect' && entry.reasonCode === 'fallback_reflect_gaps'));
     assert.ok(!result.trace.some((entry) => entry.action === 'reflect' && entry.reasonCode === 'should_not_run'));
+  });
+
+  it('retries a URL after a failed fetch instead of treating it as already read', async () => {
+    const { registerContentFetchHandler, resetContentFetchHandlers } = await import('../src/research/content-resolver.mjs');
+    let fetches = 0;
+    registerContentFetchHandler(async (url) => {
+      if (!String(url).includes('github.com/anthropics/commerce-agents')) return { status: 'unsupported' };
+      fetches += 1;
+      if (fetches === 1) return { status: 'failed', error: 'fetch failed' };
+      return {
+        status: 'ok',
+        title: 'commerce-agents',
+        content: 'Reference blueprint for commerce agents. Merchants keep checkout on their own site and retain customer relationships.',
+      };
+    });
+    const decisions = [
+      { action: 'search', query: 'commerce agents github', gapId: 'gap-1', reasonCode: 'search' },
+      { action: 'read', sourceIds: ['https://github.com/anthropics/commerce-agents'], gapId: 'gap-1', reasonCode: 'read_fail' },
+      { action: 'read', sourceIds: ['https://github.com/anthropics/commerce-agents'], gapId: 'gap-1', reasonCode: 'read_retry' },
+      { action: 'answer', reasonCode: 'done' },
+    ];
+    try {
+      const result = await new ResearchRunner().run({
+        query: 'commerce agents github',
+        settings: { llm: {}, search: {}, research: {
+          strategy: 'exploratory',
+          exploratory: { minLlmTokens: 0, maxLlmTokens: 0, maxSteps: 8, maxEvaluationRetries: 0, autoReadTopK: 0 },
+          focused: { fetchMode: 'full', fetchBackend: 'auto' },
+        } },
+        search: { async search() {
+          return [{
+            title: 'commerce-agents',
+            url: 'https://github.com/anthropics/commerce-agents',
+            snippet: 'Reference blueprint',
+          }];
+        } },
+        llm: llmFor(decisions),
+      });
+      assert.ok(fetches >= 2);
+      assert.ok(result.trace.some((entry) => (
+        entry.action === 'read'
+        && entry.reasonCode === 'read_retry'
+        && entry.status !== 'rejected'
+      )));
+      assert.ok(!result.trace.some((entry) => (
+        entry.action === 'read'
+        && entry.reasonCode === 'read_retry'
+        && entry.status === 'rejected'
+        && entry.reasonCode === 'repeat_action'
+      )));
+      const sources = (result.findings || []).flatMap((finding) => finding.sources || [])
+        .filter((item) => String(item.url || item.id).includes('commerce-agents'));
+      assert.ok(sources.some((item) => item.fetchStatus === 'ok' || item.bodyQuality === 'read'));
+    } finally {
+      resetContentFetchHandlers();
+    }
+  });
+
+  it('does not safety-cap on repeat reads while readiness already passed and the token floor is unmet', async () => {
+    const decisions = [
+      { action: 'search', query: 'floor topic', gapId: 'gap-1', reasonCode: 'search' },
+      { action: 'read', sourceIds: ['https://floor-a.test'], gapId: 'gap-1', reasonCode: 'read' },
+      { action: 'read', sourceIds: ['https://floor-a.test'], gapId: 'gap-1', reasonCode: 'read_again' },
+      { action: 'read', sourceIds: ['https://floor-a.test'], gapId: 'gap-1', reasonCode: 'read_again' },
+      { action: 'read', sourceIds: ['https://floor-a.test'], gapId: 'gap-1', reasonCode: 'read_again' },
+      { action: 'read', sourceIds: ['https://floor-a.test'], gapId: 'gap-1', reasonCode: 'read_again' },
+      { action: 'answer', reasonCode: 'done' },
+    ];
+    const result = await new ResearchRunner().run({
+      query: 'floor topic',
+      settings: { llm: {}, search: {}, research: {
+        strategy: 'exploratory',
+        exploratory: {
+          minLlmTokens: 50000,
+          maxLlmTokens: 80000,
+          maxSteps: 12,
+          maxEvaluationRetries: 0,
+          autoReadTopK: 0,
+          maxConsecutiveInvalidSteps: 2,
+        },
+        focused: { fetchMode: 'disabled' },
+      } },
+      search: { async search() {
+        return [{
+          title: 'Floor',
+          url: 'https://floor-a.test',
+          content: 'Floor topic evidence from the official host with enough body text to close the slot.',
+          fetchStatus: 'ok',
+        }];
+      } },
+      llm: llmFor(decisions),
+    });
+    assert.notEqual(result.quality.stopDetail, 'consecutive_invalid_steps');
+    assert.ok(result.trace.some((entry) => (
+      entry.reasonCode === 'below_min_skip_repeat_read'
+      || entry.reasonCode === 'floor_idle_no_new_work'
+    )));
   });
 });

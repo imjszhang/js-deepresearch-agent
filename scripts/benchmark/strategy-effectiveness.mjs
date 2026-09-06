@@ -1,4 +1,10 @@
-import { mapHistoricalStrategy, parseCitations, sourceHasFetchedBody, sourceUsableForAsOf } from 'js-deepresearch-engine';
+import {
+  mapHistoricalStrategy,
+  parseCitations,
+  parseInternalReferenceTokens,
+  sourceHasFetchedBody,
+  sourceUsableForAsOf,
+} from 'js-deepresearch-engine';
 import {
   auditClaim,
   buildAuditCitationMap,
@@ -76,8 +82,8 @@ export function auditReportIntegrity(report = '', query = '') {
       ? `${emptyBullets.length} empty bullet(s).`
       : 'No empty bullets.'),
     check('narrative_present', labeled.length > 0, labeled.length
-      ? 'Summary / Key Findings is present.'
-      : 'Summary / Key Findings is empty.'),
+      ? 'Summary / Background Facts / Key Findings is present.'
+      : 'Summary / Background Facts / Key Findings is empty.'),
     check(
       'narrative_min_chars',
       narrativeChars >= MIN_NARRATIVE_CHARS,
@@ -98,6 +104,7 @@ export function auditReportIntegrity(report = '', query = '') {
 export function auditCitationIntegrity({ report = '', claims = [], citationMap, sources = [] }) {
   const keys = allCitations(report, claims);
   const unresolved = keys.filter((key) => !citationMap.has(key));
+  const internalReferenceTokens = parseInternalReferenceTokens(report);
   const missingIds = [];
   for (const claim of claims) {
     for (const id of claim.citedSourceIds || []) {
@@ -115,6 +122,13 @@ export function auditCitationIntegrity({ report = '', claims = [], citationMap, 
       missingIds.length === 0,
       missingIds.length ? `Missing citedSourceIds: ${missingIds.join(', ')}.` : 'Cited source ids exist.',
     ),
+    check(
+      'no_internal_reference_citations',
+      internalReferenceTokens.length === 0,
+      internalReferenceTokens.length
+        ? `Internal reference tokens presented as citations: ${internalReferenceTokens.join(', ')}.`
+        : 'No internal gap, slot, source, passage, or claim ids are presented as citations.',
+    ),
   ];
   return {
     pass: checks.every((item) => item.pass),
@@ -124,9 +138,11 @@ export function auditCitationIntegrity({ report = '', claims = [], citationMap, 
       resolved: keys.length - unresolved.length,
       unresolved: unresolved.length,
       missingSourceIds: missingIds.length,
+      internalReferenceTokens: internalReferenceTokens.length,
     },
     unresolved,
     missingIds,
+    internalReferenceTokens,
   };
 }
 
@@ -361,6 +377,14 @@ export function evaluateProcessContract(strategy, {
       contractMaterialization.pass,
       contractMaterialization.pass ? 'Brief slots map one-to-one to gaps.' : 'Brief/gap slot mapping is incomplete or ambiguous.',
     ));
+    const incompleteContract = quality?.completionStatus === 'incomplete' || quality?.readiness?.pass === false;
+    checks.push(check(
+      'required_contract_complete',
+      !incompleteContract,
+      incompleteContract
+        ? 'Required research contract is still incomplete; background facts cannot mark the run ready.'
+        : 'Research contract completed or not marked incomplete.',
+    ));
     checks.push(check('source_reads_at_least_one', sourceReads >= 1, `sourceReads=${sourceReads}.`));
     checks.push(check(
       'real_body_or_summary',
@@ -394,6 +418,14 @@ export function evaluateProcessContract(strategy, {
       'contract_slot_materialization',
       contractMaterialization.pass,
       contractMaterialization.pass ? 'Brief slots map one-to-one to gaps.' : 'Brief/gap slot mapping is incomplete or ambiguous.',
+    ));
+    const incompleteContract = quality?.completionStatus === 'incomplete' || quality?.readiness?.pass === false;
+    checks.push(check(
+      'required_contract_complete',
+      !incompleteContract,
+      incompleteContract
+        ? 'Required research contract is still incomplete; background facts cannot mark the run ready.'
+        : 'Research contract completed or not marked incomplete.',
     ));
     const claimedBudgetStop = quality.stopReason === 'budget_exhausted'
       || quality.budget?.controllerStopReason === 'budget_exhausted';
@@ -544,6 +576,9 @@ export function auditStrategyRun({
   const normalizedStrategy = normalizeStrategy(strategy, { meta, trace });
   const citationMap = buildAuditCitationMap({ findings, sources, query });
   const narrativeClaims = selectNarrativeClaims(claims, report, query);
+  const citationClaims = (claims || []).filter((claim) => (
+    claim.kind === 'key_claim' || claim.kind === 'premise_fact' || !claim.kind
+  ));
   const narrative = extractNarrativeText(report, query);
   const labeledNarrative = extractLabeledNarrative(report);
   const mergedUsage = { ...(quality?.budget?.usage || {}), ...usage };
@@ -551,7 +586,7 @@ export function auditStrategyRun({
   const reportIntegrity = auditReportIntegrity(report, query);
   const citationIntegrity = auditCitationIntegrity({
     report,
-    claims: narrativeClaims,
+    claims: citationClaims.length ? citationClaims : narrativeClaims,
     citationMap,
     sources,
   });

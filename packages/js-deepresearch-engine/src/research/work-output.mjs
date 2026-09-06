@@ -7,6 +7,23 @@ import {
 } from './claim-quality.mjs';
 import { publicSearchOptionsSnapshot } from '../search/normalize-search-config.mjs';
 
+function atomicWriteFile(file, content) {
+  const temporary = `${file}.tmp-${process.pid}-${Date.now()}`;
+  try {
+    const fd = fs.openSync(temporary, 'w');
+    try {
+      fs.writeFileSync(fd, content, 'utf8');
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+    fs.renameSync(temporary, file);
+  } catch (error) {
+    try { fs.rmSync(temporary, { force: true }); } catch { /* retain original error */ }
+    throw error;
+  }
+}
+
 function snapshotCorpusDirs(settings = {}) {
   const rawDirs = settings?.search?.local?.dirs;
   if (!Array.isArray(rawDirs) || rawDirs.length === 0) return [];
@@ -50,9 +67,20 @@ export function formatSessionTimestamp(date = new Date()) {
 
 export function createWorkSessionDir({ settings, strategy, cwd = process.cwd(), date = new Date() }) {
   const workDir = resolveWorkDir(settings, cwd);
-  const sessionDir = path.join(workDir, strategy, formatSessionTimestamp(date));
-  fs.mkdirSync(sessionDir, { recursive: true });
-  return sessionDir;
+  const strategyDir = path.join(workDir, strategy);
+  fs.mkdirSync(strategyDir, { recursive: true });
+  const timestamp = formatSessionTimestamp(date);
+  for (let attempt = 0; attempt < 1000; attempt += 1) {
+    const suffix = attempt === 0 ? '' : `-${String(attempt).padStart(3, '0')}`;
+    const sessionDir = path.join(strategyDir, `${timestamp}${suffix}`);
+    try {
+      fs.mkdirSync(sessionDir);
+      return sessionDir;
+    } catch (error) {
+      if (error?.code !== 'EEXIST') throw error;
+    }
+  }
+  throw new Error(`Unable to allocate a unique work session directory for ${strategy}/${timestamp}.`);
 }
 
 export function saveResearchArtifacts({
@@ -77,29 +105,41 @@ export function saveResearchArtifacts({
     claimsPath: path.join(sessionDir, 'claims.json'),
     qualityPath: path.join(sessionDir, 'quality.json'),
     tracePath: path.join(sessionDir, 'trace.json'),
+    reportPlanPath: path.join(sessionDir, 'report-plan.json'),
   };
 
-  fs.writeFileSync(artifacts.reportPath, result.report, 'utf8');
-  fs.writeFileSync(artifacts.findingsPath, JSON.stringify(result.findings, null, 2), 'utf8');
-  fs.writeFileSync(artifacts.sourcesPath, JSON.stringify(result.sources, null, 2), 'utf8');
-  fs.writeFileSync(artifacts.briefPath, JSON.stringify(result.brief || {
+  atomicWriteFile(artifacts.reportPath, result.report);
+  atomicWriteFile(artifacts.findingsPath, JSON.stringify(result.findings, null, 2));
+  atomicWriteFile(artifacts.sourcesPath, JSON.stringify(result.sources, null, 2));
+  atomicWriteFile(artifacts.briefPath, JSON.stringify(result.brief || {
     schemaVersion: 1,
     query,
     depth: strategy,
-  }, null, 2), 'utf8');
-  fs.writeFileSync(artifacts.gapsPath, JSON.stringify(result.gaps || [], null, 2), 'utf8');
-  fs.writeFileSync(artifacts.passagesPath, JSON.stringify(result.passages || [], null, 2), 'utf8');
-  fs.writeFileSync(artifacts.claimsPath, JSON.stringify(result.claims || [], null, 2), 'utf8');
-  fs.writeFileSync(artifacts.qualityPath, JSON.stringify(result.quality || { schemaVersion: 3, gate: 'pass', flags: [] }, null, 2), 'utf8');
-  fs.writeFileSync(artifacts.tracePath, JSON.stringify(result.trace || [], null, 2), 'utf8');
-  fs.writeFileSync(
+  }, null, 2));
+  atomicWriteFile(artifacts.gapsPath, JSON.stringify(result.gaps || [], null, 2));
+  atomicWriteFile(artifacts.passagesPath, JSON.stringify(result.passages || [], null, 2));
+  atomicWriteFile(artifacts.claimsPath, JSON.stringify((result.claims || []).map((claim) => ({
+    ...claim,
+    canonicalClaimId: claim.canonicalClaimId || null,
+    placements: claim.placements || [],
+    boundSlotIds: claim.boundSlotIds || [],
+    origin: claim.origin || claim.evaluation?.origin || null,
+  })), null, 2));
+  atomicWriteFile(artifacts.qualityPath, JSON.stringify(result.quality || { schemaVersion: 4, gate: 'pass', flags: [] }, null, 2));
+  atomicWriteFile(artifacts.tracePath, JSON.stringify(result.trace || [], null, 2));
+  atomicWriteFile(artifacts.reportPlanPath, JSON.stringify(result.reportPlan || {
+    schemaVersion: 1,
+    contract: result.reportContract || null,
+    claims: result.claims || [],
+  }, null, 2));
+  atomicWriteFile(
     artifacts.metaPath,
     JSON.stringify(
       {
         query,
         strategy,
         researchId,
-        artifactSchemaVersion: 3,
+        artifactSchemaVersion: 4,
         researchBrief: result.brief || null,
         qualityMetricsVersion: result.quality?.qualityMetricsVersion || QUALITY_METRICS_VERSION,
         claimExtractionVersion: result.quality?.claimExtractionVersion || CLAIM_EXTRACTION_VERSION,
@@ -112,6 +152,7 @@ export function saveResearchArtifacts({
           claimsPath: artifacts.claimsPath,
           qualityPath: artifacts.qualityPath,
           tracePath: artifacts.tracePath,
+          reportPlanPath: artifacts.reportPlanPath,
         },
         settings: {
           iterations: settings.research?.iterations,
@@ -128,7 +169,6 @@ export function saveResearchArtifacts({
       null,
       2,
     ),
-    'utf8',
   );
 
   return artifacts;

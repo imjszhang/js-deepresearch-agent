@@ -162,4 +162,19 @@ export class UrlPool {
     }
     return kept;
   }
+
+  exportCheckpoint() {
+    return {
+      maxPerHostname: this.maxPerHostname,
+      records: this.values().map((record) => ({ ...record })),
+    };
+  }
+
+  restoreCheckpoint(checkpoint = {}) {
+    this.maxPerHostname = Math.max(1, Number(checkpoint.maxPerHostname) || this.maxPerHostname);
+    this.records = new Map(
+      (checkpoint.records || []).map((record) => [record.id, { ...record }]),
+    );
+    return this;
+  }
 }

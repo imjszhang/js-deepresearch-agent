@@ -33,6 +33,7 @@ export function buildStrategyContext({
   queryMemory,
   trace,
   researchProviders,
+  recorder,
 }) {
   return {
     query,
@@ -50,5 +51,6 @@ export function buildStrategyContext({
     queryMemory,
     trace,
     researchProviders,
+    recorder,
   };
 }

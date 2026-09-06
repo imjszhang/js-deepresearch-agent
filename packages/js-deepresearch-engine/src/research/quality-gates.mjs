@@ -1,4 +1,5 @@
 import { isPrimarySource, normalizeSourceUrl } from './source-candidates.mjs';
+import { evidenceStatusOf } from './gap-state.mjs';
 
 function sourceKey(source) { return normalizeSourceUrl(source?.url) || `${source?.title || ''}:${source?.snippet || ''}`; }
 
@@ -52,28 +53,20 @@ export function evaluatePreReport({ findings = [], gaps = [], query = '' }) {
   if (primaryRequired && !sources.some(isPrimarySource)) flags.push('primary_source_missing');
   const closed = new Set(['resolved', 'verified']);
   const reportableGaps = gaps.filter((gap) => !gap.rollup);
-  const criticalGaps = reportableGaps.filter((gap) => gap.priority === 'critical' && !closed.has(gap.status)).map((gap) => gap.question);
-  const openGaps = reportableGaps.filter((gap) => !closed.has(gap.status));
-  const conflictingGaps = reportableGaps.filter((gap) => gap.status === 'conflicting');
-  const limitedGaps = reportableGaps.filter((gap) => gap.status === 'limited');
+  const criticalGaps = reportableGaps.filter((gap) => gap.priority === 'critical' && !closed.has(evidenceStatusOf(gap))).map((gap) => gap.question);
+  const openGaps = reportableGaps.filter((gap) => !closed.has(evidenceStatusOf(gap)));
+  const conflictingGaps = reportableGaps.filter((gap) => evidenceStatusOf(gap) === 'conflicting');
   if (criticalGaps.length) flags.push('critical_gaps_open');
   if (openGaps.length) flags.push('open_gaps');
   if (conflictingGaps.length) flags.push('conflicting_gaps');
-  const limitations = [...criticalGaps];
-  limitations.push(...conflictingGaps.map((gap) => gap.resolutionReason || `Unresolved disagreement remains for ${gap.question}.`));
-  limitations.push(...limitedGaps.map((gap) => gap.resolutionReason || `Limited evidence for ${gap.question}: ${(gap.missingEvidence || []).join(', ')}.`));
-  if (openGaps.length) limitations.push(`${openGaps.length} research gap${openGaps.length === 1 ? '' : 's'} remain unresolved.`);
-  if (flags.includes('empty_sources')) limitations.push('No usable external sources were found.');
-  if (flags.includes('no_finding_sources')) limitations.push('Research findings are not backed by source records.');
-  if (flags.includes('no_direct_evidence')) limitations.push('Available evidence is limited to search snippets; no source body was successfully read.');
-  if (flags.includes('primary_source_missing')) limitations.push('No primary or official source was available to verify implementation-level claims.');
   return {
     gate: flags.length === 0 ? 'pass' : (sourceCount > 0 ? 'pass_with_warnings' : 'fail'),
     flags,
     criticalGaps,
-    limitations,
+    limitations: [],
     metrics: { findingCount: findings.length, findingsWithSources, sourceCount, directEvidenceSources, openGapCount: openGaps.length },
   };
 }
 
 export { resolveCompletionStatus, slotEvidenceLimitations } from './as-of.mjs';
+export { buildResearchLimitations } from './limitations.mjs';

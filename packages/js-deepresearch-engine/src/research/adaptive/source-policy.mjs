@@ -1,3 +1,4 @@
+import { FIRST_PARTY_RETRIEVAL_TERMS, gapAsksFirstParty } from '../evidence-criteria.mjs';
 import { isFileSourceUrl, sourceDiversityKey } from '../source-candidates.mjs';
 const MULTI_LABEL_PUBLIC_SUFFIXES = new Set([
   'com.cn', 'net.cn', 'org.cn', 'gov.cn',
@@ -202,6 +203,7 @@ export function evaluateSourceRelevance(source = {}, {
     rerankScore: Number.isFinite(rerankScore) ? rerankScore : null,
     threshold: Number.isFinite(threshold) ? threshold : null,
     requiredHostProbe,
+    lowRerank: false,
   };
   if (!enabled) return { ...base, reasonCode: 'relevance_disabled' };
   if (!siteMatch) return { ...base, accepted: false, reasonCode: 'site_constraint_violation' };
@@ -214,7 +216,12 @@ export function evaluateSourceRelevance(source = {}, {
   const shouldApplyThreshold = externalEnabled
     && Number.isFinite(rerankScore) && Number.isFinite(threshold);
   if (shouldApplyThreshold && rerankScore < threshold && !requiredHostProbe) {
-    return { ...base, accepted: false, reasonCode: 'rerank_below_threshold' };
+    return {
+      ...base,
+      accepted: true,
+      reasonCode: 'rerank_below_threshold_soft',
+      lowRerank: true,
+    };
   }
   return base;
 }
@@ -361,7 +368,49 @@ function asScopeTexts(value) {
   return text ? [text] : [];
 }
 
-export function queryMatchesGapScope(query = '', gap = {}, entities = [], extraScope = [], extraAliases = []) {
+function hasBoundedLatinTerm(text, term) {
+  const token = String(term || '').toLowerCase();
+  if (!token) return false;
+  const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?<![a-z0-9])${escaped}(?![a-z0-9])`, 'i').test(text);
+}
+
+function foldEntityHaystack(text) {
+  return String(text || '').normalize('NFKC').toLowerCase().replace(/[-_]+/g, ' ');
+}
+
+function queryContainsEntityAlias(normalizedQuery, entities, extraAliases) {
+  return resolveEntityAliases(entities, extraAliases).some((alias) => {
+    const token = String(alias || '').normalize('NFKC').toLowerCase().trim();
+    return token.length >= 2 && normalizedQuery.includes(token);
+  });
+}
+
+function distinctiveEntityTokens(entities = [], extraAliases = []) {
+  const aliases = resolveEntityAliases(entities, extraAliases)
+    .map((item) => String(item || '').normalize('NFKC').toLowerCase().trim())
+    .filter((item) => item.length >= 2);
+  if (!aliases.length) return [];
+  const longest = aliases.reduce((best, item) => (item.length > best.length ? item : best));
+  if (longest.length < 8 && !/\s/.test(longest)) return [];
+  return uniqueTerms([longest, longest.replace(/\s+/g, '')]);
+}
+
+function queryContainsDistinctiveEntity(normalizedQuery, entities, extraAliases) {
+  const haystack = foldEntityHaystack(normalizedQuery);
+  return distinctiveEntityTokens(entities, extraAliases).some((token) => (
+    token.length >= 2 && haystack.includes(foldEntityHaystack(token))
+  ));
+}
+
+function plannedIntentTargetsGap(gap, evidenceIntent) {
+  const targetGapId = String(evidenceIntent?.targetGapId || '').trim();
+  const gapId = String(gap?.id || '').trim();
+  if (!targetGapId || !gapId) return true;
+  return targetGapId === gapId;
+}
+
+export function queryMatchesGapScope(query = '', gap = {}, entities = [], extraScope = [], extraAliases = [], evidenceIntent = null) {
   let scopeText = [
     gap.question,
     publicScopeField(gap.answerSlot),
@@ -385,7 +434,12 @@ export function queryMatchesGapScope(query = '', gap = {}, entities = [], extraS
   const terms = uniqueTerms([...latin, ...han]);
   if (!terms.length) return true;
   const normalizedQuery = String(query || '').normalize('NFKC').toLowerCase();
-  return terms.some((term) => normalizedQuery.includes(term));
+  if (terms.some((term) => normalizedQuery.includes(term))) return true;
+  if (!gapAsksFirstParty(gap)) return false;
+  if (!plannedIntentTargetsGap(gap, evidenceIntent)) return false;
+  if (!queryContainsEntityAlias(normalizedQuery, entities, extraAliases)) return false;
+  if (FIRST_PARTY_RETRIEVAL_TERMS.some((term) => hasBoundedLatinTerm(normalizedQuery, term))) return true;
+  return queryContainsDistinctiveEntity(normalizedQuery, entities, extraAliases);
 }
 
 export function independentDomainsFromSources(sources = []) {

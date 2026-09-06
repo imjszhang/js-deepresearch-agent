@@ -51,7 +51,7 @@ function resolveEmbedding(config, { fetch } = {}) {
   throw new Error(`Unsupported embedding provider: ${config.provider}`);
 }
 
-function wrapEmbedding(embedding, { onEvent } = {}) {
+function wrapEmbedding(embedding, { onEvent, recorder, nextCallId } = {}) {
   if (!embedding) return null;
   const wrapped = {
     ...embedding,
@@ -61,6 +61,18 @@ function wrapEmbedding(embedding, { onEvent } = {}) {
       const startedAt = Date.now();
       const purpose = options.purpose || 'embed';
       const inputCount = Array.isArray(texts) ? texts.length : 0;
+      const callId = nextCallId?.('embedding') || `embedding-${Date.now()}`;
+      recorder?.callStarted?.({
+        callId,
+        kind: 'embedding',
+        purpose,
+        request: {
+          provider: embedding.provider || null,
+          model: embedding.model || null,
+          texts,
+          options: { ...options, signal: undefined },
+        },
+      });
       onEvent?.({
         operation: 'embed',
         status: 'started',
@@ -81,6 +93,14 @@ function wrapEmbedding(embedding, { onEvent } = {}) {
           durationMs: Date.now() - startedAt,
           fallback: false,
         });
+        recorder?.callFinished?.({
+          callId,
+          kind: 'embedding',
+          purpose,
+          status: 'completed',
+          response: { vectors },
+          durationMs: Date.now() - startedAt,
+        });
         return vectors;
       } catch (error) {
         onEvent?.({
@@ -93,6 +113,14 @@ function wrapEmbedding(embedding, { onEvent } = {}) {
           durationMs: Date.now() - startedAt,
           fallback: true,
           errorCode: error?.code || error?.name || 'EMBEDDING_ERROR',
+        });
+        recorder?.callFinished?.({
+          callId,
+          kind: 'embedding',
+          purpose,
+          status: isAbortError(error) ? 'cancelled' : 'failed',
+          error,
+          durationMs: Date.now() - startedAt,
         });
         throw error;
       }
@@ -107,23 +135,62 @@ function wrapEmbedding(embedding, { onEvent } = {}) {
   return wrapped;
 }
 
-function wrapRerank(primary, fallback, { budget, onEvent } = {}) {
+function wrapRerank(primary, fallback, {
+  budget,
+  onEvent,
+  recorder,
+  nextCallId,
+} = {}) {
   return {
     provider: primary.provider,
     model: primary.model,
     async rerank(args) {
       const startedAt = Date.now();
+      const callId = nextCallId?.('rerank') || `rerank-${Date.now()}`;
+      recorder?.callStarted?.({
+        callId,
+        kind: 'rerank',
+        request: {
+          provider: primary.provider,
+          model: primary.model,
+          args,
+        },
+      });
       onEvent?.({ operation: 'rerank', status: 'started', provider: primary.provider, model: primary.model, inputCount: args.documents?.length || 0 });
       try {
         const result = await primary.rerank(args);
         budget?.recordRerankUsage(result.usage);
         onEvent?.({ operation: 'rerank', status: 'completed', provider: result.provider, model: result.model, inputCount: args.documents?.length || 0, durationMs: result.durationMs, usage: result.usage, degraded: false });
+        recorder?.callFinished?.({
+          callId,
+          kind: 'rerank',
+          status: 'completed',
+          response: result,
+          durationMs: Date.now() - startedAt,
+        });
         return result;
       } catch (error) {
-        if (isAbortError(error) || error?.name === 'BudgetExceededError') throw error;
+        if (isAbortError(error) || error?.name === 'BudgetExceededError') {
+          recorder?.callFinished?.({
+            callId,
+            kind: 'rerank',
+            status: isAbortError(error) ? 'cancelled' : 'failed',
+            error,
+            durationMs: Date.now() - startedAt,
+          });
+          throw error;
+        }
         const result = await fallback.rerank(args);
         const errorCode = error?.code || 'RERANK_PROVIDER_ERROR';
         onEvent?.({ operation: 'rerank', status: 'degraded', provider: primary.provider, model: primary.model, inputCount: args.documents?.length || 0, durationMs: Date.now() - startedAt, errorCode });
+        recorder?.callFinished?.({
+          callId,
+          kind: 'rerank',
+          status: 'degraded',
+          response: result,
+          error,
+          durationMs: Date.now() - startedAt,
+        });
         return { ...result, degraded: true, degradedFrom: primary.provider, errorCode };
       }
     },
@@ -131,14 +198,19 @@ function wrapRerank(primary, fallback, { budget, onEvent } = {}) {
 }
 
 export function createResearchProviders(config = {}, runtime = {}) {
+  let callSequence = 0;
+  const wrappedRuntime = {
+    ...runtime,
+    nextCallId: (kind) => `${kind}-${++callSequence}`,
+  };
   const fetch = runtime.fetch;
   const fallback = new RulesRerankProvider(config.rerank || {});
   const rerank = resolveRerank(config.rerank, { budget: runtime.budget, fetch });
-  const embedding = wrapEmbedding(resolveEmbedding(config.embedding, { fetch }), runtime);
+  const embedding = wrapEmbedding(resolveEmbedding(config.embedding, { fetch }), wrappedRuntime);
   return {
     ...deterministicResearchProviders,
     ...config,
     embedding,
-    rerank: wrapRerank(rerank, fallback, runtime),
+    rerank: wrapRerank(rerank, fallback, wrappedRuntime),
   };
 }

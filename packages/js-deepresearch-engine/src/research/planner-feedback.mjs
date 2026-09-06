@@ -51,7 +51,7 @@ export function buildPlannerFeedback({
   const rejected = [
     ...(rejectedQueries || []).map((item) => asRejected(item)),
     ...(plannerRejections || []).map((item) => asRejected(item)),
-    ...(filteredQueries || []).map((item) => asRejected(item, item.reason || 'filtered')),
+    ...(filteredQueries || []).map((item) => asRejected(item, item?.reason || 'filtered')),
     ...(queryMemoryEntries || [])
       .filter((entry) => ['empty', 'duplicate_results', 'failed'].includes(entry.status))
       .map((entry) => asRejected({

@@ -1,5 +1,7 @@
 import { extractPublishedDate } from './body-quality.mjs';
 import { buildClaimEvaluation } from './claim-quality.mjs';
+import { evidenceStatusOf } from './gap-state.mjs';
+import { slotEvidenceLimitations as canonicalSlotLimitations } from './limitations.mjs';
 
 function sourcePublishedAt(source = {}) {
   const explicit = source.publishedAt || source.date || source.published;
@@ -62,19 +64,8 @@ export function applyAsOfGate(claims = [], {
   });
 }
 
-export function slotEvidenceLimitations(gaps = []) {
-  const notes = [];
-  for (const gap of (gaps || []).filter((item) => !item.rollup && item.requiredSlot)) {
-    const label = gap.answerSlot || gap.id;
-    if (['verified', 'resolved'].includes(gap.status)) continue;
-    if (['limited', 'body_read'].includes(gap.status)) {
-      notes.push(`Slot ${label} has ${gap.status} evidence only (media paraphrase / not verified from a first-party filing). Do not treat it as confirmed in Summary or Key Findings.`);
-    }
-    if (['blocked', 'missing', 'open', 'searched'].includes(gap.status) || gap.slotSupport?.verdict === 'unverifiable') {
-      notes.push(`Slot ${label} is ${gap.status || 'unresolved'} and must stay in Caveats/Limitations, not as a confirmed finding.`);
-    }
-  }
-  return notes;
+export function slotEvidenceLimitations(gaps = [], brief = {}) {
+  return canonicalSlotLimitations(gaps, brief);
 }
 
 export function resolveCompletionStatus({
@@ -86,7 +77,7 @@ export function resolveCompletionStatus({
   const openRequired = (gaps || []).filter((gap) => (
     gap?.requiredSlot
     && !gap.rollup
-    && !['verified', 'resolved'].includes(gap.status)
+    && !['verified', 'resolved'].includes(evidenceStatusOf(gap))
   ));
   if (readiness) {
     if (readiness.pass && openRequired.length === 0) return 'complete';

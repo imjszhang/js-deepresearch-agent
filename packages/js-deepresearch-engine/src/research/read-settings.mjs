@@ -10,13 +10,16 @@ export function resolveReadSettings(settings = {}, { strategy = 'focused' } = {}
   const raw = {
     fetchMode: legacyFocused.fetchMode,
     maxContentChars: legacyFocused.maxContentChars,
+    maxFetchChars: legacyFocused.maxFetchChars,
     enrichConcurrency: legacyFocused.enrichConcurrency,
     ...shared,
     ...strategySpecific,
   };
+  const maxContentChars = positiveInteger(raw.maxContentChars, 8000);
   return {
     fetchMode: MODES.has(raw.fetchMode) ? raw.fetchMode : 'summary',
-    maxContentChars: positiveInteger(raw.maxContentChars, 8000),
+    maxContentChars,
+    maxFetchChars: Math.max(maxContentChars, positiveInteger(raw.maxFetchChars, 64000)),
     enrichConcurrency: positiveInteger(raw.enrichConcurrency, 2),
     sourceAssessment: {
       enabled: raw.sourceAssessment?.enabled === true,

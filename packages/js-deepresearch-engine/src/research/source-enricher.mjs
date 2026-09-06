@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { resolveUrlContent } from './content-resolver.mjs';
 import { focusedSourceSelection } from './focused-settings.mjs';
 import { selectRelevantPassages } from './passage-selector.mjs';
@@ -59,6 +60,7 @@ async function enrichOneSource(source, {
   signal,
   fetchMode,
   maxContentChars,
+  maxFetchChars,
   settings,
   budget,
   embedding,
@@ -67,6 +69,7 @@ async function enrichOneSource(source, {
   entities,
   entityAliases,
   observedHosts,
+  recorder,
 }) {
   const url = String(source.url || '').trim();
   if (!url) {
@@ -78,17 +81,54 @@ async function enrichOneSource(source, {
   }
 
   budget?.claim('sourceReads');
-  const fetched = await resolveUrlContent(url, {
-    source,
-    settings,
-    signal,
-    maxChars: maxContentChars,
+  const callId = `fetch-${crypto.randomUUID()}`;
+  recorder?.callStarted?.({
+    callId,
+    kind: 'content-fetch',
+    request: {
+      url,
+      sourceId: source.id || null,
+      maxChars: maxFetchChars || maxContentChars,
+      fetchBackend: settings?.research?.read?.fetchBackend
+        || settings?.research?.focused?.fetchBackend
+        || 'auto',
+      viaProxy: Boolean(String(settings?.http?.proxy || '').trim()),
+    },
   });
+  let fetched;
+  const fetchStartedAt = Date.now();
+  try {
+    fetched = await resolveUrlContent(url, {
+      source,
+      settings,
+      signal,
+      maxChars: maxFetchChars || maxContentChars,
+    });
+    recorder?.callFinished?.({
+      callId,
+      kind: 'content-fetch',
+      status: fetched.status === 'ok' ? 'completed' : 'failed',
+      response: fetched,
+      durationMs: Date.now() - fetchStartedAt,
+    });
+  } catch (error) {
+    recorder?.callFinished?.({
+      callId,
+      kind: 'content-fetch',
+      status: error?.name === 'AbortError' ? 'cancelled' : 'failed',
+      error,
+      durationMs: Date.now() - fetchStartedAt,
+    });
+    throw error;
+  }
   if (fetched.status !== 'ok') {
     return {
       ...withSourceProvenance(source, fetched),
       fetchStatus: 'failed',
       fetchError: fetched.error || 'Fetch failed',
+      fetchErrorType: fetched.errorType || null,
+      httpStatus: fetched.httpStatus ?? null,
+      fetchAttempts: fetched.fetchAttempts ?? 1,
       accessStatus: fetched.accessStatus || 'failed',
       accessNotes: fetched.accessNotes || fetched.error || 'Fetch failed',
     };
@@ -124,9 +164,30 @@ async function enrichOneSource(source, {
   }
 
   const assessmentEnabled = settings?.research?.read?.sourceAssessment?.enabled === true;
+  const analysisLimit = Math.max(600, Number(maxContentChars) || 8000);
+  const needsBoundedAnalysis = fetchMode !== 'full' || assessmentEnabled;
+  const analysisContent = needsBoundedAnalysis && fetched.content.length > analysisLimit
+    ? await selectRelevantPassages({
+      query,
+      question,
+      content: fetched.content,
+      snippet: source.snippet,
+      embedding,
+      signal,
+      topK: Math.max(3, Math.ceil(analysisLimit / 1200)),
+      chunkChars: 1200,
+      windowChunks: 1,
+      shortContentChars: analysisLimit,
+    })
+    : fetched.content;
+  const assessmentFetched = {
+    ...fetched,
+    content: analysisContent,
+  };
+
   const extraAssessment = async () => {
     if (!assessmentEnabled) return null;
-    return maybeAssessSource(source, fetched, {
+    return maybeAssessSource(source, assessmentFetched, {
       llm,
       signal,
       query,
@@ -152,14 +213,7 @@ async function enrichOneSource(source, {
   }
 
   if (fetchMode === 'extract') {
-    const summary = await selectRelevantPassages({
-      query,
-      question,
-      content: fetched.content,
-      snippet: source.snippet,
-      embedding,
-      signal,
-    });
+    const summary = analysisContent;
     const assessment = await extraAssessment();
     if (assessmentBlocksSuccessfulBody(assessment)) {
       return blockedAssessmentResult(fetchedSource, assessment);
@@ -174,7 +228,7 @@ async function enrichOneSource(source, {
     };
   }
 
-  const assessment = await maybeAssessSource(source, fetched, {
+  const assessment = await maybeAssessSource(source, assessmentFetched, {
     llm,
     signal,
     query,
@@ -212,6 +266,7 @@ export async function enrichFindingSources(finding, options = {}) {
     maxUrlsPerIteration,
     maxUrlsTotal,
     maxContentChars,
+    maxFetchChars,
     enrichConcurrency,
     llm,
     signal,
@@ -223,6 +278,7 @@ export async function enrichFindingSources(finding, options = {}) {
     entities,
     entityAliases,
     observedHosts,
+    recorder,
     seenUrls = new Set(),
     enrichedCount = { value: 0 },
   } = options;
@@ -275,6 +331,7 @@ export async function enrichFindingSources(finding, options = {}) {
           signal,
           fetchMode,
           maxContentChars,
+          maxFetchChars,
           settings,
           budget,
           embedding,
@@ -283,6 +340,7 @@ export async function enrichFindingSources(finding, options = {}) {
           entities,
           entityAliases,
           observedHosts,
+          recorder,
         });
         enrichedByUrl.set(source.url, enriched);
         if (enriched.fetchStatus === 'ok') {

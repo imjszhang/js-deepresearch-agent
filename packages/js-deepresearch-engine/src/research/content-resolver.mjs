@@ -1,4 +1,5 @@
-import { fetchUrlContent } from './content-fetcher.mjs';
+import { createHttpFetch } from '../http/create-http-fetch.mjs';
+import { fetchUrlContent, truncateContent } from './content-fetcher.mjs';
 import { resolveFocusedSettings } from './focused-settings.mjs';
 
 /** @type {Array<(url: string, context: ContentFetchContext) => Promise<ContentFetchResult>>} */
@@ -10,6 +11,7 @@ const handlers = [];
  * @property {import('../types.mjs').Settings} [settings]
  * @property {AbortSignal} [signal]
  * @property {number} [maxChars]
+ * @property {typeof fetch} [fetchImpl]
  */
 
 /**
@@ -35,12 +37,25 @@ export function getContentFetchHandlers() {
   return [...handlers];
 }
 
+export function resolveContentFetchImpl(context = {}) {
+  if (typeof context.fetchImpl === 'function') return context.fetchImpl;
+  return createHttpFetch(context.settings?.http?.proxy);
+}
+
+function httpFetchOptions(context = {}) {
+  return {
+    signal: context.signal,
+    maxChars: context.maxChars,
+    fetchImpl: resolveContentFetchImpl(context),
+  };
+}
+
 function truncateResult(result, maxChars) {
   if (result.status !== 'ok' || !maxChars || !result.content) return result;
   if (result.content.length <= maxChars) return result;
   return {
     ...result,
-    content: `${result.content.slice(0, maxChars)}\n[...truncated]`,
+    content: truncateContent(result.content, maxChars),
   };
 }
 
@@ -52,11 +67,11 @@ function truncateResult(result, maxChars) {
  * @returns {Promise<ContentFetchResult>}
  */
 export async function resolveUrlContent(url, context = {}) {
-  const { settings, signal, maxChars } = context;
+  const { settings, maxChars } = context;
   const { fetchBackend } = resolveFocusedSettings(settings);
 
   if (fetchBackend === 'http') {
-    return fetchUrlContent(url, { signal, maxChars });
+    return fetchUrlContent(url, httpFetchOptions(context));
   }
 
   for (const handler of handlers) {
@@ -73,5 +88,5 @@ export async function resolveUrlContent(url, context = {}) {
     };
   }
 
-  return fetchUrlContent(url, { signal, maxChars });
+  return fetchUrlContent(url, httpFetchOptions(context));
 }

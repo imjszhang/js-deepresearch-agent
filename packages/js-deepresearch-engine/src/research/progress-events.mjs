@@ -102,7 +102,19 @@ export function mapStructuredProgressEvent(event) {
     case 'extracting_passages': return { message: 'Extracting evidence passages', progress: 72, level };
     case 'evaluating_evidence': return { message: 'Evaluating evidence sufficiency', progress: 74, level };
     case 'evaluating_report': return { message: 'Evaluating report claims', progress: 88, level };
-    case 'report_retrying': return { message: `Report output was invalid; retrying (${event.attempt}/${event.maxAttempts})`, progress: 82, level: 'warn' };
+    case 'report_retrying': {
+      const attempt = Number(event.attempt);
+      const maxAttempts = Number(event.maxAttempts);
+      const attemptLabel = Number.isFinite(attempt) && Number.isFinite(maxAttempts)
+        ? ` (${attempt}/${maxAttempts})`
+        : '';
+      const phaseLabel = event.phase ? ` [${event.phase}]` : '';
+      return {
+        message: `Report output was invalid; retrying${attemptLabel}${phaseLabel}`,
+        progress: 82,
+        level: 'warn',
+      };
+    }
     case 'llm_call_started': return { message: `LLM call started: ${event.purpose}`, progress: null, level };
     case 'llm_call_finished': return {
       message: `LLM call ${event.status}: ${event.purpose} (${event.durationMs ?? 0}ms, ${event.outputChars ?? 0} chars${event.hasReasoningContent && !event.hasContent ? ', reasoning present but final content empty' : ''})`,

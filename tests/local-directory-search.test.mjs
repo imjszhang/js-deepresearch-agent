@@ -80,7 +80,7 @@ function buildMinimalTextPdf(text) {
 }
 
 function validReport(marker = 'local report') {
-  return `# Research Report\n\n## Summary\n\nThis ${marker} summarizes the collected local evidence and clearly distinguishes verified observations from unresolved limitations. It provides enough structured prose to validate the report output contract.\n\n## Key Findings\n\n- Local files mention 监管处罚 with supporting detail. [1.1]\n\n## Caveats\n\nThe test evidence is intentionally limited.`;
+  return `# Research Report\n\n## Summary\n\nThis ${marker} summarizes the collected local evidence and clearly distinguishes verified observations from unresolved limitations. It provides enough structured prose to validate the labeled narrative contract after Evidence is ignored and claim revision keeps the cited local finding.\n\n## Key Findings\n\n- Local files mention 监管处罚 with supporting detail and keep that cited finding in the labeled narrative so the official length check does not depend on Evidence. [1.1]\n\n## Caveats\n\nThe test evidence is intentionally limited.`;
 }
 
 function localContractProfile(question, extra = {}) {
@@ -494,10 +494,10 @@ describe('local exploratory integration', () => {
           return `# Research Report
 
 ## Summary
-本地语料给出了房产交易前应核对税费、限购和持有周期的操作要点，并区分了已核实观察与仍待核对的限制条件。这份材料足够长，可以形成结构化结论，也避免把未读网页域名当成必须满足的证据门槛。 [1.1]
+本地语料给出了房产交易前应核对税费、限购和持有周期的操作要点，并区分了已核实观察与仍待核对的限制条件。这份材料足够长，可以形成结构化结论，也避免把未读网页域名当成必须满足的证据门槛，从而满足标注叙事的最低长度。报告只陈述本地正文已经写明的核对步骤，不把未读站点写成必须关闭的判断。 [1.1]
 
 ## Key Findings
-- 交易前应先核对税费与限购条件，再安排资金、贷款杠杆和持有周期，避免把未读网页来源当成一手证据。 [1.1]
+- 交易前应先核对税费与限购条件，再安排资金、贷款杠杆和持有周期，避免把未读网页来源当成一手证据，并在报告中保留可引用的本地正文，同时写明这些要点来自成功读取的本地文件而不是搜索摘要。 [1.1]
 `;
         },
       },
@@ -616,11 +616,11 @@ describe('local exploratory integration', () => {
           return `# Research Report
 
 ## Summary
-本地处罚决定书写明星河智算因未按规定披露关联交易被罚款 1200 万元，整改报告则记录了补披露、制度修订和持续合规检查。报告区分了已从本地正文核实的事实与仍需外部核对的限制。 [1.1]
+本地处罚决定书写明星河智算因未按规定披露关联交易被罚款 1200 万元，整改报告则记录了补披露、制度修订和持续合规检查。报告区分了已从本地正文核实的事实与仍需外部核对的限制，并保证标注叙事超过最低字数。 [1.1]
 
 ## Key Findings
-- 2024 年 8 月 16 日送达的决定对星河智算处以 1200 万元罚款，事由为未按规定披露关联交易。 [1.1]
-- 公司已补披露关联交易、修订管理制度，并由审计委员会复核同类交易。 [1.2]
+- 2024 年 8 月 16 日送达的决定对星河智算处以 1200 万元罚款，事由为未按规定披露关联交易，该事实来自成功读取的本地正文。 [1.1]
+- 公司已补披露关联交易、修订管理制度，并由审计委员会复核同类交易，这些整改动作同样写在本地报告中。 [1.2]
 `;
         },
       },

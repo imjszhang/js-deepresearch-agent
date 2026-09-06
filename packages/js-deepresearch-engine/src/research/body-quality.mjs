@@ -14,6 +14,12 @@ const WAF_OR_ERROR_NEEDLES = [
 
 export const MIN_FETCHED_BODY_CHARS = 80;
 export const MIN_PROVIDED_BODY_CHARS = 12;
+export const MAX_RETRYABLE_READ_ATTEMPTS = 3;
+
+export function isRetryableReadFailure(quality = {}) {
+  if (quality?.successful) return false;
+  return quality?.status === 'failed' || quality?.status === 'waf';
+}
 
 export function isWafShellText(text = '') {
   return WAF_OR_ERROR_NEEDLES.some((pattern) => pattern.test(String(text || '')));

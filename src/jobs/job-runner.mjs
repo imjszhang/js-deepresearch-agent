@@ -1,5 +1,10 @@
 import crypto from 'node:crypto';
-import { ResearchRunner, saveResearchToWorkDir } from 'js-deepresearch-engine';
+import {
+  FileRunRecorder,
+  ResearchRunner,
+  createWorkSessionDir,
+  saveResearchArtifacts,
+} from 'js-deepresearch-engine';
 import { archiveResearchResultSafe } from '../storage/intel-store.mjs';
 
 export class JobRunner {
@@ -22,11 +27,40 @@ export class JobRunner {
       strategy: settings.research.strategy,
     });
 
+    let sessionDir;
+    let recorder;
+    try {
+      sessionDir = createWorkSessionDir({
+        settings,
+        strategy: settings.research.strategy,
+      });
+      recorder = new FileRunRecorder({
+        sessionDir,
+        runId: id,
+        strategy: settings.research.strategy,
+        query,
+        metadata: { settings },
+      });
+    } catch (error) {
+      this.researchRepository.updateStatus(id, 'failed', {
+        error: error.message,
+        sessionDir: sessionDir || null,
+        completedAt: new Date().toISOString(),
+      });
+      throw error;
+    }
     const controller = new AbortController();
     this.activeJobs.set(id, controller);
-    queueMicrotask(() => this.runJob({ id, query, settings, controller }));
+    queueMicrotask(() => this.runJob({
+      id,
+      query,
+      settings,
+      controller,
+      sessionDir,
+      recorder,
+    }));
 
-    return this.researchRepository.updateStatus(id, 'running');
+    return this.researchRepository.updateStatus(id, 'running', { sessionDir });
   }
 
   cancel(id) {
@@ -36,13 +70,36 @@ export class JobRunner {
     return true;
   }
 
-  async runJob({ id, query, settings, controller }) {
+  async runJob({
+    id,
+    query,
+    settings,
+    controller,
+    sessionDir: providedSessionDir,
+    recorder: providedRecorder,
+  }) {
+    let recorder = providedRecorder || null;
     try {
+      const sessionDir = providedSessionDir || createWorkSessionDir({
+        settings,
+        strategy: settings.research.strategy,
+      });
+      if (!recorder) {
+        recorder = new FileRunRecorder({
+          sessionDir,
+          runId: id,
+          strategy: settings.research.strategy,
+          query,
+          metadata: { settings },
+        });
+        this.researchRepository.updateStatus(id, 'running', { sessionDir });
+      }
       this.emitLog(id, { message: 'Job started', progress: 1 });
       const result = await this.runner.run({
         query,
         settings,
         signal: controller.signal,
+        recorder,
         onProgress: (event) => this.emitLog(id, event),
       });
       const budget = result.quality?.budget?.usage || {};
@@ -53,7 +110,8 @@ export class JobRunner {
       });
 
       this.sourceRepository.addMany(id, result.sources);
-      const artifacts = saveResearchToWorkDir({
+      const artifacts = saveResearchArtifacts({
+        sessionDir,
         settings,
         strategy: settings.research.strategy,
         query,
@@ -77,9 +135,18 @@ export class JobRunner {
         quality: result.quality,
         completedAt: new Date().toISOString(),
       });
+      recorder.finalize('completed', {
+        artifacts: {
+          reportPath: artifacts.reportPath,
+          findingsPath: artifacts.findingsPath,
+          sourcesPath: artifacts.sourcesPath,
+          metaPath: artifacts.metaPath,
+        },
+      });
       this.eventBus.emit(id, { type: 'status', data: record });
     } catch (error) {
       const status = controller.signal.aborted ? 'cancelled' : 'failed';
+      recorder?.finalize?.(status, { error });
       const record = this.researchRepository.updateStatus(id, status, {
         error: error.message,
         completedAt: new Date().toISOString(),

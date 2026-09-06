@@ -71,6 +71,7 @@ function migrate(database) {
     );
   `);
   ensureColumn(database, 'research_history', 'quality_json', 'TEXT');
+  ensureColumn(database, 'research_history', 'session_dir', 'TEXT');
 }
 
 function ensureColumn(database, table, column, type) {

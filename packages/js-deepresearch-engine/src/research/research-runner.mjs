@@ -3,24 +3,45 @@ import { createSearchEngine } from '../search/search-factory.mjs';
 import { createHttpFetch } from '../http/create-http-fetch.mjs';
 import { createProgressEmitter } from './progress-events.mjs';
 import { buildReport, ReportGenerationError, validateReportOutput } from './report-builder.mjs';
-import { assembleReport, reviseUnsupportedKeyClaims } from './report-assembler.mjs';
+import { assembleReport, reviseUnsupportedKeyClaims, shouldMoveWeakKeyClaim } from './report-assembler.mjs';
 import { resolveReportSettings } from './report-settings.mjs';
 import { runStrategy } from './strategies.mjs';
 import { BudgetManager, BudgetExceededError, wrapProvidersWithBudget } from './budget-manager.mjs';
 import { QueryMemory } from './query-memory.mjs';
 import { alignReportClaims, buildPassageArtifactsAsync, listSnippetOnlyCitationKeys } from './evidence-chain.mjs';
 import { evaluatePreReport } from './quality-gates.mjs';
-import { applyAsOfGate, resolveCompletionStatus, slotEvidenceLimitations } from './as-of.mjs';
+import { applyAsOfGate, resolveCompletionStatus } from './as-of.mjs';
 import { applySlotStatusToClaims } from './report-evidence.mjs';
+import { buildResearchLimitations } from './limitations.mjs';
 import { resolveFocusedSettings } from './focused-settings.mjs';
 import { createResearchProviders } from './research-providers.mjs';
-import { calculateQualityMetrics, qualityGateFromClaims } from './claim-quality.mjs';
+import { calculateQualityMetrics, normalizedClaimKey, qualityGateFromClaims } from './claim-quality.mjs';
+import { extractClaimsFromDocument } from './claim-quality.mjs';
 import { applyClaimEntailment } from './claim-entailment.mjs';
 import { researchBriefFromInput } from './research-brief.mjs';
 import { collectGapSources, evaluateGapEvidence, rollupRootGap } from './gap-state.mjs';
+import { recorderOrNoop } from './run-recorder.mjs';
+import { buildReportContract } from './report-contract.mjs';
+import {
+  buildReportPlan,
+  documentFromPlan,
+  ensureKeyFindingPlacements,
+  mergeNarrativeIntoPlan,
+  validateReportPlan,
+} from './report-plan.mjs';
+import { parseMarkdownNarrative, renderNarrativeMarkdown } from './report-narrative.mjs';
 
 export class ResearchRunner {
-  async run({ query, settings, signal, onProgress = () => {}, llm: providedLlm, search: providedSearch }) {
+  async run({
+    query,
+    settings,
+    signal,
+    onProgress = () => {},
+    llm: providedLlm,
+    search: providedSearch,
+    recorder: providedRecorder,
+  }) {
+    const recorder = recorderOrNoop(providedRecorder);
     const proxiedFetch = createHttpFetch(settings?.http?.proxy);
     const rawLlm = providedLlm || createLlmProvider(settings);
     const rawSearch = providedSearch || createSearchEngine(settings);
@@ -30,6 +51,15 @@ export class ResearchRunner {
     query = brief.query;
     const emit = createProgressEmitter(onProgress);
     const trace = [];
+    const appendTrace = Array.prototype.push.bind(trace);
+    Object.defineProperty(trace, 'push', {
+      enumerable: false,
+      configurable: false,
+      value: (...entries) => {
+        for (const entry of entries) recorder.event('trace', entry);
+        return appendTrace(...entries);
+      },
+    });
     trace.push({
       step: 1,
       action: 'research_brief',
@@ -37,11 +67,18 @@ export class ResearchRunner {
       brief,
       createdAt: new Date().toISOString(),
     });
+    recorder.event('research_brief', {
+      strategy,
+      query,
+      brief,
+      queryWasStructured,
+    });
     const budget = new BudgetManager(settings, emit);
     const { llm, search } = wrapProvidersWithBudget({
       llm: rawLlm,
       search: rawSearch,
       budget,
+      recorder,
       onLlmEvent: (event) => {
         trace.push({
           step: trace.length + 1,
@@ -57,6 +94,7 @@ export class ResearchRunner {
     const researchProviders = createResearchProviders(settings?.research?.providers || {}, {
       budget,
       fetch: proxiedFetch,
+      recorder,
       onEvent: (event) => {
         const action = event.operation === 'embed' ? 'embed' : 'rerank';
         trace.push({ step: trace.length + 1, action, reasonCode: `${event.operation}_${event.status}`, ...event, createdAt: new Date().toISOString() });
@@ -71,11 +109,33 @@ export class ResearchRunner {
       similarityProvider: researchProviders.similarity,
       onSkip: (event) => trace.push({ step: trace.length + 1, action: 'query_skipped_duplicate', ...event, createdAt: new Date().toISOString() }),
     });
+    recorder.checkpoint('research-start', {
+      strategy,
+      query,
+      brief,
+      budget: budget.exportCheckpoint(),
+      queryMemory: queryMemory.exportCheckpoint(),
+      trace,
+    });
 
     emit({ stage: 'research_started' });
     let findings;
     try {
-      findings = await runStrategy({ strategy, query, brief, settings, llm, search, signal, emit, budget, queryMemory, trace, researchProviders });
+      findings = await runStrategy({
+        strategy,
+        query,
+        brief,
+        settings,
+        llm,
+        search,
+        signal,
+        emit,
+        budget,
+        queryMemory,
+        trace,
+        researchProviders,
+        recorder,
+      });
     } catch (error) {
       if (!(error instanceof BudgetExceededError)) throw error;
       findings = [];
@@ -91,69 +151,18 @@ export class ResearchRunner {
       : (focusedControl?.gaps?.length
         ? focusedControl.gaps
         : (tracksGaps ? buildGapsFromFindings(findings, query) : []));
-    const preReport = evaluatePreReport({ findings, gaps, query });
     const budgetBeforeReport = budget.snapshot();
-    const budgetLimitation = budgetBeforeReport.stopReason
-      ? `The ${budgetBeforeReport.stopReason} budget was exhausted; remaining research actions were not scheduled.`
-      : null;
-    const unresolvedLimitation = exploratoryLoop?.unresolvedGaps?.length
-      ? `Unresolved gaps: ${exploratoryLoop.unresolvedGaps.map((gap) => `${gap.id} (${gap.status}) ${gap.question}`).join('; ')}`
-      : null;
-    const blockedHostLimitation = exploratoryLoop?.blockedHosts?.length
-      ? `Blocked or unread required hosts: ${exploratoryLoop.blockedHosts.join(', ')}.`
-      : null;
-    const blockedSlotLimitation = exploratoryLoop?.recovery?.blockedGaps?.length
-      ? `Blocked slots: ${exploratoryLoop.recovery.blockedGaps.map((gap) => (
-        `${gap.gapId}${gap.answerSlot ? ` (${gap.answerSlot})` : ''}: ${gap.blockedReason}`
-      )).join('; ')}.`
-      : null;
-    const plannerExhaustedLimitation = exploratoryLoop?.stopDetail === 'query_planner_exhausted'
-      ? 'The search query planner could not produce a valid query; remaining gaps were skipped or blocked.'
-      : null;
-    const secondaryLimitation = exploratoryLoop?.secondaryOnlyClaims?.length
-      ? 'Some conclusions rest only on secondary or reprint sources and cannot be treated as primary-source verified.'
-      : null;
-    const focusedFailures = focusedControl?.readiness?.failures || [];
-    const unsupportedLimitation = exploratoryLoop?.unsupportedDecisions?.length
-      ? `The report cannot support: ${exploratoryLoop.unsupportedDecisions.join('; ')}`
-      : (focusedFailures.length
-        ? `The report cannot support: ${focusedFailures.map((failure) => failure.message).join('; ')}`
-        : null);
-    const degradedLimitation = findings.some((finding) => finding?.degraded)
-      ? 'Evidence gathering was cut short before completion; treat the collected evidence as incomplete and state remaining uncertainty explicitly.'
-      : null;
-    const snippetOnlyKeys = listSnippetOnlyCitationKeys(findings);
-    const snippetLimitation = (strategy === 'focused' || strategy === 'exploratory') && snippetOnlyKeys.length
-      ? `Sources ${snippetOnlyKeys.map((key) => `[${key}]`).join(', ')} are search snippets only and cannot verify Summary or Key Findings facts. Mark those facts Unverified or move them to Caveats.`
-      : null;
-    const earlyContractUnavailable = Boolean(
-      focusedControl?.contractUnavailable
-      || focusedControl?.profile?.contractUnavailable
-      || exploratoryLoop?.profile?.contractUnavailable,
-    );
-    const contractLimitation = earlyContractUnavailable
-      ? 'The research contract could not be planned; required slots were not available to verify.'
-      : null;
-    const slotLimitations = slotEvidenceLimitations(gaps);
-    const reportLimitations = [
-      ...preReport.limitations,
-      ...slotLimitations,
-      ...(budgetLimitation ? [budgetLimitation] : []),
-      ...(contractLimitation ? [contractLimitation] : []),
-      ...(degradedLimitation ? [degradedLimitation] : []),
-      ...(snippetLimitation ? [snippetLimitation] : []),
-      ...(unresolvedLimitation ? [unresolvedLimitation] : []),
-      ...(blockedHostLimitation ? [blockedHostLimitation] : []),
-      ...(blockedSlotLimitation ? [blockedSlotLimitation] : []),
-      ...(plannerExhaustedLimitation ? [plannerExhaustedLimitation] : []),
-      ...(secondaryLimitation ? [secondaryLimitation] : []),
-      ...(unsupportedLimitation ? [unsupportedLimitation] : []),
-    ];
-    if (focused.preReportGate.blockUnsupportedClaims && preReport.gate === 'fail') {
-      const error = new Error(`Research quality gate failed: ${preReport.flags.join(', ')}`);
-      error.name = 'ResearchQualityError';
-      throw error;
-    }
+    recorder.checkpoint('strategy-complete', {
+      strategy,
+      query,
+      brief: resolvedBrief,
+      findings,
+      gaps,
+      control: exploratoryLoop || focusedControl || null,
+      budget: budget.exportCheckpoint(),
+      queryMemory: queryMemory.exportCheckpoint(),
+      trace,
+    });
     emit({ stage: 'synthesizing_report' });
     const reportSettings = resolveReportSettings(settings);
     const evidenceOptions = strategy === 'exploratory'
@@ -171,6 +180,19 @@ export class ResearchRunner {
       },
     });
     findings = passageArtifacts.findings;
+    recorder.checkpoint('passages-extracted', {
+      strategy,
+      query,
+      brief: resolvedBrief,
+      findings,
+      gaps,
+      passages: passageArtifacts.passages,
+      sources: passageArtifacts.sources,
+      citationMap: [...passageArtifacts.citationMap.entries()],
+      budget: budget.exportCheckpoint(),
+      queryMemory: queryMemory.exportCheckpoint(),
+      trace,
+    });
     if (!exploratoryLoop?.gaps?.length && !focusedControl?.gaps?.length) {
       gaps = tracksGaps ? buildGapsFromFindings(findings, query) : [];
     }
@@ -187,51 +209,198 @@ export class ResearchRunner {
           entities: resolvedBrief?.entities || [],
           entityAliases: resolvedBrief?.entityAliases || [],
           query,
+          brief: resolvedBrief,
         },
       ));
       rollupRootGap(gaps);
     }
-    let narrativeDraft = await buildReport({
-      llm, query, findings, signal, purpose: 'report', limitations: reportLimitations, strategy,
+    const preReport = evaluatePreReport({ findings, gaps, query });
+    if (focused.preReportGate.blockUnsupportedClaims && preReport.gate === 'fail') {
+      const error = new Error(`Research quality gate failed: ${preReport.flags.join(', ')}`);
+      error.name = 'ResearchQualityError';
+      throw error;
+    }
+    const controlProfile = focusedControl?.profile || exploratoryLoop?.profile || {};
+    const contractUnavailable = Boolean(
+      controlProfile.contractUnavailable
+      || focusedControl?.contractUnavailable
+      || exploratoryLoop?.profile?.contractUnavailable,
+    );
+    const readiness = exploratoryLoop?.readiness || focusedControl?.readiness || null;
+    const focusedFailures = focusedControl?.readiness?.failures || [];
+    const snippetOnlyKeys = listSnippetOnlyCitationKeys(findings);
+    const stopReason = budget.controllerStopReason || exploratoryLoop?.stopReason || null;
+    const stopDetail = budget.controllerStopDetail || exploratoryLoop?.stopDetail || null;
+    const materialBlockedSlots = (exploratoryLoop?.recovery?.blockedGaps || []).filter((entry) => {
+      const gap = gaps.find((item) => item.id === entry.gapId);
+      return gap && !gap.rollup;
+    });
+    const limitationBase = {
+      gaps,
+      readiness,
+      stopReason,
+      stopDetail,
+      budget: budgetBeforeReport,
+      findings,
+      strategy,
+      brief: resolvedBrief,
+      snippetOnlyKeys,
+      contractUnavailable,
+      secondaryOnly: Boolean(exploratoryLoop?.secondaryOnlyClaims?.length),
+      degraded: findings.some((finding) => finding?.degraded),
+      extra: [
+        exploratoryLoop?.blockedHosts?.length
+          ? `Blocked or unread required hosts: ${exploratoryLoop.blockedHosts.join(', ')}.`
+          : null,
+        exploratoryLoop?.unresolvedGaps?.length
+          ? `Unresolved gaps: ${exploratoryLoop.unresolvedGaps.map((gap) => `${gap.id} (${gap.status}) ${gap.question}`).join('; ')}`
+          : null,
+        materialBlockedSlots.length
+          ? `Blocked slots: ${materialBlockedSlots.map((gap) => (
+            `${gap.gapId}${gap.answerSlot ? ` (${gap.answerSlot})` : ''}: ${gap.blockedReason}`
+          )).join('; ')}.`
+          : null,
+      ].filter(Boolean),
+    };
+    let canonical = buildResearchLimitations(limitationBase);
+    let reportLimitations = canonical.limitations;
+    const reportContract = buildReportContract({
+      gaps,
+      brief: resolvedBrief,
+      readiness,
+      strategy,
+      stopReason,
+    });
+    const openJudgment = reportContract.openJudgment;
+    const incompleteContract = reportContract.incompleteContract;
+    let reportPlan = buildReportPlan({
+      contract: reportContract,
+      findings,
+      passages: passageArtifacts.passages,
+      citationMap: passageArtifacts.citationMap,
+      brief: resolvedBrief,
+      limitations: reportLimitations,
+      query,
+      gaps,
+    });
+    recorder.checkpoint('report-contract', {
+      strategy,
+      query,
+      reportContract,
+      reportPlan,
+    });
+    recorder.checkpoint('pre-report', {
+      strategy,
+      query,
+      brief: resolvedBrief,
+      findings,
+      gaps,
+      passages: passageArtifacts.passages,
+      sources: passageArtifacts.sources,
+      limitations: reportLimitations,
+      reportContract,
+      reportPlan,
+      report: {
+        maxPassageChars: evidenceOptions.maxPassageChars,
+        maxTokens: reportSettings.maxOutputTokens,
+        minChars: reportSettings.minChars,
+        maxAttempts: reportSettings.maxAttempts,
+        openJudgment,
+        incompleteContract,
+      },
+      budget: budget.exportCheckpoint(),
+      queryMemory: queryMemory.exportCheckpoint(),
+      trace,
+    });
+    const reportOnAttempt = (event) => {
+      trace.push({
+        step: trace.length + 1,
+        action: event.status === 'invalid' ? 'report_retry_requested' : 'draft',
+        reasonCode: event.status === 'invalid' ? event.flags?.[0] : `report_attempt_${event.status}`,
+        ...event,
+        createdAt: new Date().toISOString(),
+      });
+      if (event.status === 'invalid') emit({ stage: 'report_retrying', ...event });
+    };
+    const generateNarrative = async (retryContext = null) => buildReport({
+      llm,
+      query,
+      findings,
+      signal,
+      purpose: 'report',
+      limitations: reportLimitations,
+      strategy,
       passages: passageArtifacts.passages,
       maxPassageChars: evidenceOptions.maxPassageChars,
       maxTokens: reportSettings.maxOutputTokens,
       minChars: reportSettings.minChars,
-      maxAttempts: reportSettings.maxAttempts,
+      maxAttempts: retryContext ? 1 : reportSettings.maxAttempts,
       mode: 'narrative',
       gaps,
-      onAttempt: (event) => {
-        trace.push({
-          step: trace.length + 1,
-          action: event.status === 'invalid' ? 'report_retry_requested' : 'draft',
-          reasonCode: event.status === 'invalid' ? event.flags?.[0] : `report_attempt_${event.status}`,
-          ...event,
-          createdAt: new Date().toISOString(),
-        });
-        if (event.status === 'invalid') emit({ stage: 'report_retrying', ...event });
-      },
+      brief: resolvedBrief,
+      contract: reportContract,
+      openJudgment,
+      incompleteContract,
+      retryContext,
+      onAttempt: reportOnAttempt,
     });
-    const assembleCurrentReport = (limitations = reportLimitations) => assembleReport({
-      narrative: narrativeDraft,
+    const assembleCurrentReport = (narrative, limitations = reportLimitations) => assembleReport({
+      narrative,
       findings,
       passages: passageArtifacts.passages,
       maxPassageChars: evidenceOptions.maxPassageChars,
       limitations,
       query,
     });
-    let report = assembleCurrentReport();
-    const assembledCheck = validateReportOutput(report, {
+    const validationOptions = {
       minChars: reportSettings.minChars,
-      mode: 'full',
       findings,
+      openJudgment,
+      incompleteContract,
+    };
+    const checkReportPair = (narrative, assembled) => {
+      const narrativeCheck = validateReportOutput(narrative, { ...validationOptions, mode: 'narrative' });
+      const fullCheck = validateReportOutput(assembled, { ...validationOptions, mode: 'full' });
+      return {
+        ok: narrativeCheck.ok && fullCheck.ok,
+        flags: [...new Set([...(narrativeCheck.flags || []), ...(fullCheck.flags || [])])],
+        outputChars: narrativeCheck.outputChars,
+      };
+    };
+    const draft = await generateNarrative();
+    let narrativeDocument = draft.document || parseMarkdownNarrative(draft.text);
+    let narrativeDraft = draft.text;
+    reportPlan = mergeNarrativeIntoPlan(reportPlan, narrativeDocument);
+    narrativeDocument = documentFromPlan(reportPlan);
+    narrativeDraft = renderNarrativeMarkdown(narrativeDocument);
+    recorder.checkpoint('report-draft', {
+      strategy,
+      query,
+      narrativeDraft,
+      narrativeDocument,
+      limitations: reportLimitations,
+      budget: budget.exportCheckpoint(),
+      trace,
     });
-    if (!assembledCheck.ok && findings.length > 0) {
-      throw new ReportGenerationError({
-        attempts: reportSettings.maxAttempts,
-        minChars: reportSettings.minChars,
-        outputChars: assembledCheck.outputChars,
-        flags: assembledCheck.flags,
-      });
+    recorder.checkpoint('report-plan', {
+      strategy,
+      query,
+      reportPlan,
+      reportContract,
+    });
+    let report = assembleCurrentReport(narrativeDraft);
+    if (!evidenceOptions.claimAlignment && findings.length > 0) {
+      const assembledCheck = checkReportPair(narrativeDraft, report);
+      if (!assembledCheck.ok) {
+        throw new ReportGenerationError({
+          attempts: reportSettings.maxAttempts,
+          minChars: reportSettings.minChars,
+          outputChars: assembledCheck.outputChars,
+          flags: assembledCheck.flags,
+          phase: 'rendering',
+          contract: reportContract,
+        });
+      }
     }
     let claims = [];
     let movedClaimTexts = [];
@@ -251,35 +420,120 @@ export class ResearchRunner {
         sources: passageArtifacts.sources,
         passages: passageArtifacts.passages,
       });
-      const alignCurrentReport = () => alignReportClaims({
-        report,
-        passages: passageArtifacts.passages,
-        citationMap: passageArtifacts.citationMap,
-        options: { ...evidenceOptions, strategy },
-      });
-      claims = applySlotStatusToClaims(await judgeClaims(alignCurrentReport()), { gaps, findings });
-      const revision = reviseUnsupportedKeyClaims(narrativeDraft, claims);
-      movedClaimTexts = revision.moved;
-      if (revision.moved.length) {
-        narrativeDraft = revision.report;
-        report = assembleCurrentReport([
-          ...reportLimitations,
-          ...revision.moved.map((text) => `Insufficient direct evidence for: ${text}`),
-        ]);
-        claims = applySlotStatusToClaims(await judgeClaims(alignCurrentReport()), { gaps, findings });
-      }
-      const revisedCheck = validateReportOutput(report, {
-        minChars: reportSettings.minChars,
-        mode: 'full',
-        findings,
-      });
-      if (!revisedCheck.ok && findings.length > 0) {
-        throw new ReportGenerationError({
-          attempts: reportSettings.maxAttempts,
-          minChars: reportSettings.minChars,
-          outputChars: revisedCheck.outputChars,
-          flags: revisedCheck.flags,
+      const alignAndJudge = async (assembled, document) => {
+        const fromReport = alignReportClaims({
+          report: assembled,
+          passages: passageArtifacts.passages,
+          citationMap: passageArtifacts.citationMap,
+          options: { ...evidenceOptions, strategy },
         });
+        const fromPlan = document ? extractClaimsFromDocument(document) : [];
+        const merged = fromReport.map((claim) => {
+          const match = fromPlan.find((item) => (
+            item.kind === claim.kind
+            && normalizedClaimKey(item.text) === normalizedClaimKey(claim.text)
+          ));
+          if (!match) return claim;
+          return {
+            ...claim,
+            canonicalClaimId: match.canonicalClaimId || claim.canonicalClaimId,
+            placements: match.placements || claim.placements,
+            boundSlotIds: match.boundSlotIds || claim.boundSlotIds,
+            origin: match.origin || claim.origin,
+            claimRole: match.claimRole || claim.claimRole,
+          };
+        });
+        return applySlotStatusToClaims(await judgeClaims(merged), { gaps, findings, brief: resolvedBrief });
+      };
+      const reviseFrom = async (narrative, document = null) => {
+        const assembled = assembleCurrentReport(narrative, reportLimitations);
+        const judged = await alignAndJudge(assembled, document);
+        const revision = reviseUnsupportedKeyClaims(narrative, judged, { document });
+        movedClaimTexts = revision.moved.map((text) => {
+          const claim = judged.find((item) => item.text === text);
+          const verified = (claim?.boundSlotIds || []).some((id) => reportContract.verifiedSlotIds.includes(id));
+          return verified ? { text, verifiedSlot: true } : text;
+        });
+        canonical = buildResearchLimitations({
+          ...limitationBase,
+          movedClaims: movedClaimTexts,
+        });
+        reportLimitations = canonical.limitations;
+        let nextDocument = ensureKeyFindingPlacements(
+          revision.document || parseMarkdownNarrative(revision.report),
+          judged,
+          reportContract,
+        );
+        reportPlan = mergeNarrativeIntoPlan(reportPlan, nextDocument);
+        nextDocument = documentFromPlan(reportPlan);
+        narrativeDocument = nextDocument;
+        narrativeDraft = renderNarrativeMarkdown(nextDocument);
+        report = assembleCurrentReport(narrativeDraft, reportLimitations);
+        claims = (revision.changed || narrativeDraft !== narrative)
+          ? await alignAndJudge(report, nextDocument)
+          : judged;
+        const planCheck = validateReportPlan(reportPlan, reportContract);
+        const renderCheck = checkReportPair(narrativeDraft, report);
+        if (planCheck.ok && !renderCheck.ok) {
+          narrativeDraft = renderNarrativeMarkdown(nextDocument);
+          report = assembleCurrentReport(narrativeDraft, reportLimitations);
+          const retryRender = checkReportPair(narrativeDraft, report);
+          return {
+            ok: retryRender.ok,
+            flags: retryRender.flags,
+            outputChars: retryRender.outputChars,
+            phase: retryRender.ok ? null : 'rendering',
+          };
+        }
+        return {
+          ok: planCheck.ok && renderCheck.ok,
+          flags: [...new Set([...(planCheck.flags || []), ...(renderCheck.flags || [])])],
+          outputChars: renderCheck.outputChars,
+          phase: !planCheck.ok ? 'semantic-contract' : (!renderCheck.ok ? 'rendering' : null),
+        };
+      };
+      let revisedCheck = await reviseFrom(narrativeDraft, narrativeDocument);
+      if (!revisedCheck.ok && findings.length > 0) {
+        const retryEvent = {
+          flags: revisedCheck.flags,
+          reasonCode: 'post_revision_narrative',
+          attempt: reportSettings.maxAttempts + 1,
+          maxAttempts: reportSettings.maxAttempts + 1,
+          phase: revisedCheck.phase || 'semantic-contract',
+        };
+        trace.push({
+          step: trace.length + 1,
+          action: 'report_retry_requested',
+          ...retryEvent,
+          createdAt: new Date().toISOString(),
+        });
+        emit({ stage: 'report_retrying', ...retryEvent });
+        const retrySeeds = {
+          ...admissibleReportSeeds(claims),
+          contract: reportContract,
+          admissibleClaims: claims
+            .filter((claim) => claim.evaluation?.verdict === 'supported' || (claim.placements || []).includes('key_findings'))
+            .map((claim) => ({
+              text: claim.text,
+              placement: (claim.placements || [])[0] || (claim.kind === 'premise_fact' ? 'background' : 'key_findings'),
+              boundSlotIds: claim.boundSlotIds || [],
+            })),
+        };
+        const retried = await generateNarrative(retrySeeds);
+        narrativeDocument = retried.document || parseMarkdownNarrative(retried.text);
+        narrativeDraft = retried.text;
+        reportPlan = mergeNarrativeIntoPlan(reportPlan, narrativeDocument);
+        revisedCheck = await reviseFrom(narrativeDraft, narrativeDocument);
+        if (!revisedCheck.ok) {
+          throw new ReportGenerationError({
+            attempts: reportSettings.maxAttempts + 1,
+            minChars: reportSettings.minChars,
+            outputChars: revisedCheck.outputChars,
+            flags: revisedCheck.flags,
+            phase: revisedCheck.phase || 'semantic-contract',
+            contract: reportContract,
+          });
+        }
       }
     }
     const evidence = {
@@ -289,66 +543,76 @@ export class ResearchRunner {
       claims,
       citationMap: passageArtifacts.citationMap,
     };
+    recorder.checkpoint('claims-evaluated', {
+      strategy,
+      query,
+      brief: resolvedBrief,
+      findings: evidence.findings,
+      sources: evidence.sources,
+      passages: evidence.passages,
+      claims: evidence.claims,
+      citationMap: [...evidence.citationMap.entries()],
+      budget: budget.exportCheckpoint(),
+      trace,
+    });
     const qualityMetrics = calculateQualityMetrics(evidence.claims);
     const claimGate = qualityGateFromClaims(evidence.claims);
     const unverifiedKeyClaims = evidence.claims.filter((claim) => (
       claim.kind === 'key_claim' && ['unsupported', 'unverifiable'].includes(claim.evaluation?.verdict)
     ));
-    const movedClaimSet = new Set(movedClaimTexts);
-    const noClaims = evidenceOptions.claimAlignment && qualityMetrics.keyClaimCount === 0;
+    const noClaims = evidenceOptions.claimAlignment
+      && qualityMetrics.keyClaimCount === 0
+      && !incompleteContract
+      && !(reportPlan.slotClaims || []).length;
     const emptyExtraction = evidenceOptions.claimAlignment && qualityMetrics.claimCount === 0;
+    if (noClaims) {
+      canonical = buildResearchLimitations({
+        ...limitationBase,
+        movedClaims: movedClaimTexts,
+        extra: [
+          ...limitationBase.extra,
+          'No evaluable claims could be extracted from the report.',
+        ],
+      });
+      reportLimitations = canonical.limitations;
+      report = assembleCurrentReport(narrativeDraft, reportLimitations);
+    }
     const finalGate = preReport.gate === 'fail' || claimGate === 'fail' || emptyExtraction
       ? 'fail'
       : (preReport.gate === 'pass_with_warnings' || claimGate === 'pass_with_warnings' || noClaims ? 'pass_with_warnings' : 'pass');
-    const controlProfile = focusedControl?.profile || exploratoryLoop?.profile || {};
-    const contractUnavailable = Boolean(
-      controlProfile.contractUnavailable || focusedControl?.contractUnavailable,
-    );
     const slotSupportUnknown = gaps.some((gap) => (
       gap?.slotSupport?.method === 'fail_closed' || gap?.slotSupport?.verdict === 'unverifiable'
     ));
+    const planSatisfaction = validateReportPlan(reportPlan, reportContract);
     const quality = {
-      schemaVersion: 3,
+      schemaVersion: 4,
+      reportContractSatisfied: planSatisfaction.ok,
       stopReason: budget.controllerStopReason || null,
-      stopDetail: budget.controllerStopDetail || exploratoryLoop?.stopDetail || null,
+      stopDetail,
       qualityMetricsVersion: qualityMetrics.metricsVersion,
       claimExtractionVersion: qualityMetrics.claimExtractionVersion,
       claimEvaluationVersion: qualityMetrics.claimEvaluationVersion,
       ...preReport,
       gate: finalGate,
-      readiness: exploratoryLoop?.readiness || focusedControl?.readiness || null,
+      readiness,
       completionStatus: resolveCompletionStatus({
-        readiness: exploratoryLoop?.readiness || focusedControl?.readiness || null,
-        stopReason: budget.controllerStopReason || exploratoryLoop?.stopReason || null,
+        readiness,
+        stopReason,
         gaps,
       }),
       flags: [
         ...preReport.flags,
         ...focusedFailures.map((failure) => failure.code).filter(Boolean),
-        ...(budgetLimitation ? ['budget_exhausted'] : []),
+        ...(stopReason === 'budget_exhausted' || budgetBeforeReport.stopReason ? ['budget_exhausted'] : []),
         ...(controlProfile.contractRetried ? ['contract_plan_retried'] : []),
         ...(contractUnavailable ? ['contract_unavailable'] : []),
         ...(slotSupportUnknown ? ['slot_support_unknown'] : []),
         ...(noClaims ? ['no_claims'] : []),
         ...(unverifiedKeyClaims.length ? ['unverified_key_claims'] : []),
       ],
-      limitations: [
-        ...preReport.limitations,
-        ...slotLimitations,
-      ...(budgetLimitation ? [budgetLimitation] : []),
-      ...(contractLimitation ? [contractLimitation] : []),
-      ...(unresolvedLimitation ? [unresolvedLimitation] : []),
-        ...(blockedHostLimitation ? [blockedHostLimitation] : []),
-        ...(blockedSlotLimitation ? [blockedSlotLimitation] : []),
-        ...(plannerExhaustedLimitation ? [plannerExhaustedLimitation] : []),
-        ...(secondaryLimitation ? [secondaryLimitation] : []),
-        ...(unsupportedLimitation ? [unsupportedLimitation] : []),
-        ...(noClaims ? ['No evaluable claims could be extracted from the report.'] : []),
-        ...(evidenceOptions.claimAlignment
-          ? unverifiedKeyClaims.filter((claim) => movedClaimSet.has(claim.text))
-          : unverifiedKeyClaims
-        ).map((claim) => `Insufficient direct evidence for: ${claim.text}`),
-      ],
+      limitations: canonical.limitations,
+      limitationItems: canonical.items,
+      limitationKeys: canonical.limitationKeys,
       metrics: {
         ...preReport.metrics,
         ...qualityMetrics,
@@ -360,10 +624,32 @@ export class ResearchRunner {
       },
       budget: budget.snapshot(),
     };
+    reportPlan = {
+      ...reportPlan,
+      claims: evidence.claims,
+      contract: reportContract,
+    };
+    recorder.checkpoint('research-complete', {
+      strategy,
+      query,
+      brief: resolvedBrief,
+      report,
+      reportPlan,
+      reportContract,
+      findings,
+      sources: evidence.sources,
+      gaps,
+      passages: evidence.passages,
+      claims: evidence.claims,
+      quality,
+      trace,
+    });
     emit({ stage: 'research_complete' });
 
     return {
       report,
+      reportPlan,
+      reportContract,
       brief: resolvedBrief,
       findings,
       sources: evidence.sources,
@@ -411,4 +697,21 @@ function buildGapsFromFindings(findings, query) {
     });
   }
   return [...gaps.values()];
+}
+
+function admissibleReportSeeds(claims = []) {
+  return {
+    premiseFacts: claims
+      .filter((claim) => (
+        claim.kind === 'premise_fact'
+        && claim.evaluation?.verdict === 'supported'
+        && (claim.evaluation?.flags || claim.flags || []).includes('slot_premise_exempt')
+      ))
+      .map((claim) => String(claim.text || '').trim())
+      .filter(Boolean),
+    keyClaims: claims
+      .filter((claim) => claim.kind === 'key_claim' && !shouldMoveWeakKeyClaim(claim) && claim.evaluation?.verdict === 'supported')
+      .map((claim) => String(claim.text || '').trim())
+      .filter(Boolean),
+  };
 }

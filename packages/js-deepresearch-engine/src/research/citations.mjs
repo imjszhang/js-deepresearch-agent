@@ -1,4 +1,5 @@
 const CITATION_BLOCK_PATTERN = /\[(\d+\.\d+(?:\s*(?:[-,，])\s*\d+\.\d+)*)\]/g;
+const INTERNAL_REFERENCE_PATTERN = /\[((?:gap|slot|source|passage|claim)(?:[-_:][A-Za-z0-9_.:-]+)+)\](?!\()/gi;
 
 function addCitationKey(citations, seen, findingIndex, sourceIndex) {
   const key = `${findingIndex}.${sourceIndex}`;
@@ -41,6 +42,21 @@ export function parseCitations(text = '') {
   }
 
   return citations;
+}
+
+export function parseInternalReferenceTokens(text = '') {
+  return [...new Set(
+    [...String(text || '').matchAll(INTERNAL_REFERENCE_PATTERN)]
+      .map((match) => match[1]),
+  )];
+}
+
+export function stripInternalReferenceTokens(text = '') {
+  return String(text || '')
+    .replace(INTERNAL_REFERENCE_PATTERN, '')
+    .replace(/\s+([。．.!?！？,，;；:：])/g, '$1')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
 }
 
 export function buildCitationMap(findings = [], { sourceIdFor } = {}) {

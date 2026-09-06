@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { normalizeSourceUrl } from './source-candidates.mjs';
-import { buildClaimEvaluation, extractQualityClaims } from './claim-quality.mjs';
+import { buildClaimEvaluation, extractClaimsFromDocument, extractQualityClaims } from './claim-quality.mjs';
 import { buildCitationMap, parseCitations, resolveCitedSourceIds } from './citations.mjs';
 import { sourceHasFetchedBody } from './focused-settings.mjs';
 import {
@@ -123,7 +123,7 @@ export function alignClaimToCitedPassages(claim, {
   const citedPassages = passages.filter((passage) => citedSourceIds.includes(passage.sourceId));
   const citedSourcesWithPassages = new Set(citedPassages.map((passage) => passage.sourceId));
   const missingBodySourceIds = citedSourceIds.filter((sourceId) => !citedSourcesWithPassages.has(sourceId));
-  const keyFact = claim.kind === 'key_claim' || claim.importance === 'key';
+  const keyFact = claim.kind === 'key_claim' || claim.kind === 'premise_fact' || claim.importance === 'key';
   const enforceDirectEvidence = requiresDirectEvidence({ strategy, strictDirectEvidence });
 
   if (citationKeys.length === 0) flags.push('uncited');
@@ -310,25 +310,52 @@ export async function buildPassageArtifactsAsync({ query, findings = [], options
   });
 }
 
+function finalizeAlignedClaim(claim, index, passages, citationMap, options = {}) {
+  const aligned = alignClaimToCitedPassages(claim, {
+    passages,
+    citationMap,
+    strategy: options.strategy,
+    strictDirectEvidence: options.strictDirectEvidence,
+  });
+  return {
+    id: claim.id || hash('claim', `${index}:${aligned.text}`),
+    ...aligned,
+    canonicalClaimId: claim.canonicalClaimId || aligned.canonicalClaimId,
+    placements: claim.placements || aligned.placements,
+    boundSlotIds: claim.boundSlotIds || aligned.boundSlotIds,
+    origin: claim.origin || aligned.origin || 'markdown',
+    ...(aligned.parentClaimText ? { parentClaimId: hash('claim-parent', aligned.parentClaimText) } : {}),
+  };
+}
+
+export function alignPlanClaims({
+  document = null,
+  plan = null,
+  passages = [],
+  citationMap,
+  options = {},
+} = {}) {
+  const source = document || {
+    title: plan?.title,
+    summary: plan?.summary,
+    backgroundFacts: plan?.backgroundFacts,
+    keyFindings: plan?.keyFindings,
+    caveats: plan?.caveats,
+  };
+  return extractClaimsFromDocument(source).map((claim, index) => (
+    finalizeAlignedClaim(claim, index, passages, citationMap, options)
+  ));
+}
+
 export function alignReportClaims({
   report = '',
   passages = [],
   citationMap,
   options = {},
 } = {}) {
-  return extractQualityClaims(report).map((claim, index) => {
-    const aligned = alignClaimToCitedPassages(claim, {
-      passages,
-      citationMap,
-      strategy: options.strategy,
-      strictDirectEvidence: options.strictDirectEvidence,
-    });
-    return {
-      id: hash('claim', `${index}:${aligned.text}`),
-      ...aligned,
-      ...(aligned.parentClaimText ? { parentClaimId: hash('claim-parent', aligned.parentClaimText) } : {}),
-    };
-  });
+  return extractQualityClaims(report).map((claim, index) => (
+    finalizeAlignedClaim({ ...claim, origin: 'markdown' }, index, passages, citationMap, options)
+  ));
 }
 
 export function buildEvidenceArtifacts({ query, findings = [], report = '', options = {} }) {

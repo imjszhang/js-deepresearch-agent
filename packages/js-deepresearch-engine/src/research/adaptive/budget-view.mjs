@@ -53,6 +53,28 @@ export class ActionCostTracker {
       samples: this.samples[action].length,
     }]));
   }
+
+  exportCheckpoint() {
+    return {
+      priors: { ...this.priors },
+      samples: Object.fromEntries(
+        Object.entries(this.samples).map(([action, values]) => [action, [...values]]),
+      ),
+    };
+  }
+
+  restoreCheckpoint(checkpoint = {}) {
+    if (checkpoint.priors) this.priors = { ...ACTION_PRIORS, ...checkpoint.priors };
+    if (checkpoint.samples) {
+      this.samples = Object.fromEntries(
+        Object.keys(this.samples).map((action) => [
+          action,
+          Array.isArray(checkpoint.samples[action]) ? [...checkpoint.samples[action]].slice(-12) : [],
+        ]),
+      );
+    }
+    return this;
+  }
 }
 
 function explorationUsed(budget = {}) {

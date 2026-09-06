@@ -8,6 +8,7 @@ import {
   QUERY_ORIGINS,
 } from '../src/research/search-query-planner.mjs';
 import { searchQueryPlannerPrompt } from '../src/research/prompts.mjs';
+import { completeStructuredJson } from '../src/research/structured-llm.mjs';
 
 function llmJson(payload, { truncated = false } = {}) {
   let calls = 0;
@@ -297,7 +298,7 @@ describe('search query planner', () => {
     const result = await planSearchQueries({
       llm: llmJson({
         queries: [{
-          query: 'Anthropic Commerce Agents forkable official blueprint GitHub',
+          query: 'Anthropic Commerce Agents official blueprint GitHub',
           targetGapId: 'gap-2',
           expectedEvidence: 'official docs',
           searchOptions: { language: 'en' },
@@ -324,7 +325,76 @@ describe('search query planner', () => {
       limit: 1,
     });
     assert.equal(result.ok, true);
-    assert.equal(result.queries[0], 'Anthropic Commerce Agents forkable official blueprint GitHub');
+    assert.equal(result.queries[0], 'Anthropic Commerce Agents official blueprint GitHub');
     assert.equal(result.planned[0].searchOptions.language, 'en');
+  });
+
+  it('accepts an English product query that names the slot entity without retrieval-term padding', async () => {
+    const result = await planSearchQueries({
+      llm: llmJson({
+        queries: [{
+          query: 'Anthropic Commerce Agents announcement',
+          targetGapId: 'gap-2',
+          expectedEvidence: 'first-party product page',
+        }],
+      }),
+      mode: 'initial',
+      query: '店面会话正在变成新的货架。Anthropic 开源 Commerce Agents，是在帮零售商把货架留在自己家里，还是在用「可 fork 的正确做法」把货架标准写成 Claude 的？',
+      gap: {
+        id: 'gap-2',
+        question: '在店面会话正在变成新的货架的前提下,Anthropic 开源 Commerce Agents 是在帮零售商把货架留在自己家里,还是在用「可 fork 的正确做法」把货架标准写成 Claude 的?',
+        answerSlot: 'judgment_on_commerce_agents_design',
+        evidenceCriteria: ['first_party'],
+      },
+      brief: {
+        query: '店面会话正在变成新的货架。Anthropic 开源 Commerce Agents，是在帮零售商把货架留在自己家里，还是在用「可 fork 的正确做法」把货架标准写成 Claude 的？',
+        queryShape: 'judgment',
+        entities: ['Anthropic', 'Commerce Agents', 'Claude'],
+      },
+      limit: 1,
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.queries[0], 'Anthropic Commerce Agents announcement');
+  });
+
+  it('fails closed when structured accept throws instead of crashing the run', async () => {
+    const result = await completeStructuredJson({
+      llm: {
+        async complete() {
+          return JSON.stringify({ queries: [{ query: 'Anthropic Commerce Agents announcement' }] });
+        },
+      },
+      purpose: 'search_query_planning',
+      messages: [{ role: 'user', content: 'plan' }],
+      accept() {
+        throw new TypeError("Cannot read properties of null (reading 'reason')");
+      },
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, 'invalid_or_empty_json');
+  });
+
+  it('still rejects an off-topic English query for a Chinese first-party product slot', async () => {
+    const result = await planSearchQueries({
+      llm: llmJson({
+        queries: [{ query: 'Anthropic Claude API pricing', targetGapId: 'gap-2' }],
+      }),
+      mode: 'initial',
+      query: '店面会话正在变成新的货架。Anthropic 开源 Commerce Agents，是在帮零售商把货架留在自己家里，还是在用「可 fork 的正确做法」把货架标准写成 Claude 的？',
+      gap: {
+        id: 'gap-2',
+        question: '在店面会话正在变成新的货架的前提下,Anthropic 开源 Commerce Agents 是在帮零售商把货架留在自己家里,还是在用「可 fork 的正确做法」把货架标准写成 Claude 的?',
+        answerSlot: 'judgment_on_commerce_agents_design',
+        evidenceCriteria: ['first_party'],
+      },
+      brief: {
+        query: '店面会话正在变成新的货架。Anthropic 开源 Commerce Agents，是在帮零售商把货架留在自己家里，还是在用「可 fork 的正确做法」把货架标准写成 Claude 的？',
+        entities: ['Anthropic', 'Commerce Agents', 'Claude'],
+      },
+      limit: 1,
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.failure, 'scope_mismatch');
+    assert.equal(result.dedup.rejected[0].reason, 'scope_mismatch');
   });
 });

@@ -10,6 +10,9 @@ export class OpenAICompatibleProvider {
   constructor(config) {
     this.config = config;
     this.fetch = typeof config.fetch === 'function' ? config.fetch : globalThis.fetch;
+    this.provider = 'openai-compatible';
+    this.model = config.model || null;
+    this.transportOptions = this.fetch?.transportOptions || null;
   }
 
   async complete(args) {
@@ -17,20 +20,12 @@ export class OpenAICompatibleProvider {
     return result.text;
   }
 
-  async completeWithMetadata({ messages, signal, temperature, maxTokens, reasoningEffort }) {
-    if (!this.config.apiKey) {
-      throw new Error('API key is required for OpenAI-compatible provider.');
-    }
-
+  buildRecordedRequest({ messages, temperature, maxTokens, reasoningEffort } = {}) {
     const baseUrl = (this.config.baseUrl || 'https://api.openai.com/v1').replace(/\/$/, '');
-    const response = await this.fetch(`${baseUrl}/chat/completions`, {
-      method: 'POST',
-      signal,
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${this.config.apiKey}`,
-      },
-      body: JSON.stringify({
+    return {
+      provider: this.provider,
+      endpoint: `${baseUrl}/chat/completions`,
+      body: {
         model: this.config.model,
         messages,
         temperature: temperature ?? this.config.temperature,
@@ -40,7 +35,29 @@ export class OpenAICompatibleProvider {
         ...((reasoningEffort || this.config.reasoningEffort || (/qwen/i.test(this.config.model || '') ? 'none' : null))
           ? { reasoning_effort: reasoningEffort || this.config.reasoningEffort || 'none' }
           : {}),
-      }),
+      },
+    };
+  }
+
+  async completeWithMetadata({ messages, signal, temperature, maxTokens, reasoningEffort }) {
+    if (!this.config.apiKey) {
+      throw new Error('API key is required for OpenAI-compatible provider.');
+    }
+
+    const request = this.buildRecordedRequest({
+      messages,
+      temperature,
+      maxTokens,
+      reasoningEffort,
+    });
+    const response = await this.fetch(request.endpoint, {
+      method: 'POST',
+      signal,
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${this.config.apiKey}`,
+      },
+      body: JSON.stringify(request.body),
     });
 
     if (!response.ok) {

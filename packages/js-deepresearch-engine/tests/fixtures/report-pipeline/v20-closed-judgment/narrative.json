@@ -1,0 +1,18 @@
+{
+  "title": "Commerce Agents 判断",
+  "summary": [
+    "Anthropic 把 Commerce Agents 写成可 fork 的开源蓝图，零售商可以在自己的站点完成结账。 [1.1]"
+  ],
+  "backgroundFacts": [
+    "Anthropic published Commerce Agents as an open-source blueprint. [1.1]"
+  ],
+  "keyFindings": [
+    {
+      "heading": "判断",
+      "claims": [
+        "Anthropic 把 Commerce Agents 写成可 fork 的开源蓝图，零售商可以在自己的站点完成结账。 [1.1]"
+      ]
+    }
+  ],
+  "caveats": []
+}

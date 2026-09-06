@@ -24,6 +24,8 @@ export async function runIterativeStrategy(context) {
     settings,
     brief,
     trace = [],
+    recorder,
+    budget,
   } = context;
   const resolvedConcurrency = resolveStrategyConcurrency(search, concurrency, questionCount + 1);
   const findings = [];
@@ -129,6 +131,20 @@ export async function runIterativeStrategy(context) {
       queryOrigin: iteration === 1 && index === 0 ? 'user_query' : 'llm_planner',
       plannerMode: 'initial',
     })));
+    recorder?.checkpoint?.('quick-iteration-complete', {
+      schemaVersion: 1,
+      strategy: 'quick',
+      query,
+      brief,
+      iteration,
+      iterations,
+      findings,
+      searchOutcomes,
+      rejectedQueries,
+      queryMemory: queryMemory?.exportCheckpoint?.() || null,
+      budget: budget?.exportCheckpoint?.() || budget?.snapshot?.() || null,
+      trace,
+    });
   }
 
   return findings;

@@ -31,7 +31,13 @@ describe('intel store import', () => {
     return dir;
   }
 
-  function writeSession(root, strategy, timestamp, { researchId = null, loopVersion = null, trace = null, brief = null } = {}) {
+  function writeSession(root, strategy, timestamp, {
+    researchId = null,
+    loopVersion = null,
+    trace = null,
+    brief = null,
+    runStatus = null,
+  } = {}) {
     const sessionDir = path.join(root, strategy, timestamp);
     fs.mkdirSync(sessionDir, { recursive: true });
     fs.writeFileSync(path.join(sessionDir, 'report.md'), '# Report\n\nClaim [1.1].', 'utf8');
@@ -55,6 +61,12 @@ describe('intel store import', () => {
     }
     if (brief) {
       fs.writeFileSync(path.join(sessionDir, 'brief.json'), JSON.stringify(brief, null, 2), 'utf8');
+    }
+    if (runStatus) {
+      fs.writeFileSync(path.join(sessionDir, 'run.json'), JSON.stringify({
+        schemaVersion: 1,
+        status: runStatus,
+      }, null, 2), 'utf8');
     }
     return sessionDir;
   }
@@ -96,6 +108,10 @@ describe('intel store import', () => {
       brief: { schemaVersion: 1, query: 'test query', depth: 'focused', exclusions: ['forums'] },
     });
     writeSession(workRoot, 'source-based', '2026-05-26_070000', { researchId: 'existing-id' });
+    writeSession(workRoot, 'source-based', '2026-05-26_075000', {
+      researchId: 'failed-id',
+      runStatus: 'failed',
+    });
     fs.mkdirSync(path.join(workRoot, 'rapid', '2026-05-26_080000'), { recursive: true });
 
     const engine = createIntelStoreEngine({ baseDir: intelDir });
@@ -108,8 +124,12 @@ describe('intel store import', () => {
 
     const summary = importWorkDirSessions({ root: workRoot, engine });
     assert.equal(summary.imported, 1);
-    assert.equal(summary.skipped, 2);
+    assert.equal(summary.skipped, 3);
     assert.equal(summary.failed, 0);
+    assert.equal(
+      summary.items.find((item) => item.researchId === null && item.timestamp === '2026-05-26_075000').reason,
+      'session status is failed',
+    );
 
     const imported = engine.readSource('research_runs', {
       name: 'imported__source-based__2026-05-26_065414',

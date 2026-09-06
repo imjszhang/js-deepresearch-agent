@@ -8,6 +8,7 @@ import {
   judgeOpenSlotSupport,
   selectSlotPassages,
   slotSupportFingerprint,
+  slotsNeedingSupport,
 } from '../src/research/gap-slot-support.mjs';
 import { promoteSuccessfulSources } from '../src/research/slot-promotion.mjs';
 import { ResearchState } from '../src/research/adaptive/research-state.mjs';
@@ -66,6 +67,116 @@ describe('gap slot support judgments', () => {
     const evaluated = evaluateGapEvidence(gaps[0], findings[0].sources, { slotSupport: gaps[0].slotSupport });
     assert.equal(evaluated.status, 'verified');
     assert.equal(evaluated.slotSupport.quoteAnchored, true);
+  });
+
+  it('anchors an HTML-encoded source quote and preserves prior anchored support on a later judge failure', async () => {
+    const gaps = [slotGap('gap-2', 'commerce_judgment')];
+    const findings = [finding(
+      'gap-2',
+      'https://claude.com/solutions/commerce',
+      'Go live before code freeze to capture this year&#x27;s traffic. Your relationships stay yours.',
+    )];
+    const result = await judgeOpenSlotSupport({
+      query: 'Who retains the customer relationship?',
+      gaps,
+      findings,
+      brief: {
+        queryShape: 'judgment',
+        consequentialClaims: ['Retailers retain their customer relationships.'],
+      },
+      llm: {
+        async complete({ messages }) {
+          assert.match(messages[0].content, /slotMode=research_judgment/);
+          assert.match(messages[1].content, /slotMode: research_judgment/);
+          return JSON.stringify({
+            judgments: [{
+              gapId: 'gap-2',
+              verdict: 'supported',
+              quote: 'Go live before code freeze to capture this year’s traffic. Your relationships stay yours.',
+            }],
+          });
+        },
+      },
+    });
+    applySlotSupportJudgments(gaps, result.judgments);
+    assert.equal(gaps[0].slotSupport.quoteAnchored, true);
+    assert.equal(gaps[0].slotSupport.verdict, 'supported');
+
+    applySlotSupportJudgments(gaps, [{
+      ...failClosedSupport('temporary_judge_failure'),
+      gapId: 'gap-2',
+    }]);
+    assert.equal(gaps[0].slotSupport.quoteAnchored, true);
+    assert.equal(gaps[0].slotSupport.verdict, 'supported');
+  });
+
+  it('reopens a verified anchored judgment after a later official body arrives', async () => {
+    const gaps = [slotGap('gap-2', 'judgment_on_commerce_agents_design')];
+    gaps[0].preferredHosts = ['anthropic.com'];
+    const secondary = finding(
+      'gap-2',
+      'https://www.aicodex.to/articles/claude-commerce-agents',
+      'The blueprint is deliberately portable across the deployment surfaces: Claude API Amazon Bedrock Microsoft Foundry Google Cloud Vertex AI. Product prices stay with the merchant.',
+    );
+    let calls = 0;
+    const llm = {
+      async complete({ messages }) {
+        calls += 1;
+        const text = JSON.stringify(messages);
+        if (text.includes('claude.com/solutions')) {
+          return JSON.stringify({
+            judgments: [{
+              gapId: 'gap-2',
+              verdict: 'partially_supported',
+              quote: 'Claude is the intelligence layer, not the storefront or the checkout.',
+            }],
+          });
+        }
+        return JSON.stringify({
+          judgments: [{
+            gapId: 'gap-2',
+            verdict: 'supported',
+            quote: 'The blueprint is deliberately portable across the deployment surfaces',
+          }],
+        });
+      },
+    };
+    const first = await judgeOpenSlotSupport({
+      query: 'Who keeps the shelf?',
+      gaps,
+      findings: [secondary],
+      llm,
+    });
+    applySlotSupportJudgments(gaps, first.judgments);
+    const evaluated = evaluateGapEvidence(gaps[0], secondary.sources, { slotSupport: gaps[0].slotSupport });
+    Object.assign(gaps[0], evaluated);
+    assert.equal(gaps[0].status, 'verified');
+    assert.equal(gaps[0].slotSupport.verdict, 'supported');
+    assert.equal(calls, 1);
+    assert.equal(slotsNeedingSupport(gaps, { findings: [secondary] }).length, 0);
+
+    const official = {
+      gapId: 'gap-2',
+      sources: [{
+        id: 'https://claude.com/solutions/commerce',
+        url: 'https://claude.com/solutions/commerce',
+        content: 'Claude is the intelligence layer, not the storefront or the checkout. Merchants keep catalog and customer relationships.',
+        fetchStatus: 'ok',
+        assessment: { firstParty: true, publisherType: 'official', contentKind: 'article' },
+      }],
+    };
+    assert.equal(slotsNeedingSupport(gaps, { findings: [secondary, official] }).length, 1);
+    const second = await judgeOpenSlotSupport({
+      query: 'Who keeps the shelf?',
+      gaps,
+      findings: [secondary, official],
+      llm,
+    });
+    assert.equal(second.cacheMisses, 1);
+    assert.equal(calls, 2);
+    applySlotSupportJudgments(gaps, second.judgments);
+    assert.equal(gaps[0].slotSupport.verdict, 'partially_supported');
+    assert.ok(gaps[0].slotSupport.officialSourceIds.includes('https://claude.com/solutions/commerce'));
   });
 
   it('keeps unrelated successful bodies at body_read', async () => {
@@ -379,7 +490,8 @@ describe('gap slot support judgments', () => {
     });
     assert.ok(promotions.some((item) => item.targetGapId === ownership.id));
     assert.notEqual(ownership.status, 'blocked');
-    assert.equal(ownership.blockedReason, null);
+    assert.equal(ownership.evidenceStatus || ownership.status, 'body_read');
+    assert.equal(ownership.blockedReason, 'repair_exhausted');
   });
 
   it('does not promote a product body into ownership from a broad original query', () => {
@@ -408,5 +520,198 @@ describe('gap slot support judgments', () => {
       entityAliases: ['智谱'],
     });
     assert.equal(promotions.some((item) => item.targetGapId === ownership.id), false);
+  });
+});
+
+function firstPartyFinding(gapId, url, content, extra = {}) {
+  return {
+    gapId,
+    sources: [{
+      id: url,
+      url,
+      content,
+      fetchStatus: 'ok',
+      assessment: extra.assessment || { firstParty: extra.firstParty === true, publisherType: extra.publisherType || 'unknown', contentKind: extra.contentKind || 'article' },
+    }],
+  };
+}
+
+describe('criterion-aware slot passage selection', () => {
+  const question = 'Anthropic 开源 Commerce Agents 是在帮零售商把货架留在自己家里，还是在用可 fork 的正确做法把货架标准写成 Claude 的?';
+  const reprint = '店面会话正在变成新的货架。Anthropic 开源 Commerce Agents，零售商可以把货架留在自己家里，可 fork 的正确做法把货架标准写成 Claude 的。'.repeat(2);
+  const official = 'Anthropic published Commerce Agents as an open-source blueprint. Retailers can fork the reference implementation and keep checkout on their own site.';
+
+  it('reserves a first_party official passage in topK over higher-overlap reprints', () => {
+    const gap = {
+      id: 'gap-2',
+      question,
+      requiredSlot: true,
+      evidenceCriteria: ['first_party'],
+    };
+    const findings = [
+      firstPartyFinding('gap-2', 'https://explainx.ai/a', reprint),
+      firstPartyFinding('gap-2', 'https://theroberthu.com/a', reprint),
+      firstPartyFinding('gap-2', 'https://juliangoldie.com/a', reprint),
+      firstPartyFinding('gap-2', 'https://reprint.test/a', reprint),
+      firstPartyFinding('gap-2', 'https://mirror.test/a', reprint),
+      firstPartyFinding('gap-2', 'https://www.claude.com/blog/commerce', official, { firstParty: true, publisherType: 'official' }),
+    ];
+    const selected = selectSlotPassages(gap, findings, { topK: 3 });
+    assert.ok(selected.some((item) => item.sourceId === 'https://www.claude.com/blog/commerce'));
+    assert.equal(selected[0].assessment.firstParty, true);
+  });
+
+  it('cache-misses and rejudges after a first-party body arrives', async () => {
+    const gap = {
+      id: 'gap-2',
+      question,
+      requiredSlot: true,
+      status: 'body_read',
+      evidenceCriteria: ['first_party'],
+    };
+    const reprints = [
+      firstPartyFinding('gap-2', 'https://explainx.ai/a', reprint),
+      firstPartyFinding('gap-2', 'https://theroberthu.com/a', reprint),
+      firstPartyFinding('gap-2', 'https://juliangoldie.com/a', reprint),
+    ];
+    const cache = new Map();
+    let calls = 0;
+    const llm = {
+      async complete({ messages }) {
+        calls += 1;
+        const text = JSON.stringify(messages);
+        if (text.includes('claude.com')) {
+          return JSON.stringify({
+            judgments: [{
+              gapId: 'gap-2',
+              verdict: 'supported',
+              quote: 'Retailers can fork the reference implementation',
+            }],
+          });
+        }
+        return JSON.stringify({
+          judgments: [{
+            gapId: 'gap-2',
+            verdict: 'unsupported',
+            quote: '店面会话正在变成新的货架',
+          }],
+        });
+      },
+    };
+    const first = await judgeOpenSlotSupport({
+      query: question,
+      gaps: [gap],
+      findings: reprints,
+      llm,
+      cache,
+    });
+    applySlotSupportJudgments([gap], first.judgments);
+    const firstEval = evaluateGapEvidence(gap, reprints.flatMap((item) => item.sources), { slotSupport: gap.slotSupport });
+    assert.equal(firstEval.status, 'limited');
+    assert.ok(firstEval.missingEvidence.includes('criterion:first_party'));
+    assert.equal(first.cacheMisses, 1);
+
+    const withOfficial = [
+      ...reprints,
+      firstPartyFinding('gap-2', 'https://www.claude.com/blog/commerce', official, { firstParty: true, publisherType: 'official' }),
+    ];
+    const second = await judgeOpenSlotSupport({
+      query: question,
+      gaps: [gap],
+      findings: withOfficial,
+      llm,
+      cache,
+    });
+    assert.equal(second.cacheMisses, 1);
+    assert.equal(second.cacheHits, 0);
+    assert.ok(second.selections[0].selectedSourceIds.includes('https://www.claude.com/blog/commerce'));
+    applySlotSupportJudgments([gap], second.judgments);
+    const secondEval = evaluateGapEvidence(gap, withOfficial.flatMap((item) => item.sources), { slotSupport: gap.slotSupport });
+    assert.equal(secondEval.status, 'verified');
+    assert.equal(calls, 2);
+  });
+
+  it('changes the fingerprint when firstParty assessment flips to true', () => {
+    const gap = {
+      id: 'gap-2',
+      question,
+      requiredSlot: true,
+      evidenceCriteria: ['first_party'],
+    };
+    const before = firstPartyFinding('gap-2', 'https://www.claude.com/blog/commerce', official, { firstParty: false });
+    const after = firstPartyFinding('gap-2', 'https://www.claude.com/blog/commerce', official, { firstParty: true });
+    assert.notEqual(
+      slotSupportFingerprint(gap, selectSlotPassages(gap, [before]), {
+        criterionPool: { first_party: [] },
+      }),
+      slotSupportFingerprint(gap, selectSlotPassages(gap, [after]), {
+        criterionPool: { first_party: ['https://www.claude.com/blog/commerce'] },
+      }),
+    );
+  });
+
+  it('keeps an official but semantically unrelated body at body_read', async () => {
+    const gap = slotGap('gap-2', 'SubjectA');
+    gap.evidenceCriteria = ['first_party'];
+    const findings = [firstPartyFinding('gap-2', 'https://docs.example.com/weather', UNRELATED_BODY, { firstParty: true })];
+    const result = await judgeOpenSlotSupport({
+      query: 'What is SubjectA official status?',
+      gaps: [gap],
+      findings,
+      llm: {
+        async complete() {
+          return JSON.stringify({
+            judgments: [{
+              gapId: 'gap-2',
+              verdict: 'unsupported',
+              quote: 'weather patterns, rainfall totals, and agricultural cycles',
+            }],
+          });
+        },
+      },
+    });
+    applySlotSupportJudgments([gap], result.judgments);
+    const evaluated = evaluateGapEvidence(gap, findings[0].sources, { slotSupport: gap.slotSupport });
+    assert.equal(evaluated.status, 'body_read');
+    assert.ok(evaluated.missingEvidence.includes('slot_support'));
+    assert.equal(evaluated.missingEvidence.includes('criterion:first_party'), false);
+  });
+
+  it('requires a citable number for numeric criteria', () => {
+    const gap = { id: 'gap-n', requiredSlot: true, evidenceCriteria: ['numeric'], question: 'revenue' };
+    const withNumber = firstPartyFinding('gap-n', 'https://a.test/n', 'Revenue reached $12,400,000 in 2026.');
+    const withoutNumber = firstPartyFinding('gap-n', 'https://a.test/w', 'The company discussed growth qualitatively.');
+    const selected = selectSlotPassages(gap, [withoutNumber, withNumber], { topK: 1 });
+    assert.equal(selected[0].sourceId, 'https://a.test/n');
+    const missing = evaluateGapEvidence(gap, withoutNumber.sources);
+    assert.ok(missing.missingEvidence.includes('criterion:numeric'));
+  });
+
+  it('requires filing provenance for filing criteria', () => {
+    const gap = { id: 'gap-f', requiredSlot: true, evidenceCriteria: ['filing'], question: 'ownership' };
+    const filing = firstPartyFinding('gap-f', 'https://hkex.test/a', 'This prospectus lists shareholders.', { contentKind: 'filing', publisherType: 'exchange_filing' });
+    const blog = firstPartyFinding('gap-f', 'https://blog.test/a', 'A recap of the listing.');
+    const selected = selectSlotPassages(gap, [blog, filing], { topK: 1 });
+    assert.equal(selected[0].sourceId, 'https://hkex.test/a');
+    assert.ok(evaluateGapEvidence(gap, blog.sources).missingEvidence.includes('criterion:filing'));
+  });
+
+  it('requires mainstream_media publisherType', () => {
+    const gap = { id: 'gap-m', requiredSlot: true, evidenceCriteria: ['mainstream_media'], question: 'coverage' };
+    const media = firstPartyFinding('gap-m', 'https://reuters.test/a', 'Mainstream coverage of the launch.', { publisherType: 'mainstream_media' });
+    const ugc = firstPartyFinding('gap-m', 'https://forum.test/a', 'User discussion of the launch.', { publisherType: 'ugc' });
+    const selected = selectSlotPassages(gap, [ugc, media], { topK: 1 });
+    assert.equal(selected[0].sourceId, 'https://reuters.test/a');
+    assert.ok(evaluateGapEvidence(gap, ugc.sources).missingEvidence.includes('criterion:mainstream_media'));
+  });
+
+  it('requires a user-named host for user_named criteria', () => {
+    const gap = { id: 'gap-u', requiredSlot: true, evidenceCriteria: ['user_named'], question: 'official site' };
+    const brief = { requiredHosts: ['claude.com'] };
+    const named = firstPartyFinding('gap-u', 'https://www.claude.com/solutions/commerce', official, { publisherType: 'official' });
+    const other = firstPartyFinding('gap-u', 'https://news.test/a', official);
+    const selected = selectSlotPassages(gap, [other, named], { topK: 1, brief, query: 'see claude.com' });
+    assert.equal(selected[0].sourceId, 'https://www.claude.com/solutions/commerce');
+    assert.ok(evaluateGapEvidence(gap, other.sources, { brief, query: 'see claude.com' }).missingEvidence.includes('criterion:user_named'));
   });
 });

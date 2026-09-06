@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import {
   applyClaimEntailment,
   applyEntailmentVerdict,
+  passageContainsQuote,
   shouldJudgeClaim,
 } from '../src/index.mjs';
 
@@ -32,6 +33,7 @@ describe('claim entailment gating', () => {
     assert.equal(shouldJudgeClaim(baseClaim({ flags: ['snippet_only'] }), [passage]), false);
     assert.equal(shouldJudgeClaim(baseClaim({ flags: ['missing_direct_evidence'] }), [passage]), false);
     assert.equal(shouldJudgeClaim(baseClaim(), [passage]), true);
+    assert.equal(shouldJudgeClaim(baseClaim({ kind: 'premise_fact' }), [passage]), true);
   });
 
   it('keeps the rule verdict when the quote is not in the passage', () => {
@@ -43,15 +45,53 @@ describe('claim entailment gating', () => {
     assert.equal(next.evaluation.verdict, 'unverifiable');
   });
 
+  it('anchors equivalent HTML entities and Unicode punctuation without fuzzy matching', () => {
+    const htmlPassage = {
+      id: 'p-html',
+      sourceId: 's-html',
+      text: 'Go live before code freeze to capture this year&#x27;s traffic. Your relationships stay yours.',
+    };
+    assert.equal(
+      passageContainsQuote(
+        [htmlPassage],
+        'Go live before code freeze to capture this year’s traffic. Your relationships stay yours.',
+      ),
+      true,
+    );
+    assert.equal(
+      passageContainsQuote([htmlPassage], 'Your relationships and customer data stay yours.'),
+      false,
+    );
+  });
+
   it('accepts a Chinese paraphrase when the quote matches a cited passage', () => {
     const next = applyEntailmentVerdict(
       baseClaim(),
-      { verdict: 'supported', quote: '专为 Apple Silicon 的统一内存架构设计' },
+      {
+        verdict: 'supported',
+        quote: '专为 Apple Silicon 的统一内存架构设计',
+        claimRole: 'source_attributed_fact',
+      },
       [passage],
     );
     assert.equal(next.evaluation.verdict, 'supported');
     assert.equal(next.evaluation.method, 'llm');
     assert.equal(next.evaluation.origin, 'runtime_llm');
+    assert.equal(next.claimRole, 'source_attributed_fact');
+  });
+
+  it('fails closed on an unknown claim role without discarding a valid entailment verdict', () => {
+    const next = applyEntailmentVerdict(
+      baseClaim(),
+      {
+        verdict: 'supported',
+        quote: '专为 Apple Silicon 的统一内存架构设计',
+        claimRole: 'fact_but_trust_me',
+      },
+      [passage],
+    );
+    assert.equal(next.evaluation.verdict, 'supported');
+    assert.equal(next.claimRole, undefined);
   });
 
   it('does not call the LLM for already supported claims', async () => {

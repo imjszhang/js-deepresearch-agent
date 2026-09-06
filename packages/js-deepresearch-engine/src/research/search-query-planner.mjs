@@ -85,6 +85,10 @@ export function validatePlannedQuery(query, {
   evidenceScope = 'web',
   mode = 'initial',
   scopeTexts = [],
+  targetGapId = null,
+  expectedEvidence = null,
+  intent = null,
+  sourceType = null,
 } = {}) {
   const text = String(query || '').replace(/\s+/g, ' ').trim();
   if (!text) return { ok: false, reason: 'empty_query' };
@@ -110,8 +114,19 @@ export function validatePlannedQuery(query, {
       return { ok: false, reason: 'site_mode_violation' };
     }
   }
-  if (gap && Object.keys(gap).length && !queryMatchesGapScope(text, gap, entities, scopeTexts)) {
-    return { ok: false, reason: 'scope_mismatch' };
+  if (gap && Object.keys(gap).length) {
+    let inScope;
+    try {
+      inScope = queryMatchesGapScope(text, gap, entities, scopeTexts, [], {
+        targetGapId: targetGapId || gap.id || null,
+        expectedEvidence,
+        intent,
+        sourceType,
+      });
+    } catch {
+      inScope = false;
+    }
+    if (!inScope) return { ok: false, reason: 'scope_mismatch' };
   }
   const duplicate = (comparedQueries || []).find((seen) => (
     normalizeQuery(seen) === normalizeQuery(text)
@@ -187,7 +202,13 @@ export async function planSearchQueries({
     evidenceScope,
   });
   const accept = (parsed) => extractQueryItems(parsed).some((item) => (
-    validatePlannedQuery(item.query, validationOptions).ok
+    validatePlannedQuery(item.query, {
+      ...validationOptions,
+      targetGapId: item.targetGapId || targetGap?.id || gapId || null,
+      expectedEvidence: item.expectedEvidence,
+      intent: item.intent,
+      sourceType: item.sourceType,
+    }).ok
   ));
   const promptArgs = {
     mode: resolvedMode,
@@ -424,6 +445,10 @@ function finalizeQueries(items, {
   for (const item of items) {
     const validation = validatePlannedQuery(item.query, {
       ...validationOptions,
+      targetGapId: item.targetGapId || gapId || validationOptions.gap?.id || null,
+      expectedEvidence: item.expectedEvidence,
+      intent: item.intent,
+      sourceType: item.sourceType,
       comparedQueries: [
         ...(validationOptions.comparedQueries || []),
         ...accepted.map((entry) => entry.query),
@@ -505,7 +530,7 @@ function buildPlanResult({
 
 function failureFrom(first, second, rejected = []) {
   if (first?.reason === 'no_llm') return 'no_llm';
-  const reasons = rejected.map((item) => item.reason).filter(Boolean);
+  const reasons = rejected.map((item) => item?.reason).filter(Boolean);
   if (reasons.includes('local_site_forbidden')) return 'local_site_forbidden';
   if (reasons.includes('site_mode_violation')) return 'site_mode_violation';
   if (reasons.includes('scope_mismatch')) return 'scope_mismatch';

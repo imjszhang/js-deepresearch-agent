@@ -1,14 +1,15 @@
 import { enrichFindings } from '../source-enricher.mjs';
 import { resolveReadSettings } from '../read-settings.mjs';
 import { applyExploratoryBudget, effectiveExploratoryMaxSteps, resolveExploratorySettings } from '../exploratory-settings.mjs';
-import { decideAdaptiveAction, fallbackAdaptiveAction, evaluateAnswerReadiness, decomposeQuery, pickUnreadCandidates, belowHardCapFrom } from '../adaptive/agent-policy.mjs';
+import { decideAdaptiveAction, fallbackAdaptiveAction, evaluateAnswerReadiness, decomposeQuery, pickUnreadCandidates, belowHardCapFrom, padFloorExploreAction, shouldSafetyCapInvalidStep } from '../adaptive/agent-policy.mjs';
 import { ResearchState } from '../adaptive/research-state.mjs';
 import { classifyResearchQuery } from '../adaptive/exploratory-sufficiency.mjs';
 import { inferResearchProfile } from '../adaptive/research-profile.mjs';
 import { applyContractGaps, planAndNormalizeContract } from '../research-contract.mjs';
 import { applySlotSupportJudgments, judgeOpenSlotSupport } from '../gap-slot-support.mjs';
+import { evidenceStatusOf, isRepairTerminal } from '../gap-state.mjs';
 import { mergeResearchBrief, researchBriefFromInput } from '../research-brief.mjs';
-import { classifyFetchedBody, sanitizeUnusableSourceBody } from '../body-quality.mjs';
+import { classifyFetchedBody, isRetryableReadFailure, MAX_RETRYABLE_READ_ATTEMPTS, sanitizeUnusableSourceBody } from '../body-quality.mjs';
 import {
   evaluateSourceRelevance,
   inferEvidenceScope,
@@ -101,7 +102,14 @@ function attachLoopMeta(findings, meta) {
 function selectedFinding(state, sourceIds, gapId) {
   const sources = sourceIds.map((id) => state.candidates.get(id)).filter(Boolean);
   const gap = state.gaps.find((item) => item.id === gapId) || state.gaps[0];
-  return { question: gap.question, gapId: gap.id, sources };
+  return {
+    question: gap.question,
+    gapId: gap.id,
+    contractSlotId: gap.contractSlotId || null,
+    parentGapId: gap.parentGapId || null,
+    answerSlot: gap.answerSlot || null,
+    sources,
+  };
 }
 
 function addSerpKnowledge(state, results, gapId) {
@@ -196,7 +204,8 @@ async function filterDuplicateQueries(queries, { state, queryMemory, gapId, embe
     state.noteDuplicateQuery?.();
     state.embeddingTraces.push({ purpose: 'query_dedup_decision', gapId, query, rejectedAt: 'deterministic_scope' });
   });
-  for (const rejection of result.rejected) {
+  for (const rejection of result?.rejected || []) {
+    if (!rejection) continue;
     state.noteDuplicateQuery?.();
     state.embeddingTraces.push({
       purpose: 'query_dedup_decision',
@@ -235,18 +244,25 @@ function hasEligibleUnread(state, gaps = []) {
 function allUnresolvedBlocked(state, gate) {
   const targets = contractRepairTargets(state, gate);
   if (!targets.length) return false;
-  if (!targets.every((gap) => gap.status === 'blocked')) return false;
+  if (!targets.every((gap) => isRepairTerminal(gap))) return false;
   return !hasEligibleUnread(state, targets);
+}
+
+function persistPlannerExhaustion(state, stopDetail) {
+  if (!['query_planner_exhausted', 'repair_exhausted'].includes(stopDetail)) return;
+  for (const gap of contractRepairTargets(state, state.readiness)) {
+    if (evidenceStatusOf(gap) === 'verified') continue;
+    state.markRepairTerminal(gap.id, stopDetail, { phase: 'planner' });
+  }
 }
 
 function safetyStopDetail(state, { trigger } = {}) {
   if (trigger === 'consecutive_invalid') return 'consecutive_invalid_steps';
   if (trigger === 'all_unresolved_blocked') {
     const last = state.recovery.lastPlannerFailure;
-    const lastReason = typeof last === 'object' ? last.reason : last;
     if (last && typeof last === 'object' && last.step === state.step && last.gapId) {
       const remaining = contractRepairTargets(state, state.readiness);
-      if (remaining.some((gap) => gap.id === last.gapId && gap.status === 'blocked') && lastReason) {
+      if (remaining.some((gap) => gap.id === last.gapId && isRepairTerminal(gap)) && last.reason) {
         return 'query_planner_exhausted';
       }
     }
@@ -293,7 +309,7 @@ export async function resolveRecoveryAction(state, {
   const repair = nextSlotRepairAction(state, { readiness: gate, maxQueries: maxQueriesPerStep });
   let gap = state.getGap(repair?.gapId || gapId || state.focusGap()?.id);
   if (repair?.action === 'read') return repair;
-  if (!gap || gap.status === 'blocked') return null;
+  if (!gap || isRepairTerminal(gap)) return null;
   const filter = (queries) => filterDuplicateQueries(queries, {
     state,
     queryMemory,
@@ -332,7 +348,6 @@ export async function resolveRecoveryAction(state, {
       repairTarget: gap.id,
     };
   }
-  if (!plan.ok) state.setPlannerFailure(plan.failure, { gapId: gap.id, stage: 'recovery' });
   const userQuery = String(state.query || '').trim();
   const unusedUser = userQuery ? await filter([userQuery]) : [];
   if (unusedUser.length) {
@@ -443,8 +458,14 @@ async function observeRerank({ state, gap, providers, signal, trace, budget, rel
         result: { provider: result.provider, model: result.model || model, degraded: result.degraded },
       });
       decidedIds.add(item.id);
-      if (decision.accepted) acceptedCount += 1;
-      else rejectedCount += 1;
+      if (decision.accepted) {
+        acceptedCount += 1;
+        if (decision.lowRerank) {
+          state.relevance.rerankLowScore = (state.relevance.rerankLowScore || 0) + 1;
+        }
+      } else {
+        rejectedCount += 1;
+      }
     }
     for (const entry of pending) {
       if (!decidedIds.has(entry.source.id)) missingResults += 1;
@@ -477,7 +498,19 @@ async function observeRerank({ state, gap, providers, signal, trace, budget, rel
 }
 
 export async function runExploratoryLoop(context) {
-  const { query, llm, search, signal, emit, settings, budget, queryMemory, trace, researchProviders } = context;
+  const {
+    query,
+    llm,
+    search,
+    signal,
+    emit,
+    settings,
+    budget,
+    queryMemory,
+    trace,
+    researchProviders,
+    recorder,
+  } = context;
   const exploratory = resolveExploratorySettings(settings);
   const readPolicy = resolveReadSettings(settings, { strategy: 'exploratory' });
   const queryShape = classifyResearchQuery(query);
@@ -517,6 +550,26 @@ export async function runExploratoryLoop(context) {
   let stopRequiredAmount = null;
   let pendingStopReason = null;
   let consecutiveInvalidSteps = 0;
+  const checkpointState = (boundary, extra = {}) => recorder?.checkpoint?.(
+    boundary,
+    state.exportCheckpoint({
+      queryMemory,
+      loopLocal: {
+        consecutiveInvalidSteps,
+        stopReason,
+        stopDetail,
+        stopRequiredAmount,
+        pendingStopReason,
+        degraded,
+      },
+    }),
+    {
+      strategy: 'exploratory',
+      loopStep: state.step,
+      traceLength: trace.length,
+      ...extra,
+    },
+  );
 
   emit({ stage: 'assessing_query', step: 0, maxSteps: state.maxSteps });
   emit({ stage: 'gap_opened', gapId: 'gap-1', question: query });
@@ -564,6 +617,7 @@ export async function runExploratoryLoop(context) {
       maxUrlsPerIteration: maxReads,
       maxUrlsTotal: maxReads,
       maxContentChars: readPolicy.maxContentChars,
+      maxFetchChars: readPolicy.maxFetchChars,
       enrichConcurrency: readPolicy.enrichConcurrency,
       llm,
       signal,
@@ -575,6 +629,7 @@ export async function runExploratoryLoop(context) {
       entities: state.brief?.entities || state.profile?.brief?.entities || [],
       entityAliases: state.brief?.entityAliases || state.profile?.brief?.entityAliases || [],
       observedHosts: [...(state.observedHosts || [])],
+      recorder,
     }))[0];
     const classifiedSources = [];
     let successful = 0;
@@ -623,10 +678,19 @@ export async function runExploratoryLoop(context) {
         },
       }, quality);
       classifiedSources.push(next);
-      state.readSourceIds.add(id);
       const existing = state.candidates.get(id) || {};
       const existingMatch = existing.gapMatches?.[targetGap?.id] || {};
-      state.candidates.set(id, { ...existing, ...next, id, freq: existing.freq || 1 });
+      const readAttempts = Number(existing.readAttempts || 0) + 1;
+      const retryable = isRetryableReadFailure(quality);
+      const consumeRead = !retryable || readAttempts >= MAX_RETRYABLE_READ_ATTEMPTS;
+      state.candidates.set(id, {
+        ...existing,
+        ...next,
+        id,
+        freq: existing.freq || 1,
+        readAttempts,
+        status: consumeRead ? (next.status || existing.status) : 'unread',
+      });
       const stored = state.candidates.get(id);
       stored.gapMatches = {
         ...(stored.gapMatches || {}),
@@ -635,7 +699,13 @@ export async function runExploratoryLoop(context) {
           relevanceDecision: bodyRelevance,
         },
       };
-      state.markCandidateStatus(id, quality.status, quality.reason);
+      if (consumeRead) {
+        state.readSourceIds.add(id);
+        state.markCandidateStatus(id, quality.status, quality.reason);
+      } else {
+        stored.status = 'unread';
+        stored.skipReason = quality.reason;
+      }
       if (quality.successful) {
         successful += 1;
         state.relevance.readAccepted += 1;
@@ -657,7 +727,7 @@ export async function runExploratoryLoop(context) {
         state.relevance.bodyIrrelevant += 1;
       }
       const gap = state.getGap(finding.gapId);
-      if (gap && !gap.readSourceIds.includes(id)) gap.readSourceIds.push(id);
+      if (consumeRead && gap && !gap.readSourceIds.includes(id)) gap.readSourceIds.push(id);
     }
     finding.sources = classifiedSources;
     state.findings.push(finding);
@@ -695,6 +765,8 @@ export async function runExploratoryLoop(context) {
         query,
         gaps: state.gaps,
         findings: state.findings,
+        brief: state.brief,
+        profile: state.profile,
         cache: state.slotSupportCache,
       });
       applySlotSupportJudgments(state.gaps, support.judgments);
@@ -702,6 +774,16 @@ export async function runExploratoryLoop(context) {
       if (support.judgments.some((item) => ['supported', 'partially_supported'].includes(item.verdict))) {
         consecutiveInvalidSteps = 0;
         state.noteProgressKind('progress');
+      }
+      if ((support.selections || []).some((item) => item.evidenceTypes?.length)) {
+        consecutiveInvalidSteps = 0;
+        state.noteProgressKind('progress');
+        for (const gap of state.gaps) {
+          if (evidenceStatusOf(gap) === 'verified') {
+            gap.repairFailures = 0;
+            state.clearRepairTerminal(gap.id);
+          }
+        }
       }
       addTrace(trace, state, 'slot_support', {
         reasonCode: support.unknown ? 'slot_support_unknown' : 'slot_support_judged',
@@ -713,6 +795,16 @@ export async function runExploratoryLoop(context) {
         cacheHits: support.cacheHits,
         cacheMisses: support.cacheMisses,
         gapIds: support.judgments.map((item) => item.gapId).filter(Boolean),
+        selectedSourceIds: (support.selections || []).flatMap((item) => item.selectedSourceIds || []),
+        evidenceTypes: (support.selections || []).flatMap((item) => item.evidenceTypes || []),
+        missingCriteria: (support.selections || []).flatMap((item) => item.missingCriteria || []),
+        selections: (support.selections || []).map((item) => ({
+          gapId: item.gapId,
+          selectedSourceIds: item.selectedSourceIds,
+          evidenceTypes: item.evidenceTypes,
+          missingCriteria: item.missingCriteria,
+          cacheHit: item.cacheHit,
+        })),
       }, budget, support.unknown ? 'degraded' : 'success');
     }
     addTrace(trace, state, 'read', {
@@ -769,6 +861,7 @@ export async function runExploratoryLoop(context) {
     addTrace(trace, state, 'stop', { reasonCode: STOP_REASONS.contractUnavailable }, budget, 'failed');
     budget?.setControllerStopReason?.(stopReason, stopDetail);
     refreshState();
+    checkpointState('exploratory-contract-unavailable');
     emit({
       stage: 'research_stopped',
       reason: stopReason,
@@ -822,6 +915,9 @@ export async function runExploratoryLoop(context) {
     while (!hasStepCap(state.maxSteps) || state.step < state.maxSteps) {
       abort(signal);
       const gate = refreshState();
+      if (state.step === 0) {
+        checkpointState('exploratory-bootstrap', { readinessPass: Boolean(gate?.pass) });
+      }
 
       if (budget && !loopCanAfford(budget, state.actionCosts.estimate('decide'))) {
         stopReason = STOP_REASONS.budgetExhausted;
@@ -934,20 +1030,40 @@ export async function runExploratoryLoop(context) {
         && pendingStopReason !== STOP_REASONS.budgetExhausted
       ) {
         const tokensBefore = budget?.usage?.llmTokens || 0;
-        const planned = await attachPlannedQueries(action, {
-          ...plannerContext(state, {
-            llm,
-            signal,
-            queryMemory,
-            gate,
-            search,
+        let planned;
+        try {
+          planned = await attachPlannedQueries(action, {
+            ...plannerContext(state, {
+              llm,
+              signal,
+              queryMemory,
+              gate,
+              search,
+              gap: state.getGap(action.gapId || state.focusGap()?.id),
+            }),
+            mode: action.plannerMode || (state.marginal.plateau ? 'angle_change' : 'repair'),
             gap: state.getGap(action.gapId || state.focusGap()?.id),
-          }),
-          mode: action.plannerMode || (state.marginal.plateau ? 'angle_change' : 'repair'),
-          gap: state.getGap(action.gapId || state.focusGap()?.id),
-          gapId: action.gapId || state.focusGap()?.id,
-          limit: maxQueriesPerStep,
-        });
+            gapId: action.gapId || state.focusGap()?.id,
+            limit: maxQueriesPerStep,
+          });
+        } catch (error) {
+          if (error?.name === 'AbortError' || error?.name === 'BudgetExceededError') throw error;
+          planned = {
+            action: {
+              ...action,
+              query: '',
+              queries: [],
+              planFailure: 'planner_exception',
+            },
+            plan: {
+              ok: false,
+              failure: 'planner_exception',
+              reasonCode: 'search_query_failed',
+              dedup: { rejected: [] },
+              errorMessage: String(error?.message || 'planner_exception').slice(0, 240),
+            },
+          };
+        }
         state.actionCosts.record('reflect', (budget?.usage?.llmTokens || 0) - tokensBefore);
         recordPlannerMetrics(state, planned.plan, {
           gapId: planned.action?.gapId || action.gapId,
@@ -959,12 +1075,30 @@ export async function runExploratoryLoop(context) {
           queryOrigin: planned.action?.queryOrigin || null,
           queries: planned.action?.queries || [],
           failure: planned.plan?.failure || planned.action?.planFailure || null,
+          errorMessage: planned.plan?.errorMessage || null,
           targetGapIds: [planned.action?.gapId || action.gapId].filter(Boolean),
         }, budget, planned.plan?.ok ? 'success' : 'failed');
         action = planned.action;
       }
 
       const queryScope = { evidenceScope: state.evidenceScope || evidenceScope };
+      const floorPadding = belowMin && Boolean(gate?.pass);
+      if (floorPadding && action?.action === 'read') {
+        const redirected = padFloorExploreAction(state, action, {
+          belowMin,
+          belowHardCap,
+          readiness: gate,
+        });
+        if (redirected !== action) {
+          addTrace(trace, state, 'read', {
+            reasonCode: 'below_min_skip_repeat_read',
+            sourceIds: action.sourceIds,
+            targetGapIds: [action.gapId].filter(Boolean),
+            nextAction: redirected?.action || null,
+          }, budget, 'skipped');
+          action = redirected;
+        }
+      }
       let invalid = pendingStopReason === STOP_REASONS.budgetExhausted ? null : state.validate(action);
       let searchQueries = [];
       if (!invalid && action.action === 'search') {
@@ -1004,7 +1138,7 @@ export async function runExploratoryLoop(context) {
         const requestedRecoveryGap = state.getGap(requestedRecoveryGapId);
         const rotateRepair = ['duplicate', 'relevance_rejected'].includes(classifyInvalidReason(invalid))
           || requestedRecoveryGap?.rollup
-          || requestedRecoveryGap?.status === 'blocked';
+          || isRepairTerminal(requestedRecoveryGap);
         const recoveryGapId = rotateRepair
           ? (nextSlotRepairAction(state, { readiness: gate, maxQueries: maxQueriesPerStep })?.gapId || requestedRecoveryGapId)
           : requestedRecoveryGapId;
@@ -1031,22 +1165,40 @@ export async function runExploratoryLoop(context) {
         if (invalid) {
           const kind = classifyInvalidReason(invalid);
           state.noteProgressKind(kind === 'semantic' ? 'semantic_no_yield' : kind);
+          if (floorPadding && !shouldSafetyCapInvalidStep(invalid, { belowMin, gatePass: true })) {
+            state.step += 1;
+            state.observations.push({ type: 'recovery_advanced', reason: 'floor_idle_no_new_work' });
+            addTrace(trace, state, 'recovery', {
+              reasonCode: 'floor_idle_no_new_work',
+              originalInvalid: invalid,
+              recoveryState: 'idle',
+              targetGapIds: [state.focusGap()?.id].filter(Boolean),
+            }, budget, 'retry');
+            checkpointState('exploratory-step-complete', {
+              action: 'recovery',
+              outcome: 'floor_idle_no_new_work',
+            });
+            continue;
+          }
           if (kind === 'semantic') consecutiveInvalidSteps += 1;
           const failedGap = state.getGap(recoveryGapId);
-          if (kind === 'semantic' && failedGap && !failedGap.rollup && failedGap.status !== 'blocked') {
+          if (kind === 'semantic' && failedGap && !failedGap.rollup && !isRepairTerminal(failedGap)) {
             failedGap.repairFailures = (Number(failedGap.repairFailures) || 0) + 1;
-            if (failedGap.repairFailures >= exploratory.maxRepairFailuresPerGap) {
-              const filteredAll = (failedGap.filteredQueries || []).some((item) => item.reason === 'site_filtered_all');
+            if (!belowMin && failedGap.repairFailures >= exploratory.maxRepairFailuresPerGap) {
+              const filteredAll = (failedGap.filteredQueries || []).some((item) => item?.reason === 'site_filtered_all');
               const unreachableRequired = (failedGap.requiredHosts || []).length > 0;
-              state.markGapStatus(
+              state.markRepairTerminal(
                 failedGap.id,
-                'blocked',
                 filteredAll ? 'site_filtered_all' : (unreachableRequired ? 'required_host_unreachable' : 'repair_exhausted'),
+                { phase: 'repair' },
               );
             }
           }
-          const blockedAll = allUnresolvedBlocked(state, gate);
           const consecutiveCap = consecutiveInvalidSteps >= exploratory.maxConsecutiveInvalidSteps;
+          if (consecutiveCap && failedGap && !failedGap.rollup && !isRepairTerminal(failedGap)) {
+            state.markRepairTerminal(failedGap.id, 'repair_exhausted', { phase: 'recovery' });
+          }
+          const blockedAll = allUnresolvedBlocked(state, gate);
           if (blockedAll || consecutiveCap) {
             stopReason = STOP_REASONS.safetyCap;
             stopDetail = safetyStopDetail(state, {
@@ -1079,6 +1231,10 @@ export async function runExploratoryLoop(context) {
             recoveryState: 'advanced',
             targetGapIds: [state.focusGap()?.id].filter(Boolean),
           }, budget, 'retry');
+          checkpointState('exploratory-step-complete', {
+            action: 'recovery',
+            outcome: invalid,
+          });
           continue;
         }
       }
@@ -1405,6 +1561,7 @@ export async function runExploratoryLoop(context) {
         state.noteProgressKind(progressKind);
         if (progressKind === 'progress') {
           consecutiveInvalidSteps = 0;
+          if (gap && !gap.rollup) gap.repairFailures = 0;
           state.clearPlannerFailure({ gapId });
         } else if (progressKind === 'transient' || progressKind === 'duplicate') {
           addTrace(trace, state, 'recovery', {
@@ -1422,6 +1579,9 @@ export async function runExploratoryLoop(context) {
             consecutiveInvalidSteps,
           }, budget, 'retry');
           if (consecutiveInvalidSteps >= exploratory.maxConsecutiveInvalidSteps) {
+            if (gap && !gap.rollup && !isRepairTerminal(gap)) {
+              state.markRepairTerminal(gap.id, 'repair_exhausted', { phase: 'search' });
+            }
             stopReason = STOP_REASONS.safetyCap;
             stopDetail = safetyStopDetail(state, { trigger: 'consecutive_invalid' });
             addTrace(trace, state, 'stop', {
@@ -1432,24 +1592,51 @@ export async function runExploratoryLoop(context) {
             break;
           }
         }
+        checkpointState('exploratory-step-complete', {
+          action: 'search',
+          outcome: progressKind,
+        });
         continue;
       }
 
       if (action.action === 'read') {
         state.forbidFinalizeUntilExplore = false;
+        const targetGapId = action.gapId || state.focusGap()?.id;
+        const requestedSourceIds = [...new Set(action.sourceIds)];
+        const rejectedSourceIds = requestedSourceIds.filter((id) => {
+          const decision = state.candidateDecisionForGap(state.candidates.get(id), targetGapId);
+          return decision?.accepted === false;
+        });
+        const eligibleSourceIds = requestedSourceIds
+          .filter((id) => !rejectedSourceIds.includes(id))
+          .filter((id) => !state.readSourceIds.has(id))
+          .slice(0, maxReads);
+        if (rejectedSourceIds.length) {
+          addTrace(trace, state, 'read_sources_filtered', {
+            reasonCode: 'partial_relevance_rejection',
+            targetGapIds: [targetGapId].filter(Boolean),
+            sourceIds: rejectedSourceIds,
+          }, budget, 'skipped');
+        }
         const successfulReads = await performRead({
-          sourceIds: action.sourceIds.slice(0, maxReads),
-          gapId: action.gapId,
+          sourceIds: eligibleSourceIds,
+          gapId: targetGapId,
           reasonCode: action.reasonCode || 'agent_read',
           harvest: false,
         });
         if (successfulReads > 0) {
           consecutiveInvalidSteps = 0;
+          const readGap = state.getGap(action.gapId);
+          if (readGap && !readGap.rollup) readGap.repairFailures = 0;
           state.clearPlannerFailure({ gapId: action.gapId });
-        } else {
+        } else if (!(belowMin && gate?.pass)) {
           consecutiveInvalidSteps += 1;
           state.recovery.invalidSteps += 1;
           if (consecutiveInvalidSteps >= exploratory.maxConsecutiveInvalidSteps) {
+            const failedGap = state.getGap(targetGapId);
+            if (failedGap && !failedGap.rollup && !isRepairTerminal(failedGap)) {
+              state.markRepairTerminal(failedGap.id, 'repair_exhausted', { phase: 'read' });
+            }
             stopReason = STOP_REASONS.safetyCap;
             stopDetail = safetyStopDetail(state, { trigger: 'consecutive_invalid' });
             addTrace(trace, state, 'stop', {
@@ -1460,6 +1647,10 @@ export async function runExploratoryLoop(context) {
             break;
           }
         }
+        checkpointState('exploratory-step-complete', {
+          action: 'read',
+          successfulReads,
+        });
         continue;
       }
 
@@ -1480,6 +1671,10 @@ export async function runExploratoryLoop(context) {
         else consecutiveInvalidSteps += 1;
         state.addDiary(gapQuestion ? `reflected, opened gap "${gapQuestion.slice(0, 80)}"` : 'reflected, no new gap');
         addTrace(trace, state, 'reflect', { reasonCode: action.reasonCode || 'agent_reflect', targetGapIds: state.gaps.map((gap) => gap.id), decisionStep: true }, budget);
+        checkpointState('exploratory-step-complete', {
+          action: 'reflect',
+          openedGap: Boolean(gapQuestion),
+        });
         continue;
       }
 
@@ -1491,6 +1686,10 @@ export async function runExploratoryLoop(context) {
           state.observations.push({ type: 'evaluation', verdict: 'needs_body_after_search' });
           state.addDiary('finalize rejected: no successful body in this search-read cycle');
           addTrace(trace, state, 'evaluate_report', { reasonCode: 'missing_direct_evidence', allowedAdditionalActions: 1 }, budget, 'retry');
+          checkpointState('exploratory-step-complete', {
+            action: 'evaluate-report',
+            outcome: 'needs_body_after_search',
+          });
           continue;
         }
         if (!hasDirectEvidence && continueOk && state.evaluationRetries < maxRetries && budget?.canClaim('searchRequests')) {
@@ -1498,6 +1697,10 @@ export async function runExploratoryLoop(context) {
           state.observations.push({ type: 'evaluation', verdict: 'needs_more_evidence' });
           state.addDiary('answer rejected: missing direct evidence');
           addTrace(trace, state, 'evaluate_report', { reasonCode: 'missing_direct_evidence', allowedAdditionalActions: 1 }, budget, 'retry');
+          checkpointState('exploratory-step-complete', {
+            action: 'evaluate-report',
+            outcome: 'needs_more_evidence',
+          });
           continue;
         }
         if (!currentGate?.pass && pendingStopReason !== STOP_REASONS.budgetExhausted && pendingStopReason !== STOP_REASONS.safetyCap) {
@@ -1534,6 +1737,10 @@ export async function runExploratoryLoop(context) {
               missingAspect: evaluation?.missingAspect || null,
               failures: currentGate.failures,
             }, budget, 'retry');
+            checkpointState('exploratory-step-complete', {
+              action: 'evaluate-report',
+              outcome: 'readiness_gate_failed',
+            });
             continue;
           }
           stopReason = resolveNewRunStopReason(pendingStopReason, {
@@ -1557,10 +1764,18 @@ export async function runExploratoryLoop(context) {
           action = fallbackAdaptiveAction(state, { belowMin: true, readiness: currentGate });
           if (!FINALIZE_ACTIONS.has(action.action)) {
             state.addDiary('gate passed but token floor not reached; keep exploring');
+            checkpointState('exploratory-step-complete', {
+              action: 'evaluate-report',
+              outcome: 'token_floor_continue',
+            });
             continue;
           }
           if (belowMin) {
             state.addDiary('token floor not reached; refusing evidence_sufficient');
+            checkpointState('exploratory-step-complete', {
+              action: 'evaluate-report',
+              outcome: 'token_floor_refused_finalize',
+            });
             continue;
           }
         }
@@ -1592,7 +1807,18 @@ export async function runExploratoryLoop(context) {
       stopReason = STOP_REASONS.userCancelled;
       addTrace(trace, state, 'stop', { reasonCode: STOP_REASONS.userCancelled }, budget, 'cancelled');
     } else if (error?.name !== 'BudgetExceededError') {
-      throw error;
+      stopReason = STOP_REASONS.safetyCap;
+      stopDetail = 'loop_exception';
+      addTrace(trace, state, 'stop', {
+        reasonCode: STOP_REASONS.safetyCap,
+        stopDetail,
+        errorName: error?.name || 'Error',
+        errorMessage: String(error?.message || '').slice(0, 240),
+      }, budget, 'failed');
+      emit({
+        stage: 'research_stopped',
+        reason: `loop_exception: ${String(error?.message || error).slice(0, 240)}`,
+      });
     } else {
       degraded = true;
       stopReason = STOP_REASONS.budgetExhausted;
@@ -1637,7 +1863,10 @@ export async function runExploratoryLoop(context) {
     for (const finding of state.findings) finding.degraded = true;
   }
   const notes = state.unresolvedReportNotes();
-  const blockedSlots = recoverySnapshot.blockedGaps;
+  const blockedSlots = recoverySnapshot.blockedGaps.filter((entry) => {
+    const gap = state.getGap(entry.gapId);
+    return gap && !gap.rollup;
+  });
   for (const finding of state.findings) {
     finding.unresolvedGaps = notes.unresolvedGaps;
     finding.blockedHosts = notes.blockedHosts;
@@ -1648,8 +1877,13 @@ export async function runExploratoryLoop(context) {
   if (stopReason === STOP_REASONS.budgetExhausted && !stopDetail) {
     stopDetail = budget?.exhaustionDetail?.({ llmClaim: budget?.defaultLlmMaxTokens || 1 }) || null;
   }
+  persistPlannerExhaustion(state, stopDetail);
   budget?.setControllerStopReason?.(stopReason, stopDetail, stopRequiredAmount);
   refreshState();
+  checkpointState('exploratory-loop-complete', {
+    stopReason,
+    stopDetail,
+  });
   emit({
     stage: 'research_stopped',
     reason: stopReason,

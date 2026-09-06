@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { BudgetManager } from '../src/research/budget-manager.mjs';
 import { ResearchState } from '../src/research/adaptive/research-state.mjs';
-import { fallbackAdaptiveAction } from '../src/research/adaptive/agent-policy.mjs';
+import { fallbackAdaptiveAction, padFloorExploreAction, shouldSafetyCapInvalidStep } from '../src/research/adaptive/agent-policy.mjs';
 import { evaluateExploratorySufficiency, classifyResearchQuery, similarQuestions } from '../src/research/adaptive/exploratory-sufficiency.mjs';
 import { buildBudgetView, estimateReportPromptTokens } from '../src/research/adaptive/budget-view.mjs';
 import { applyExploratoryBudget, effectiveExploratoryMaxSteps, EXPLORATORY_SAFETY_MAX_STEPS, resolveExploratorySettings } from '../src/research/exploratory-settings.mjs';
@@ -117,6 +117,32 @@ describe('exploratory budget snapshot and sufficiency', () => {
     state.lastAction = 'read';
     assert.equal(state.validate({ action: 'read', sourceIds: ['https://open-b.test'] }), null);
     assert.equal(state.validate({ action: 'read', sourceIds: ['https://open-a.test'] }), 'repeat_action');
+  });
+
+  it('rewrites finished re-reads to fresh exploration while padding the token floor', () => {
+    const state = new ResearchState({ query: 'open topic space', maxSteps: 8 });
+    state.addCandidates([
+      { url: 'https://open-a.test', title: 'A' },
+      { url: 'https://open-b.test', title: 'B' },
+    ], 'gap-1');
+    state.readSourceIds.add('https://open-a.test');
+    const mixed = padFloorExploreAction(state, {
+      action: 'read',
+      sourceIds: ['https://open-a.test', 'https://open-b.test'],
+      gapId: 'gap-1',
+    }, { belowMin: true, readiness: { pass: true } });
+    assert.deepEqual(mixed.sourceIds, ['https://open-b.test']);
+    state.readSourceIds.add('https://open-b.test');
+    const redirected = padFloorExploreAction(state, {
+      action: 'read',
+      sourceIds: ['https://open-a.test'],
+      gapId: 'gap-1',
+    }, { belowMin: true, readiness: { pass: true } });
+    assert.notEqual(redirected.action, 'read');
+    assert.ok(['search', 'reflect'].includes(redirected.action));
+    assert.equal(shouldSafetyCapInvalidStep('repeat_action', { belowMin: true, gatePass: true }), false);
+    assert.equal(shouldSafetyCapInvalidStep('no_repair_action', { belowMin: true, gatePass: true }), false);
+    assert.equal(shouldSafetyCapInvalidStep('repeat_action', { belowMin: false, gatePass: true }), true);
   });
 
   it('rejects paraphrased reflect gaps and does not use reflect as the default fallback', () => {

@@ -6,7 +6,8 @@ import {
   requiredHostCoverage,
 } from './source-policy.mjs';
 import { hasUsableResearchContract } from './research-profile.mjs';
-import { collectGapSources, isRequiredSlot } from '../gap-state.mjs';
+import { evaluateEvidenceCriteria, gapNeedsRequiredEvidence } from '../evidence-criteria.mjs';
+import { collectGapSources, evidenceStatusOf, isRepairTerminal, isRequiredSlot } from '../gap-state.mjs';
 
 export const GAP_OPEN_STATUSES = new Set(['open', 'searched', 'missing', 'conflicting', 'limited', 'body_read']);
 export const GAP_CLOSED_STATUSES = new Set(['verified']);
@@ -27,15 +28,31 @@ function requiredHostsRead(gap, findings, extras = {}) {
       return {
         missing: primary.length ? [] : ['primary_filing'],
         read: primary.length ? ['primary_filing'] : [],
+        satisfied: primary.length > 0,
       };
     }
-    return { missing: [], read: [] };
+    return { missing: [], read: [], satisfied: true };
   }
   return requiredHostCoverage(pool, gap);
 }
 
 function gapNeedsRequiredHost(gap) {
-  return (gap.requiredHosts || []).length > 0 || (gap.requiredSourceTypes || []).includes('primary_filing');
+  return gapNeedsRequiredEvidence(gap);
+}
+
+function requiredEvidenceRead(gap, findings, extras = {}) {
+  const hosts = requiredHostsRead(gap, findings, extras);
+  const pool = collectGapSources(gap, findings);
+  const criteria = evaluateEvidenceCriteria({
+    gap,
+    sources: pool,
+    extras,
+  });
+  return {
+    missing: [...(hosts.missing || []), ...criteria.missing.map((item) => `criterion:${item}`)],
+    read: [...(hosts.read || []), ...criteria.satisfied],
+    satisfied: hosts.satisfied === true && criteria.missing.length === 0,
+  };
 }
 
 export function evaluateReadinessGate({
@@ -108,7 +125,7 @@ export function evaluateReadinessGate({
   }
 
   const criticalGaps = resolvedGaps.filter((gap) => gap.priority === 'critical' && !gap.rollup);
-  const unresolvedCritical = criticalGaps.filter((gap) => !GAP_CLOSED_STATUSES.has(gap.status));
+  const unresolvedCritical = criticalGaps.filter((gap) => !GAP_CLOSED_STATUSES.has(evidenceStatusOf(gap)));
   if (unresolvedCritical.length) {
     failures.push({
       code: 'critical_gap_open',
@@ -119,25 +136,42 @@ export function evaluateReadinessGate({
   }
 
   const unresolvedRequiredSlots = resolvedGaps.filter((gap) => (
-    isRequiredSlot(gap) && !GAP_CLOSED_STATUSES.has(gap.status)
+    isRequiredSlot(gap) && !GAP_CLOSED_STATUSES.has(evidenceStatusOf(gap))
   ));
   if (unresolvedRequiredSlots.length) {
+    const missingCriteria = unresolvedRequiredSlots.flatMap((gap) => (
+      (gap.missingEvidence || []).filter((item) => String(item).startsWith('criterion:'))
+    ));
+    const semanticOpen = unresolvedRequiredSlots.filter((gap) => (
+      (gap.missingEvidence || []).includes('slot_support')
+      || (gap.missingEvidence || []).includes('slot_partial')
+    ));
+    const quoteOpen = unresolvedRequiredSlots.filter((gap) => (
+      gap.slotSupport && gap.slotSupport.quoteAnchored !== true
+    ));
     failures.push({
       code: 'required_slot_open',
       message: `Required answer slots still open: ${unresolvedRequiredSlots.map((gap) => gap.id).join(', ')}`,
       gapIds: unresolvedRequiredSlots.map((gap) => gap.id),
+      missingEvidence: unresolvedRequiredSlots.flatMap((gap) => gap.missingEvidence || []),
     });
     flags.push('required_slots_open');
+    if (missingCriteria.length) flags.push('required_evidence_missing');
+    if (semanticOpen.length) flags.push('slot_semantic_unsupported');
+    if (quoteOpen.length) flags.push('slot_quote_unanchored');
   }
 
   const missingRequired = [];
+  const extras = {
+    query: state?.query,
+    entities: brief.entities || [],
+    entityAliases: brief.entityAliases || [],
+    brief,
+    profile: resolvedProfile,
+  };
   for (const gap of resolvedGaps) {
     if (gap.rollup || !gapNeedsRequiredHost(gap)) continue;
-    const coverage = requiredHostsRead(gap, resolvedFindings, {
-      query: state?.query,
-      entities: brief.entities || [],
-      entityAliases: brief.entityAliases || [],
-    });
+    const coverage = requiredEvidenceRead(gap, resolvedFindings, extras);
     if (coverage.missing.length && !coverage.satisfied) {
       const { missing } = coverage;
       missingRequired.push({ gapId: gap.id, hosts: missing });
@@ -184,7 +218,7 @@ export function evaluateReadinessGate({
     ...unresolvedCriticalGapIds,
     ...unresolvedRequiredGapIds,
     ...resolvedGaps
-      .filter((gap) => !gap.rollup && ['conflicting', 'limited', 'body_read'].includes(gap.status))
+      .filter((gap) => !gap.rollup && ['conflicting', 'limited', 'body_read'].includes(evidenceStatusOf(gap)))
       .map((gap) => gap.id),
   ]);
   const pass = failures.length === 0;
@@ -218,23 +252,23 @@ export function repairGapsFromGate(gate = {}, gaps = []) {
   ]);
   return gaps.filter((gap) => {
     if (gap.rollup) return false;
+    if (isRepairTerminal(gap)) return false;
     return targetIds.has(gap.id)
-      || ['conflicting', 'limited', 'body_read'].includes(gap.status)
-      || (gap.priority === 'critical' && GAP_OPEN_STATUSES.has(gap.status))
-      || (isRequiredSlot(gap) && !GAP_CLOSED_STATUSES.has(gap.status));
+      || ['conflicting', 'limited', 'body_read'].includes(evidenceStatusOf(gap))
+      || (gap.priority === 'critical' && GAP_OPEN_STATUSES.has(evidenceStatusOf(gap)))
+      || (isRequiredSlot(gap) && !GAP_CLOSED_STATUSES.has(evidenceStatusOf(gap)));
   });
 }
 
 export function describeUnresolvedGaps(gaps = []) {
   return (gaps || [])
     .filter((gap) => !gap.rollup)
-    .filter((gap) => !GAP_CLOSED_STATUSES.has(gap.status))
+    .filter((gap) => !GAP_CLOSED_STATUSES.has(evidenceStatusOf(gap)))
     .filter((gap) => (
       gap.priority === 'critical'
       || isRequiredSlot(gap)
-      || gap.status === 'blocked'
+      || isRepairTerminal(gap)
       || gap.status === 'missing'
-      || (gap.requiredHosts || []).length
-      || (gap.requiredSourceTypes || []).includes('primary_filing')
+      || gapNeedsRequiredEvidence(gap)
     ));
 }

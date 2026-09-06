@@ -1,3 +1,6 @@
+import crypto from 'node:crypto';
+import { recorderOrNoop } from './run-recorder.mjs';
+
 function limit(value) {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? number : 0;
@@ -237,10 +240,45 @@ export class BudgetManager {
       stopReason: this.stopReason,
     };
   }
+
+  exportCheckpoint() {
+    return {
+      ...this.snapshot(),
+      defaultLlmMaxTokens: this.defaultLlmMaxTokens,
+      exhaustedKinds: [...this.exhaustedKinds],
+    };
+  }
+
+  restoreCheckpoint(checkpoint = {}) {
+    if (checkpoint.limits) this.limits = { ...this.limits, ...checkpoint.limits };
+    if (checkpoint.usage) this.usage = { ...this.usage, ...checkpoint.usage };
+    if (checkpoint.unknown) this.unknown = { ...this.unknown, ...checkpoint.unknown };
+    this.maxReportOutputTokens = Number(checkpoint.maxReportOutputTokens) || 0;
+    this.estimatedReportPromptTokens = Number(checkpoint.estimatedReportPromptTokens) || 0;
+    this.minLlmTokens = Number(checkpoint.minLlmTokens) || 0;
+    this.targetLlmTokens = Number(checkpoint.targetLlmTokens) || this.minLlmTokens;
+    this.controllerStopReason = checkpoint.controllerStopReason || null;
+    this.controllerStopDetail = checkpoint.controllerStopDetail || null;
+    this.controllerStopRequiredAmount = Number.isFinite(checkpoint.controllerStopRequiredAmount)
+      ? checkpoint.controllerStopRequiredAmount
+      : null;
+    this.defaultLlmMaxTokens = Number(checkpoint.defaultLlmMaxTokens) || this.defaultLlmMaxTokens;
+    this.stopReason = checkpoint.stopReason || null;
+    this.exhaustedKinds = new Set(checkpoint.exhaustedKinds || []);
+    return this;
+  }
 }
 
-export function wrapProvidersWithBudget({ llm, search, budget, onLlmEvent = () => {} }) {
+export function wrapProvidersWithBudget({
+  llm,
+  search,
+  budget,
+  onLlmEvent = () => {},
+  recorder: providedRecorder,
+}) {
+  const recorder = recorderOrNoop(providedRecorder);
   let llmCallSequence = 0;
+  let searchCallSequence = 0;
   let lastLlmCall = null;
   return {
     llm: {
@@ -259,6 +297,44 @@ export function wrapProvidersWithBudget({ llm, search, budget, onLlmEvent = () =
             ? requested
             : (isReport ? 1 : (budget.limits.llmTokens > 0 ? budget.defaultLlmMaxTokens : 1));
           budget.claim('llmTokens', claimAmount, { purpose, report: isReport });
+          const recordedRequest = typeof llm.buildRecordedRequest === 'function'
+            ? llm.buildRecordedRequest(args)
+            : {
+              provider: llm.provider || 'custom',
+              model: llm.model || null,
+              body: {
+                messages: args?.messages || [],
+                temperature: args?.temperature,
+                maxTokens: args?.maxTokens,
+                reasoningEffort: args?.reasoningEffort,
+              },
+            };
+          const recordedMessages = recordedRequest?.body?.messages || args?.messages || [];
+          const promptText = JSON.stringify(recordedMessages);
+          const requestMetadata = {
+            purpose,
+            attempt: args?.attempt ?? null,
+            timeoutMs: args?.timeoutMs
+              ?? llm.transportOptions?.headersTimeoutMs
+              ?? llm.config?.timeoutMs
+              ?? null,
+            transport: llm.transportOptions || null,
+            promptChars: promptText.length,
+            promptSha256: crypto.createHash('sha256').update(promptText).digest('hex'),
+          };
+          recorder.callStarted({
+            callId,
+            kind: 'llm',
+            ...requestMetadata,
+            request: recordedRequest,
+          });
+          if (purpose === 'report') {
+            recorder.checkpoint('report-request-ready', {
+              callId,
+              request: recordedRequest,
+              budget: budget.exportCheckpoint(),
+            }, requestMetadata);
+          }
           const result = typeof llm.completeWithMetadata === 'function'
             ? await llm.completeWithMetadata(args)
             : await llm.complete(args);
@@ -282,6 +358,19 @@ export function wrapProvidersWithBudget({ llm, search, budget, onLlmEvent = () =
             hasReasoningContent: Boolean(result?.metadata?.hasReasoningContent),
             providerResponseFields: Array.isArray(result?.metadata?.responseFields) ? result.metadata.responseFields : [],
           };
+          recorder.callFinished({
+            callId,
+            kind: 'llm',
+            purpose,
+            status: 'completed',
+            response: {
+              text: String(text || ''),
+              usage: result?.usage || null,
+              finishReason: lastLlmCall.finishReason,
+              metadata: result?.metadata || null,
+            },
+            durationMs: lastLlmCall.durationMs,
+          });
           onLlmEvent(lastLlmCall);
           return String(text || '');
         } catch (error) {
@@ -293,6 +382,14 @@ export function wrapProvidersWithBudget({ llm, search, budget, onLlmEvent = () =
             errorName: error?.name || 'Error',
             errorCode: error?.code || null,
           };
+          recorder.callFinished({
+            callId,
+            kind: 'llm',
+            purpose,
+            status: lastLlmCall.status,
+            error,
+            durationMs: lastLlmCall.durationMs,
+          });
           onLlmEvent(lastLlmCall);
           throw error;
         }
@@ -303,7 +400,40 @@ export function wrapProvidersWithBudget({ llm, search, budget, onLlmEvent = () =
       capabilities: search.capabilities,
       async search(query, options) {
         budget.claim('searchRequests');
-        return search.search(query, options);
+        const callId = `search-${++searchCallSequence}`;
+        const startedAt = Date.now();
+        recorder.callStarted({
+          callId,
+          kind: 'search',
+          request: {
+            provider: search.id || search.provider || 'search',
+            query,
+            options: {
+              ...(options || {}),
+              signal: undefined,
+            },
+          },
+        });
+        try {
+          const result = await search.search(query, options);
+          recorder.callFinished({
+            callId,
+            kind: 'search',
+            status: 'completed',
+            response: result,
+            durationMs: Date.now() - startedAt,
+          });
+          return result;
+        } catch (error) {
+          recorder.callFinished({
+            callId,
+            kind: 'search',
+            status: error?.name === 'AbortError' ? 'cancelled' : 'failed',
+            error,
+            durationMs: Date.now() - startedAt,
+          });
+          throw error;
+        }
       },
     },
   };

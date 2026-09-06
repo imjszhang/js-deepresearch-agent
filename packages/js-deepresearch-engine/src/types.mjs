@@ -146,6 +146,7 @@
  * @property {import('./research/query-memory.mjs').QueryMemory} [queryMemory]
  * @property {Array<Record<string, unknown>>} [trace]
  * @property {Record<string, unknown>} [researchProviders]
+ * @property {{event?: Function, checkpoint?: Function, callStarted?: Function, callFinished?: Function}} [recorder]
  */
 
 /**

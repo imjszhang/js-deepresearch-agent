@@ -1,5 +1,10 @@
 import fs from 'node:fs';
-import { ResearchRunner, saveResearchToWorkDir } from 'js-deepresearch-engine';
+import {
+  FileRunRecorder,
+  ResearchRunner,
+  createWorkSessionDir,
+  saveResearchArtifacts,
+} from 'js-deepresearch-engine';
 import { archiveResearchResultSafe } from './storage/intel-store.mjs';
 
 export class ResearchCancelledError extends Error {
@@ -57,7 +62,9 @@ export async function runCliResearch({
   flags,
   services,
   runner = new ResearchRunner(),
-  saveArtifacts = saveResearchToWorkDir,
+  createSessionDir = createWorkSessionDir,
+  createRecorder = (options) => new FileRunRecorder(options),
+  saveArtifacts = saveResearchArtifacts,
   writeFile = fs.writeFileSync.bind(fs),
   cryptoRandomId = defaultCryptoRandomId,
   signalTarget = process,
@@ -72,15 +79,35 @@ export async function runCliResearch({
 
   install();
   let recordId = null;
+  let sessionDir = null;
+  let recorder = null;
 
   try {
+    const runId = cryptoRandomId();
     if (!flags['no-save']) {
-      recordId = cryptoRandomId();
+      recordId = runId;
       services.researchRepository.create({
         id: recordId,
         query,
         strategy: settings.research.strategy,
       });
+    }
+    if (!flags['no-work-dir']) {
+      sessionDir = createSessionDir({
+        settings,
+        strategy: settings.research.strategy,
+      });
+      if (recordId) {
+        services.researchRepository.updateStatus(recordId, 'running', { sessionDir });
+      }
+      recorder = createRecorder({
+        sessionDir,
+        runId,
+        strategy: settings.research.strategy,
+        query,
+        metadata: { settings },
+      });
+    } else if (recordId) {
       services.researchRepository.updateStatus(recordId, 'running');
     }
 
@@ -88,6 +115,7 @@ export async function runCliResearch({
       query,
       settings,
       signal: controller.signal,
+      recorder,
       onProgress: ({ message, progress, level }) => {
         onProgressLog(level, progress, message);
       },
@@ -96,6 +124,7 @@ export async function runCliResearch({
     let artifacts = null;
     if (!flags['no-work-dir']) {
       artifacts = saveArtifacts({
+        sessionDir,
         settings,
         strategy: settings.research.strategy,
         query,
@@ -134,9 +163,18 @@ export async function runCliResearch({
       writeFile(flags.output, result.report, 'utf8');
     }
 
+    recorder?.finalize?.('completed', {
+      artifacts: artifacts ? {
+        reportPath: artifacts.reportPath,
+        findingsPath: artifacts.findingsPath,
+        sourcesPath: artifacts.sourcesPath,
+        metaPath: artifacts.metaPath,
+      } : null,
+    });
     return { result, artifacts };
   } catch (error) {
     if (isAbortError(error) || controller.signal.aborted) {
+      recorder?.finalize?.('cancelled', { error });
       if (recordId) {
         services.researchRepository.updateStatus(recordId, 'cancelled', {
           error: error.message || 'Research cancelled.',
@@ -146,6 +184,7 @@ export async function runCliResearch({
       throw new ResearchCancelledError(error.message || 'Research cancelled.');
     }
 
+    recorder?.finalize?.('failed', { error });
     if (recordId) {
       services.researchRepository.updateStatus(recordId, 'failed', {
         error: error.message,
