@@ -67,6 +67,33 @@ function refusalAttemptCount(record = {}) {
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 1;
 }
 
+export function plannerFactsFromSnapshot(snap = {}) {
+  const blockedHosts = Object.entries(snap.hosts || {})
+    .filter(([, state]) => state.open)
+    .map(([hostname, state]) => ({
+      hostname,
+      reason: state.lastReason || 'host_circuit_open',
+    }));
+  const attemptedUrls = (snap.attempts || []).map((entry) => ({
+    url: entry.url,
+    backend: entry.backend,
+    retrievalPath: entry.retrievalPath,
+    status: entry.status,
+    errorType: entry.errorType || null,
+    httpStatus: entry.httpStatus ?? null,
+  }));
+  const exhaustedRetrievalPaths = [...new Set(
+    attemptedUrls
+      .filter((entry) => entry.status && entry.status !== 'ok')
+      .map((entry) => `${hostnameOf(entry.url)}:${entry.retrievalPath}`),
+  )];
+  return {
+    blockedHosts,
+    attemptedUrls: attemptedUrls.slice(-24),
+    exhaustedRetrievalPaths,
+  };
+}
+
 export function resolveTransportMemorySettings(settings = {}) {
   const raw = settings?.research?.read?.transport || {};
   return {
@@ -252,6 +279,15 @@ export class TransportMemory {
       transportMemorySkipped: true,
       circuit: decision.circuit || null,
     };
+  }
+
+  plannerFacts() {
+    return plannerFactsFromSnapshot(this.snapshot());
+  }
+
+  isHostBlocked(url) {
+    const hostname = hostnameOf(url);
+    return Boolean(hostname && this.hosts.get(hostname)?.open);
   }
 
   snapshot() {

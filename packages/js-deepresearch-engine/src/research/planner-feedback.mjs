@@ -46,6 +46,7 @@ export function buildPlannerFeedback({
   recentSearchOutcomes = [],
   queryMemoryEntries = [],
   providerCapabilities = null,
+  transportFacts = null,
   limit = DEFAULT_LIMIT,
 } = {}) {
   const rejected = [
@@ -75,6 +76,7 @@ export function buildPlannerFeedback({
     rejectedQueries: uniqueRejected.slice(-Math.max(limit, 1)),
     recentSearchOutcomes: outcomes.slice(-Math.max(limit, 1)),
     providerCapabilities: providerCapabilities || null,
+    transportFacts: transportFacts || null,
   };
 }
 
@@ -105,5 +107,9 @@ export function plannerFeedbackFromState(state, extra = {}) {
       || (gap ? gapOutcomes : (state?.recentSearchOutcomes?.() || [])),
     queryMemoryEntries: extra.queryMemory?.entries || extra.queryMemoryEntries || [],
     providerCapabilities: extra.providerCapabilities || extra.search?.capabilities || null,
+    transportFacts: extra.transportFacts
+      || (typeof state?.transportMemory?.plannerFacts === 'function'
+        ? state.transportMemory.plannerFacts()
+        : extra.transportMemory?.plannerFacts?.() || null),
   });
 }

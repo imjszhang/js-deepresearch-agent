@@ -651,6 +651,7 @@ export async function runFocusedPipeline(context) {
       findings,
       trace,
       searchOutcomes: state.searchOutcomes,
+      transportMemory: state.transportMemory,
     }),
   });
 }

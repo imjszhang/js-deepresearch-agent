@@ -12,11 +12,31 @@ function countBy(items, keyOf) {
   return counts;
 }
 
+export function collectTransportMetrics({ findings = [], transportMemory = null } = {}) {
+  const sources = (findings || []).flatMap((finding) => finding.sources || []);
+  const facts = typeof transportMemory?.plannerFacts === 'function'
+    ? transportMemory.plannerFacts()
+    : { blockedHosts: [], attemptedUrls: [] };
+  const fetchBlocked = countBy(
+    sources.filter((source) => source.fetchStatus && source.fetchStatus !== 'ok'),
+    (source) => source.fetchErrorType || source.errorType || source.accessStatus || 'failed',
+  );
+  return {
+    fetchAttempted: sources.filter((source) => source.fetchStatus || source.fetchAttempts).length
+      + (facts.attemptedUrls || []).length,
+    fetchOk: sources.filter((source) => source.fetchStatus === 'ok').length,
+    fetchBlocked: Object.keys(fetchBlocked).length ? fetchBlocked : null,
+    backendEscalations: sources.filter((source) => source.retrievedVia && source.retrievedVia !== 'direct').length,
+    blockedHosts: facts.blockedHosts || [],
+  };
+}
+
 export function collectObservabilityMetrics({
   findings = [],
   trace = [],
   searchOutcomes = [],
   agentSnapshotChars = null,
+  transportMemory = null,
 } = {}) {
   const sources = (findings || []).flatMap((finding) => finding.sources || []);
   const assessments = sources.map((source) => source.assessment).filter(Boolean);
@@ -44,5 +64,6 @@ export function collectObservabilityMetrics({
       misses: slotTraces.reduce((sum, entry) => sum + (Number(entry.cacheMisses) || 0), 0),
     } : null,
     agentSnapshotChars: Number.isFinite(Number(agentSnapshotChars)) ? Number(agentSnapshotChars) : null,
+    transport: collectTransportMetrics({ findings, transportMemory }),
   };
 }

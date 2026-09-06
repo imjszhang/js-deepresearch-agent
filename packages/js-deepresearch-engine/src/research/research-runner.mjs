@@ -14,6 +14,7 @@ import { applyAsOfGate, resolveCompletionStatus } from './as-of.mjs';
 import { applySlotStatusToClaims } from './report-evidence.mjs';
 import { archiveDisclosureText } from './alternate-evidence.mjs';
 import { closeHeadlessPool } from './headless-backend.mjs';
+import { plannerFactsFromSnapshot } from './transport-memory.mjs';
 import { buildResearchLimitations } from './limitations.mjs';
 import { resolveFocusedSettings } from './focused-settings.mjs';
 import { createResearchProviders } from './research-providers.mjs';
@@ -255,6 +256,10 @@ export class ResearchRunner {
         exploratoryLoop?.blockedHosts?.length
           ? `Blocked or unread required hosts: ${exploratoryLoop.blockedHosts.join(', ')}.`
           : null,
+        ...plannerFactsFromSnapshot(exploratoryLoop?.transportMemory || focusedControl?.transportMemory || {})
+          .blockedHosts.map((host) => (
+            `Required or attempted host ${host.hostname} was unreachable (${host.reason}).`
+          )),
         exploratoryLoop?.unresolvedGaps?.length
           ? `Unresolved gaps: ${exploratoryLoop.unresolvedGaps.map((gap) => `${gap.id} (${gap.status}) ${gap.question}`).join('; ')}`
           : null,
