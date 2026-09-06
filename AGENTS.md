@@ -136,6 +136,10 @@ npm exec --package=. -- jdr research "Explain the current state of local-first A
 | `--read-relevance-min-score` | `research.read.relevance.minRerankScore` | 外部 rerank 低相关标记阈值（默认 0.01）；用于排序与诊断，不单独禁止读取 |
 | `--read-body-relevance` | `research.read.relevance.bodyValidation` | 摘要前是否校验正文主体相关性（默认 true） |
 | `--site-query-mode` | `research.read.relevance.siteQueryMode` | `confirmed`（默认，仅 required/已观察 host）\| `always` \| `never` |
+| `--read-host-circuit-threshold` | `research.read.transport.hostCircuitThreshold` | HTTP 直连连续 `403/429/challenge` 熔断阈值（默认 3，`0` 关闭） |
+| `--read-response-headers-timeout-ms` | `research.read.transport.responseHeadersTimeoutMs` | 等待响应头超时（默认 10000）；这是 fetch API 可验证边界，不冒充独立首字节计时 |
+| `--read-html-timeout-ms` | `research.read.transport.htmlTotalTimeoutMs` | HTML/文本读取总超时（默认 15000） |
+| `--read-document-timeout-ms` | `research.read.transport.documentTotalTimeoutMs` | PDF/Office/大文件读取及转换总超时（默认 60000） |
 | `--search-language` | `search.language` | 透传给搜索提供方的语言，不做语言检测或引擎路由 |
 | `--search-engines` | `search.options.engines` | 透传 SearXNG `engines` |
 | `--search-categories` | `search.options.categories` | 透传 SearXNG `categories` |

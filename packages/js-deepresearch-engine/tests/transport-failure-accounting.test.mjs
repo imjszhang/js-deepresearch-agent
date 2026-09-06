@@ -99,6 +99,11 @@ describe('transport failure accounting', () => {
     assert.notEqual(result.quality.stopDetail, 'consecutive_invalid_steps');
     assert.notEqual(result.quality.stopDetail, 'transport_blocked');
     assert.ok(result.trace.some((entry) => entry.reasonCode === 'transport_blocked_read'));
+    assert.ok(result.trace.some((entry) => (
+      entry.action === 'transport_memory'
+      && entry.reasonCode === 'transport_attempt_completed'
+    )));
+    assert.ok(result.quality.metrics.recovery.transportBlockedHosts);
     assert.deepEqual(
       Object.keys(recovery.transportBlockedHosts || {}).sort(),
       ['walled-a.test', 'walled-b.test', 'walled-c.test'],

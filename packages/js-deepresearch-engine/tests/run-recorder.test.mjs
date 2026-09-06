@@ -370,10 +370,32 @@ describe('durable run recorder', () => {
     state.candidates.set('source-1', { id: 'source-1', url: 'https://example.com' });
     state.urlPool.add({ id: 'source-1', url: 'https://example.com' });
     state.rerankCache.set('cache-key', { score: 0.8 });
+    const transportAttempt = state.transportMemory.begin('https://blocked.example.com/one', {
+      backend: 'http',
+    });
+    state.transportMemory.finish(transportAttempt, {
+      status: 'failed',
+      errorType: 'http_4xx',
+      httpStatus: 403,
+      fetchAttempts: 1,
+    });
     const checkpoint = state.exportCheckpoint({
       queryMemory: memory,
       loopLocal: { consecutiveInvalidSteps: 2 },
     });
+    const sessionDir = makeSession();
+    const recorder = new FileRunRecorder({
+      sessionDir,
+      runId: 'run-transport-checkpoint',
+      strategy: 'exploratory',
+      query: 'alpha',
+    });
+    recorder.checkpoint('exploratory-step-complete', checkpoint);
+    const persisted = loadLatestCheckpoint(sessionDir);
+    assert.equal(
+      persisted.state.transportMemory.attempts[0].url,
+      'https://blocked.example.com/one',
+    );
 
     const restoredBudget = new BudgetManager({ research: { budget: {} }, llm: {} });
     const restoredMemory = new QueryMemory({ enabled: true });
@@ -388,6 +410,10 @@ describe('durable run recorder', () => {
     assert.equal(restored.candidates.get('source-1').url, 'https://example.com');
     assert.equal(restored.urlPool.get('source-1').url, 'https://example.com');
     assert.equal(restored.rerankCache.get('cache-key').score, 0.8);
+    assert.equal(
+      restored.transportMemory.check('https://blocked.example.com/one', { backend: 'http' }).reason,
+      'url_backend_already_attempted',
+    );
     assert.equal(restoredBudget.usage.llmTokens, 25);
     assert.equal(restoredMemory.entries[0].query, 'alpha');
     assert.deepEqual(restoredMemory.vectorCache.get('alpha'), [0.1, 0.2]);

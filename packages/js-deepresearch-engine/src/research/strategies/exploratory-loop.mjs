@@ -541,6 +541,13 @@ export async function runExploratoryLoop(context) {
     evidenceScope,
     brief: profile.brief,
   });
+  state.transportMemory.setEventSink((event) => {
+    addTrace(trace, state, 'transport_memory', {
+      ...event,
+      reasonCode: event.type,
+    }, budget);
+    recorder?.event?.('transport_memory', event);
+  });
   const maxReads = Math.max(1, Number(exploratory.maxReadsPerStep) || 3);
   const maxRetries = Math.max(0, Number(exploratory.maxEvaluationRetries) || 0);
   const maxOpenGaps = Number(exploratory.maxOpenGaps) || 8;
@@ -639,6 +646,7 @@ export async function runExploratoryLoop(context) {
       entityAliases: state.brief?.entityAliases || state.profile?.brief?.entityAliases || [],
       observedHosts: [...(state.observedHosts || [])],
       recorder,
+      transportMemory: state.transportMemory,
     }))[0];
     const classifiedSources = [];
     let successful = 0;
@@ -692,7 +700,12 @@ export async function runExploratoryLoop(context) {
       const existing = state.candidates.get(id) || {};
       const existingMatch = existing.gapMatches?.[targetGap?.id] || {};
       const readAttempts = Number(existing.readAttempts || 0) + 1;
-      const retryable = isRetryableReadFailure(quality);
+      // TransportMemory owns retry boundaries. The fetcher has already
+      // consumed allowed transient retries, so re-queuing this candidate
+      // would only produce a memory skip for the same backend/path.
+      const retryable = isRetryableReadFailure(quality)
+        && !source.backend
+        && !source.transportMemorySkipped;
       const consumeRead = !retryable || readAttempts >= MAX_RETRYABLE_READ_ATTEMPTS;
       state.candidates.set(id, {
         ...existing,
@@ -911,6 +924,7 @@ export async function runExploratoryLoop(context) {
       marginal: state.snapshot().marginal,
       relevance: state.snapshot().relevance,
       recovery: state.snapshot().recovery,
+      transportMemory: state.transportMemory.snapshot(),
       ...state.unresolvedReportNotes(),
     });
   }
@@ -1948,6 +1962,7 @@ export async function runExploratoryLoop(context) {
     marginal: state.snapshot().marginal,
     relevance: state.snapshot().relevance,
     recovery: state.snapshot().recovery,
+    transportMemory: state.transportMemory.snapshot(),
     searchOutcomes: state.searchOutcomes,
     observability: collectObservabilityMetrics({
       findings: state.findings,
