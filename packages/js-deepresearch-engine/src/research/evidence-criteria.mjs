@@ -131,11 +131,29 @@ function assessmentOf(source = {}) {
   return source.assessment || {};
 }
 
+/**
+ * Hard hosts only: hosts the user named or that appear literally in the query.
+ * Planner-inferred preferred hosts are deliberately excluded.
+ */
+function hardHostsFor(extras = {}) {
+  return unique([
+    ...sanitizeHosts(extras.gap?.requiredHosts),
+    ...(extras.userNamedHosts || collectUserNamedHosts(extras)),
+  ]);
+}
+
 export function sourceSatisfiesCriterion(source = {}, criterion, extras = {}) {
   const token = normalizeEvidenceCriterion(criterion);
   if (!token || !source) return false;
   const assessment = assessmentOf(source);
-  if (token === 'first_party') return assessment.firstParty === true;
+  if (token === 'first_party') {
+    if (assessment.firstParty === true) return true;
+    // No verdict was produced, so fall back to the deterministic host rule
+    // rather than treating an LLM plumbing failure as "not first party".
+    if (source.assessmentStatus !== 'unavailable') return false;
+    const host = hostnameOf(sourceUrl(source));
+    return Boolean(host) && hardHostsFor(extras).some((item) => hostnamesMatch(host, item));
+  }
   if (token === 'filing') {
     return assessment.contentKind === 'filing'
       || assessment.publisherType === 'exchange_filing'
@@ -194,6 +212,7 @@ export function evaluateEvidenceCriteria({
   const required = normalizeEvidenceCriteria(gap.evidenceCriteria);
   const resolvedExtras = {
     ...extras,
+    gap: extras.gap || gap,
     userNamedHosts: extras.userNamedHosts || collectUserNamedHosts(extras),
   };
   const pool = {};

@@ -801,6 +801,65 @@ describe('focused pipeline', () => {
     assert.ok(!searches.some((question) => /successful_body|primary source evidence/.test(question)));
     assert.ok(!trace.some((entry) => entry.wave === 'repair' && entry.queries?.includes('general comparison')));
   });
+
+  it('keeps focused transport status independent from an unreadable body verdict', async () => {
+    registerContentFetchHandler(async () => ({
+      status: 'ok',
+      accessStatus: 'ok',
+      content: 'Topic body bytes delivered successfully before the assessment rejects their readability.'.repeat(2),
+    }));
+    const findings = await runFocusedPipeline({
+      query: 'opaque focused topic',
+      iterations: 1,
+      questionCount: 1,
+      concurrency: 1,
+      settings: {
+        research: {
+          focused: {
+            fetchMode: 'summary',
+            fetchBackend: 'auto',
+            iterationControl: { enabled: false },
+          },
+        },
+      },
+      search: {
+        async search() {
+          return [{ title: 'Opaque', url: 'https://opaque.test/focused', snippet: 'opaque focused topic' }];
+        },
+      },
+      llm: {
+        async complete({ purpose, messages }) {
+          if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
+          if (purpose === 'research_profile') {
+            return JSON.stringify({
+              requiredAnswerSlots: [{ answerSlot: 'topic', question: 'opaque focused topic' }],
+            });
+          }
+          if (purpose === 'source_assessment') {
+            return JSON.stringify({
+              summary: '',
+              readability: 'unreadable',
+              contentKind: 'obfuscated',
+              publisherType: 'unknown',
+              firstParty: false,
+              evidenceTier: 'unknown',
+              reason: 'obfuscated body',
+            });
+          }
+          if (purpose === 'gap_support') return JSON.stringify({ judgments: [] });
+          return JSON.stringify(['opaque focused topic']);
+        },
+      },
+      emit: () => {},
+      trace: [],
+    });
+    const source = findings.flatMap((finding) => finding.sources || [])
+      .find((item) => item.url === 'https://opaque.test/focused' && item.bodyQuality === 'waf');
+    assert.ok(source);
+    assert.equal(source.fetchStatus, 'ok');
+    assert.equal(source.accessStatus, 'ok');
+    assert.equal(source.bodyQualityReason, 'assessment_unreadable');
+  });
 });
 
 describe('quick strategy isolation', () => {

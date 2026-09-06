@@ -74,9 +74,7 @@ function applyBodyClassification(findings, gaps = []) {
         return {
           ...source,
           bodyQuality: quality.status,
-          fetchStatus: quality.successful
-            ? (source.fetchStatus || 'ok')
-            : (quality.status === 'waf' ? 'waf' : (source.fetchStatus === 'irrelevant' ? 'irrelevant' : 'failed')),
+          bodyQualityReason: quality.reason,
           tier: classifySourceTier(source, gap),
         };
       }),

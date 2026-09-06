@@ -12,6 +12,7 @@ import {
 } from '../src/research/gap-slot-support.mjs';
 import { promoteSuccessfulSources } from '../src/research/slot-promotion.mjs';
 import { ResearchState } from '../src/research/adaptive/research-state.mjs';
+import { passageSatisfiesCriterion } from '../src/research/evidence-criteria.mjs';
 
 const SUBJECT_A_BODY = 'SubjectA publishes a first-party guide at docs.example.com that states production support began in 2026.';
 const SUBJECT_B_BODY = 'SubjectB publishes a first-party guide at docs.example.com that states it remains experimental only.';
@@ -559,6 +560,37 @@ describe('criterion-aware slot passage selection', () => {
     const selected = selectSlotPassages(gap, findings, { topK: 3 });
     assert.ok(selected.some((item) => item.sourceId === 'https://www.claude.com/blog/commerce'));
     assert.equal(selected[0].assessment.firstParty, true);
+  });
+
+  it('preserves assessment availability when projecting a hard-host source to passages', () => {
+    const gap = {
+      id: 'gap-2',
+      question,
+      requiredSlot: true,
+      requiredHosts: ['claude.com'],
+      evidenceCriteria: ['first_party'],
+    };
+    const findings = [{
+      gapId: 'gap-2',
+      sources: [{
+        id: 'https://www.claude.com/blog/commerce',
+        url: 'https://www.claude.com/blog/commerce',
+        content: official,
+        fetchStatus: 'ok',
+        assessmentStatus: 'unavailable',
+        assessment: {
+          method: 'fail_closed',
+          readability: 'uncertain',
+          firstParty: false,
+        },
+      }],
+    }];
+    const passages = collectSuccessfulPassages(findings, { gapId: gap.id, allowFallback: false });
+    assert.equal(passages[0].assessmentStatus, 'unavailable');
+    assert.equal(passageSatisfiesCriterion(passages[0], 'first_party', { gap }), true);
+    const selected = selectSlotPassages(gap, findings, { topK: 1 });
+    assert.equal(selected.length, 1);
+    assert.equal(selected[0].sourceId, 'https://www.claude.com/blog/commerce');
   });
 
   it('cache-misses and rejudges after a first-party body arrives', async () => {

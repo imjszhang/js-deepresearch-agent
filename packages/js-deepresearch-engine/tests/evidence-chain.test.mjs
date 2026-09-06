@@ -14,6 +14,7 @@ import {
   buildPassageArtifactsAsync,
 } from '../src/index.mjs';
 import { compareRankedPassages, isMediaOnlyPassage } from '../src/research/passage-utils.mjs';
+import { passageSatisfiesCriterion } from '../src/research/evidence-criteria.mjs';
 
 const wikipedia = {
   title: 'Ollama',
@@ -280,6 +281,127 @@ describe('passage artifacts and report claim alignment', () => {
     });
     assert.deepEqual(reassembled.sources.map((item) => item.id), split.sources.map((item) => item.id));
     assert.equal(reassembled.passages.length, split.passages.length);
+  });
+
+  it('preserves unavailable assessment status in final passage artifacts', () => {
+    const source = {
+      title: 'Official documentation',
+      url: 'https://docs.vendor.test/official',
+      content: 'The vendor publishes this official technical documentation with enough body text for evidence.',
+      fetchStatus: 'ok',
+      contentOrigin: 'fetched',
+      assessmentStatus: 'unavailable',
+      assessment: {
+        method: 'fail_closed',
+        readability: 'uncertain',
+        firstParty: false,
+      },
+    };
+    const split = buildPassageArtifacts({
+      query: 'What does docs.vendor.test publish?',
+      findings: [{ question: 'official evidence', sources: [source] }],
+      options: { maxPassagesPerSource: 2, maxPassageChars: 300 },
+    });
+    assert.ok(split.passages.length > 0);
+    assert.equal(split.passages[0].assessmentStatus, 'unavailable');
+    assert.equal(passageSatisfiesCriterion(split.passages[0], 'first_party', {
+      gap: { requiredHosts: ['docs.vendor.test'] },
+    }), true);
+  });
+
+  it('replaces stale transport errors when the same URL later succeeds', () => {
+    const url = 'https://vendor.test/recovered';
+    const failed = {
+      title: 'Recovered source',
+      url,
+      fetchStatus: 'failed',
+      accessStatus: 'http_403',
+      accessNotes: 'HTTP 403',
+      fetchError: 'HTTP 403',
+      fetchErrorType: 'http_4xx',
+      httpStatus: 403,
+      fetchAttempts: 1,
+    };
+    const recovered = {
+      title: 'Recovered source',
+      url,
+      fetchStatus: 'ok',
+      accessStatus: 'ok',
+      contentOrigin: 'fetched',
+      content: 'The source later returned an official body with enough text to produce evidence.',
+      bodyQuality: 'read',
+      bodyQualityReason: 'body_ok',
+      assessmentStatus: 'unavailable',
+      assessment: {
+        method: 'fail_closed',
+        readability: 'uncertain',
+        firstParty: false,
+      },
+    };
+    const split = buildPassageArtifacts({
+      query: 'recovered source',
+      findings: [
+        { question: 'first attempt', sources: [failed] },
+        { question: 'second attempt', sources: [recovered] },
+      ],
+    });
+    assert.equal(split.sources.length, 1);
+    const source = split.sources[0];
+    assert.equal(source.fetchStatus, 'ok');
+    assert.equal(source.accessStatus, 'ok');
+    assert.equal(source.fetchError, null);
+    assert.equal(source.fetchErrorType, null);
+    assert.equal(source.httpStatus, null);
+    assert.equal(source.assessmentStatus, 'unavailable');
+    assert.equal(source.bodyQuality, 'read');
+    assert.ok(split.passages.length > 0);
+  });
+
+  it('keeps a usable body when a later successful transport returns a rejected shell', () => {
+    const url = 'https://vendor.test/official';
+    const validContent = 'Official product documentation with enough specific evidence to remain the canonical usable body.';
+    const split = buildPassageArtifacts({
+      query: 'official product documentation',
+      findings: [
+        {
+          question: 'usable read',
+          sources: [{
+            title: 'Official source',
+            url,
+            fetchStatus: 'ok',
+            accessStatus: 'ok',
+            contentOrigin: 'fetched',
+            content: validContent,
+            bodyQuality: 'read',
+            bodyQualityReason: 'body_ok',
+            assessmentStatus: 'ok',
+            assessment: { method: 'llm', readability: 'readable', firstParty: true },
+          }],
+        },
+        {
+          question: 'later rejected read',
+          sources: [{
+            title: 'Official source',
+            url,
+            fetchStatus: 'ok',
+            accessStatus: 'ok',
+            contentOrigin: 'fetched',
+            content: 'Access denied. Please complete the captcha before continuing to the requested page.',
+            bodyQuality: 'waf',
+            bodyQualityReason: 'waf_or_shell',
+            assessmentStatus: 'ok',
+            assessment: { method: 'llm', readability: 'unreadable', firstParty: true },
+          }],
+        },
+      ],
+    });
+    assert.equal(split.sources.length, 1);
+    const source = split.sources[0];
+    assert.equal(source.fetchStatus, 'ok');
+    assert.equal(source.content, validContent);
+    assert.equal(source.bodyQuality, 'read');
+    assert.equal(source.assessment.readability, 'readable');
+    assert.ok(split.passages.length > 0);
   });
 
   it('keeps bylines as candidates but displays the semantically preferred body', async () => {

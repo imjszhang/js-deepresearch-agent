@@ -57,6 +57,7 @@ export function collectSuccessfulPassages(findings = [], {
         text,
         gapId: finding.gapId || null,
         assessment: source.assessment || null,
+        assessmentStatus: source.assessmentStatus || null,
       };
     }).filter(Boolean)
   ));
@@ -73,6 +74,7 @@ function passageKey(passage) {
 function criteriaExtras(gap, extras = {}) {
   return {
     ...extras,
+    gap,
     query: extras.query || extras.brief?.query || '',
     brief: extras.brief || {},
     profile: extras.profile || {},

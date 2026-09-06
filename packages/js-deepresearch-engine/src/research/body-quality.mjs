@@ -21,6 +21,38 @@ export function isRetryableReadFailure(quality = {}) {
   return quality?.status === 'failed' || quality?.status === 'waf';
 }
 
+const TRANSPORT_ERROR_TYPES = new Set([
+  'http_4xx',
+  'http_429',
+  'http_5xx',
+  'timeout',
+  'network',
+]);
+
+/**
+ * True when a read failed because the target refused or never delivered the
+ * bytes, as opposed to the planner picking a source that turned out to be
+ * irrelevant or unreadable. Transport failures say nothing about whether the
+ * research loop is making progress, so they are accounted for separately.
+ */
+export function isTransportReadFailure(source = {}, quality = {}) {
+  if (quality?.successful) return false;
+  if (quality?.status === 'irrelevant') return false;
+  if (quality?.status === 'waf') return quality.reason !== 'assessment_unreadable';
+  if (quality?.status !== 'failed') return false;
+  if (source?.fetchStatus !== 'failed') return false;
+  if (Number(source?.httpStatus) > 0) return true;
+  return TRANSPORT_ERROR_TYPES.has(String(source?.fetchErrorType || ''));
+}
+
+/** Coarse reason label for a blocked host, used for diagnostics only. */
+export function transportFailureReason(source = {}, quality = {}) {
+  if (quality?.status === 'waf') return 'challenge';
+  const httpStatus = Number(source?.httpStatus) || 0;
+  if (httpStatus > 0) return `http_${httpStatus}`;
+  return String(source?.fetchErrorType || 'transport_failed');
+}
+
 export function isWafShellText(text = '') {
   return WAF_OR_ERROR_NEEDLES.some((pattern) => pattern.test(String(text || '')));
 }
@@ -98,11 +130,7 @@ export function sourceHasObservableDate(source = {}) {
 
 export function classifyFetchedBody(source = {}) {
   if (assessmentBlocksSuccessfulBody(source.assessment)) {
-    return {
-      status: 'waf',
-      successful: false,
-      reason: source.assessment?.method === 'fail_closed' ? 'assessment_fail_closed' : 'assessment_unreadable',
-    };
+    return { status: 'waf', successful: false, reason: 'assessment_unreadable' };
   }
   const text = sourceBodyText(source);
   if (source.fetchStatus === 'irrelevant' || source.bodyQuality === 'irrelevant') {
@@ -142,10 +170,7 @@ export function sanitizeUnusableSourceBody(source = {}, quality = {}) {
     content: '',
     summary: '',
     snippet: source.snippet || '',
-    fetchStatus: quality.status === 'waf' ? 'waf' : (source.fetchStatus === 'ok' ? 'failed' : (source.fetchStatus || quality.status)),
     bodyQuality: quality.status || source.bodyQuality,
-    accessStatus: quality.status || source.accessStatus || null,
-    accessNotes: quality.reason || source.accessNotes || null,
-    fetchError: source.fetchError || quality.reason || null,
+    bodyQualityReason: quality.reason || source.bodyQualityReason || null,
   };
 }

@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { normalizeSourceUrl } from './source-candidates.mjs';
+import { isSuccessfulBody, sourceBodyText } from './body-quality.mjs';
 import { buildClaimEvaluation, extractClaimsFromDocument, extractQualityClaims } from './claim-quality.mjs';
 import { buildCitationMap, parseCitations, resolveCitedSourceIds } from './citations.mjs';
 import { sourceHasFetchedBody } from './focused-settings.mjs';
@@ -25,18 +26,52 @@ export function stableSourceId(source = {}) {
 function mergeSourceRecord(existing, incoming) {
   if (!existing) return { ...incoming };
   const merged = { ...existing };
+  const existingBodyUsable = isSuccessfulBody(existing);
+  const incomingBodyUsable = isSuccessfulBody(incoming);
+  const preferIncomingBody = (
+    incomingBodyUsable
+    && (!existingBodyUsable || sourceBodyText(incoming).length > sourceBodyText(existing).length)
+  ) || (
+    !existingBodyUsable
+    && !incomingBodyUsable
+    && incoming.fetchStatus === 'ok'
+  );
   for (const field of [
     'title', 'url', 'snippet', 'engine', 'platform', 'publisher', 'author',
     'publishedAt', 'date', 'updatedAt', 'accessedAt', 'sourceType',
-    'jurisdiction', 'productVersion', 'accessStatus', 'accessNotes',
+    'jurisdiction', 'productVersion',
   ]) {
     if (!merged[field] && incoming[field]) merged[field] = incoming[field];
   }
-  if (String(incoming.summary || '').length > String(merged.summary || '').length) merged.summary = incoming.summary;
-  if (String(incoming.content || '').length > String(merged.content || '').length) merged.content = incoming.content;
-  if (incoming.fetchStatus === 'ok' || !merged.fetchStatus) merged.fetchStatus = incoming.fetchStatus || merged.fetchStatus;
-  if (incoming.contentOrigin) merged.contentOrigin = incoming.contentOrigin;
-  if (!merged.fetchError && incoming.fetchError) merged.fetchError = incoming.fetchError;
+  if (incoming.fetchStatus === 'ok') {
+    // A later successful read supersedes stale transport diagnostics from an
+    // earlier failed attempt for the same canonical URL.
+    merged.fetchStatus = 'ok';
+    merged.accessStatus = incoming.accessStatus || 'ok';
+    merged.accessNotes = incoming.accessNotes || null;
+    merged.fetchError = null;
+    merged.fetchErrorType = null;
+    merged.httpStatus = null;
+    merged.fetchAttempts = incoming.fetchAttempts ?? null;
+  } else if (merged.fetchStatus !== 'ok') {
+    if (!merged.fetchStatus && incoming.fetchStatus) merged.fetchStatus = incoming.fetchStatus;
+    for (const field of [
+      'accessStatus', 'accessNotes', 'fetchError', 'fetchErrorType',
+      'httpStatus', 'fetchAttempts',
+    ]) {
+      if (merged[field] == null && incoming[field] != null) merged[field] = incoming[field];
+    }
+  }
+  if (preferIncomingBody) {
+    for (const field of [
+      'content', 'summary', 'contentOrigin', 'assessment', 'assessmentStatus',
+      'assessmentAttempts', 'assessmentRetried', 'assessmentReason',
+      'bodyQuality', 'bodyQualityReason', 'relevanceDecision',
+      'relevanceDecisionByGap', 'tier',
+    ]) {
+      merged[field] = incoming[field] ?? null;
+    }
+  }
   return merged;
 }
 
@@ -67,6 +102,7 @@ function attachRankedPassages({
       passages.push({
         id: idValue,
         sourceId,
+        url: source.url || null,
         findingIds: [findingId],
         text: passage.text,
         startChar: passage.startChar,
@@ -78,6 +114,7 @@ function attachRankedPassages({
         observedAt: new Date().toISOString(),
         contentHash,
         assessment: source.assessment || null,
+        assessmentStatus: source.assessmentStatus || null,
         provenance: pickSourceProvenance(source),
       });
     }
