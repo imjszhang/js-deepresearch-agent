@@ -224,4 +224,37 @@ describe('manual import escape hatch', () => {
     assert.match(hints[0], /openai.com/);
     assert.match(hints[0], /sourceUrl/);
   });
+
+  it('does not hint when the host was read or only the body was rejected', () => {
+    const rejected = collectManualImportHints({
+      gaps: [{ id: 'slot-1', requiredHosts: ['openai.com'] }],
+      readiness: {
+        failures: [{
+          code: 'required_host_missing',
+          hostDiagnostics: [{ host: 'openai.com', reason: 'body_rejected' }],
+        }],
+      },
+      corpusDirs: ['/tmp/notes'],
+    });
+    const fetched = collectManualImportHints({
+      gaps: [{ id: 'slot-1', requiredHosts: ['openai.com'] }],
+      readiness: {
+        failures: [{
+          code: 'required_host_missing',
+          hostDiagnostics: [{ host: 'openai.com', reason: 'fetch_blocked' }],
+        }],
+      },
+      findings: [{
+        sources: [{ url: 'https://openai.com/policy', fetchStatus: 'ok' }],
+      }],
+      corpusDirs: ['/tmp/notes'],
+    });
+    const namedOnly = collectManualImportHints({
+      gaps: [{ id: 'slot-1', requiredHosts: ['openai.com'] }],
+      corpusDirs: ['/tmp/notes'],
+    });
+    assert.deepEqual(rejected, []);
+    assert.deepEqual(fetched, []);
+    assert.deepEqual(namedOnly, []);
+  });
 });

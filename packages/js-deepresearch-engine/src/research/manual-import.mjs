@@ -60,7 +60,7 @@ function extensionOf(filePath = '') {
 }
 
 function walkFiles(root, fsImpl, files = []) {
-  let entries = [];
+  let entries;
   try {
     entries = fsImpl.readdirSync(root, { withFileTypes: true });
   } catch {
@@ -84,7 +84,7 @@ function inspectManualFile(filePath, fsImpl) {
   if (!TEXT_EXTENSIONS.has(ext)) {
     return sidecar.sourceUrl ? { filePath, ...sidecar, body: null } : null;
   }
-  let text = '';
+  let text;
   try {
     text = fsImpl.readFileSync(filePath, 'utf8');
   } catch {
@@ -152,41 +152,33 @@ export function manualImportResult(record, extras = {}) {
   };
 }
 
+const MANUAL_IMPORT_HINT_REASONS = new Set(['not_retrieved', 'fetch_blocked']);
+
+function hostWasSuccessfullyFetched(findings = [], host) {
+  return (findings || []).some((finding) => (finding.sources || []).some((source) => {
+    if (source.fetchStatus !== 'ok' && source.retrievedVia !== 'manual_import') return false;
+    const sourceHost = hostnameOf(source.sourceUrl || source.url || source.id);
+    return sourceHost && hostnamesMatch(sourceHost, host);
+  }));
+}
+
 export function collectManualImportHints({
-  gaps = [],
   readiness = null,
   findings = [],
   corpusDirs = [],
 } = {}) {
   const hosts = [];
   const seen = new Set();
-  for (const gap of gaps || []) {
-    for (const host of gap.requiredHosts || []) {
-      const key = String(host || '').toLowerCase();
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
-      hosts.push(host);
-    }
-  }
   for (const failure of readiness?.failures || []) {
     if (failure.code !== 'required_host_missing') continue;
     for (const item of failure.hostDiagnostics || []) {
-      const key = String(item.host || '').toLowerCase();
+      const host = item.host || item.hostname;
+      const key = String(host || '').toLowerCase();
+      const reason = item.reason || 'not_retrieved';
       if (!key || seen.has(key)) continue;
-      if (item.reason === 'body_rejected') continue;
+      if (!MANUAL_IMPORT_HINT_REASONS.has(reason)) continue;
+      if (hostWasSuccessfullyFetched(findings, host)) continue;
       seen.add(key);
-      hosts.push(item.host);
-    }
-  }
-  for (const finding of findings || []) {
-    for (const source of finding.sources || []) {
-      if (source.fetchStatus === 'ok' || source.retrievedVia === 'manual_import') continue;
-      const host = hostnameOf(source.sourceUrl || source.url || source.id);
-      if (!host || seen.has(host)) continue;
-      if (!(gaps || []).some((gap) => (gap.requiredHosts || []).some((item) => hostnamesMatch(host, item)))) {
-        continue;
-      }
-      seen.add(host);
       hosts.push(host);
     }
   }

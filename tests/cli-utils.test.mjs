@@ -345,12 +345,21 @@ describe('CLI utilities', () => {
     );
   });
 
-  it('maps --corpus-dirs into search.local.dirs and enables the local engine', () => {
+  it('maps --corpus-dirs into search.local.dirs without switching the web engine', () => {
     const settings = applyResearchFlags({ search: { engine: 'searxng' } }, {
       'corpus-dirs': '/tmp/notes,/tmp/reports,/tmp/notes',
     });
-    assert.equal(settings.search.engine, 'local');
+    assert.equal(settings.search.engine, 'searxng');
     assert.deepEqual(settings.search.local.dirs, ['/tmp/notes', '/tmp/reports']);
+  });
+
+  it('keeps --search js-eyes when corpus directories are also set', () => {
+    const settings = applyResearchFlags({ search: { engine: 'searxng' } }, {
+      search: 'js-eyes',
+      'corpus-dirs': '/tmp/notes',
+    });
+    assert.equal(settings.search.engine, 'js-eyes');
+    assert.deepEqual(settings.search.local.dirs, ['/tmp/notes']);
   });
 
   it('keeps --search local and writes corpus directories', () => {

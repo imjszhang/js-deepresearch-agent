@@ -307,9 +307,6 @@ function applyLocalCorpusOverrides(settings, flags) {
     ...(settings.search.local && typeof settings.search.local === 'object' ? settings.search.local : {}),
     dirs,
   };
-  // Single-mode: enable local so directories are not silently dropped.
-  // Combining local with searxng/js-eyes fan-out is issue #16.
-  settings.search.engine = 'local';
 }
 
 function coerceValue(value) {
