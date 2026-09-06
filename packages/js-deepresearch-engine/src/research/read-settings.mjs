@@ -32,6 +32,15 @@ export function resolveReadSettings(settings = {}, { strategy = 'focused' } = {}
     alternateEvidence: {
       enabled: raw.alternateEvidence?.enabled !== false,
     },
+    backends: Array.isArray(raw.backends) && raw.backends.length
+      ? raw.backends.map((item) => String(item))
+      : ['http', 'alternate', 'headless', 'js-eyes'],
+    headless: {
+      enabled: raw.headless?.enabled === true,
+      waitUntil: raw.headless?.waitUntil || 'domcontentloaded',
+      timeoutMs: Number(raw.headless?.timeoutMs) > 0 ? Number(raw.headless.timeoutMs) : 15000,
+      maxConcurrency: Number(raw.headless?.maxConcurrency) > 0 ? Number(raw.headless.maxConcurrency) : 2,
+    },
     transport: {
       maxAttempts: positiveInteger(raw.transport?.maxAttempts, 3),
       hostCircuitThreshold: nonNegativeInteger(raw.transport?.hostCircuitThreshold, 3),

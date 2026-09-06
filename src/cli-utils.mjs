@@ -180,6 +180,9 @@ export function applyResearchFlags(settings, flags) {
     'search-categories': 'search.options.categories',
     'source-assessment': 'research.read.sourceAssessment.enabled',
     'read-source-assessment': 'research.read.sourceAssessment.enabled',
+    'read-backends': 'research.read.backends',
+    'headless-enabled': 'research.read.headless.enabled',
+    'headless-timeout-ms': 'research.read.headless.timeoutMs',
     'embedding-provider': 'research.providers.embedding.provider',
     'embedding-model': 'research.providers.embedding.model',
     'embedding-base-url': 'research.providers.embedding.baseUrl',
@@ -226,6 +229,16 @@ export function applyResearchFlags(settings, flags) {
     if (!hostHeaders || typeof hostHeaders !== 'object' || Array.isArray(hostHeaders)) {
       throw new Error('Flag --http-host-headers requires a JSON object keyed by hostname.');
     }
+  }
+  if (flags['read-backends'] !== undefined) {
+    const backends = String(flags['read-backends'])
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean);
+    if (!backends.length) {
+      throw new Error('Flag --read-backends requires a comma-separated list.');
+    }
+    setDeepValue(settings, 'research.read.backends', backends);
   }
   if (flags['http-allowed-content-types'] !== undefined) {
     const contentTypes = String(flags['http-allowed-content-types'])

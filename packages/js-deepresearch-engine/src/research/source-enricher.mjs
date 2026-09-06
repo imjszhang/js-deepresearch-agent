@@ -117,6 +117,7 @@ async function enrichOneSource(source, {
   recorder,
   transportMemory,
   fetchImpl,
+  headlessFetch,
 }) {
   const url = String(source.url || '').trim();
   if (!url) {
@@ -168,6 +169,7 @@ async function enrichOneSource(source, {
     signal,
     maxChars: maxFetchChars || maxContentChars,
     fetchImpl,
+    headlessFetch,
     transportMemory,
     recorder,
   });
@@ -360,6 +362,7 @@ export async function enrichFindingSources(finding, options = {}) {
     recorder,
     transportMemory,
     fetchImpl,
+    headlessFetch,
     seenUrls = new Set(),
     enrichedCount = { value: 0 },
   } = options;
@@ -424,6 +427,7 @@ export async function enrichFindingSources(finding, options = {}) {
           recorder,
           transportMemory,
           fetchImpl,
+          headlessFetch,
         });
         enrichedByUrl.set(source.url, enriched);
         if (enriched.fetchStatus === 'ok') {

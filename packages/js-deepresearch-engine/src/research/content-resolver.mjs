@@ -7,6 +7,13 @@ import { recoverAlternateEvidence } from './alternate-evidence.mjs';
 import { fetchUrlContent, truncateContent } from './content-fetcher.mjs';
 import { resolveFocusedSettings } from './focused-settings.mjs';
 import { isWafShellText } from './body-quality.mjs';
+import {
+  fetchHeadlessContent,
+  isJsEyesHandlerBackend,
+  isLoginPlatformHost,
+  resolveReadBackends,
+  shouldEscalateBackend,
+} from './headless-backend.mjs';
 
 /** @type {Array<{handler: Function, backendId: string|Function|null}>} */
 const handlers = [];
@@ -200,8 +207,29 @@ export async function runRememberedAttempt(url, context, {
  * @param {ContentFetchContext} context
  * @returns {Promise<ContentFetchResult>}
  */
+async function runHandlers(url, context, { jsEyesOnly = false, skipJsEyes = false } = {}) {
+  const { maxChars } = context;
+  const retrievalPath = context.retrievalPath || 'direct';
+  for (const descriptor of handlers) {
+    const backend = handlerBackendId(descriptor, url, context);
+    if (jsEyesOnly && !isJsEyesHandlerBackend(backend)) continue;
+    if (skipJsEyes && isJsEyesHandlerBackend(backend)) continue;
+    const { handler } = descriptor;
+    if (typeof handler.supports === 'function' && !handler.supports(url, context)) continue;
+    const result = await runRememberedAttempt(url, context, {
+      backend,
+      retrievalPath,
+      run: () => handler(url, context),
+    });
+    if (result?.status && result.status !== 'unsupported') {
+      return truncateResult(result, maxChars);
+    }
+  }
+  return null;
+}
+
 async function resolveDirectUrlContent(url, context = {}) {
-  const { settings, maxChars } = context;
+  const { settings } = context;
   const { fetchBackend } = resolveFocusedSettings(settings);
   const retrievalPath = context.retrievalPath || 'direct';
 
@@ -213,21 +241,9 @@ async function resolveDirectUrlContent(url, context = {}) {
     });
   }
 
-  for (const descriptor of handlers) {
-    const { handler } = descriptor;
-    if (typeof handler.supports === 'function' && !handler.supports(url, context)) continue;
-    const backend = handlerBackendId(descriptor, url, context);
-    const result = await runRememberedAttempt(url, context, {
-      backend,
-      retrievalPath,
-      run: () => handler(url, context),
-    });
-    if (result?.status && result.status !== 'unsupported') {
-      return truncateResult(result, maxChars);
-    }
-  }
-
   if (fetchBackend === 'js-eyes') {
+    const handled = await runHandlers(url, context, { jsEyesOnly: true });
+    if (handled) return handled;
     return runRememberedAttempt(url, context, {
       backend: 'js-eyes',
       retrievalPath,
@@ -240,6 +256,17 @@ async function resolveDirectUrlContent(url, context = {}) {
     });
   }
 
+  const handled = await runHandlers(url, context, { skipJsEyes: true });
+  if (handled) return handled;
+
+  if (fetchBackend === 'http' || fetchBackend === 'auto' || fetchBackend === 'headless') {
+    return runRememberedAttempt(url, context, {
+      backend: 'http',
+      retrievalPath,
+      run: () => fetchUrlContent(url, httpFetchOptions(context)),
+    });
+  }
+
   return runRememberedAttempt(url, context, {
     backend: 'http',
     retrievalPath,
@@ -247,16 +274,7 @@ async function resolveDirectUrlContent(url, context = {}) {
   });
 }
 
-export async function resolveUrlContent(url, context = {}) {
-  const direct = await resolveDirectUrlContent(url, context);
-  if (context.skipAlternateEvidence || context.retrievalPath && context.retrievalPath !== 'direct') {
-    return direct;
-  }
-  if (context.settings?.research?.read?.alternateEvidence?.enabled === false) {
-    return direct;
-  }
-  const recovered = await recoverAlternateEvidence(url, { direct, context });
-  if (!recovered) return direct;
+function mergeRecovered(direct, recovered) {
   return {
     ...direct,
     ...recovered,
@@ -264,4 +282,53 @@ export async function resolveUrlContent(url, context = {}) {
     originalError: direct.error || null,
     originalErrorType: direct.errorType || null,
   };
+}
+
+export async function resolveUrlContent(url, context = {}) {
+  const { fetchBackend } = resolveFocusedSettings(context.settings);
+  const backends = resolveReadBackends(context.settings, fetchBackend);
+  let result = await resolveDirectUrlContent(url, context);
+
+  if (context.skipAlternateEvidence || (context.retrievalPath && context.retrievalPath !== 'direct')) {
+    return result;
+  }
+
+  if (
+    backends.includes('alternate')
+    && context.settings?.research?.read?.alternateEvidence?.enabled !== false
+    && shouldEscalateBackend(result)
+  ) {
+    const recovered = await recoverAlternateEvidence(url, { direct: result, context });
+    if (recovered) result = mergeRecovered(result, recovered);
+  }
+
+  if (backends.includes('headless') && shouldEscalateBackend(result)) {
+    const headless = await fetchHeadlessContent(url, {
+      ...context,
+      retrievalPath: 'headless',
+    });
+    if (headless && headless.status !== 'unsupported') {
+      result = {
+        ...result,
+        ...headless,
+        originalError: result.error || null,
+        originalErrorType: result.errorType || null,
+      };
+    }
+  }
+
+  if (
+    backends.includes('js-eyes')
+    && fetchBackend !== 'http'
+    && shouldEscalateBackend(result)
+    && isLoginPlatformHost(url)
+  ) {
+    const eyes = await runHandlers(url, {
+      ...context,
+      retrievalPath: 'js-eyes',
+    }, { jsEyesOnly: true });
+    if (eyes) result = eyes;
+  }
+
+  return result;
 }

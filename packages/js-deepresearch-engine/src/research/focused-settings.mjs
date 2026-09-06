@@ -34,7 +34,7 @@ const DEFAULT_FOCUSED = Object.freeze({
 });
 
 const VALID_FETCH_MODES = new Set(['disabled', 'full', 'summary', 'extract']);
-const VALID_FETCH_BACKENDS = new Set(['auto', 'http', 'js-eyes']);
+const VALID_FETCH_BACKENDS = new Set(['auto', 'http', 'js-eyes', 'headless']);
 
 function resolveBooleanFlag(rawValue, defaultValue) {
   return rawValue === undefined ? defaultValue : rawValue === true;
