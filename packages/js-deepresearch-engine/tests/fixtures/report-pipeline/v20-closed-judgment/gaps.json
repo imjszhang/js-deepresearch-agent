@@ -1,0 +1,19 @@
+[
+  {
+    "id": "gap-2",
+    "requiredSlot": true,
+    "contractSlotId": "judgment",
+    "answerSlot": "judgment",
+    "question": "Commerce Agents 是把货架留给零售商，还是把标准写成 Claude 的？",
+    "status": "verified",
+    "evidenceStatus": "verified",
+    "importance": "critical",
+    "slotSupport": {
+      "verdict": "supported",
+      "quoteAnchored": true,
+      "method": "llm",
+      "quote": "Retailers can fork the reference implementation and keep checkout on their own site.",
+      "supportingPassageIds": ["p-official"]
+    }
+  }
+]

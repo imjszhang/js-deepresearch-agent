@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
-import { GAP_SCHEMA_VERSION, RESEARCH_BRIEF_SCHEMA_VERSION } from '../src/index.mjs';
+import { GAP_SCHEMA_VERSION, RESEARCH_BRIEF_SCHEMA_VERSION, normalizeGapRecord } from '../src/index.mjs';
 
 const fixtureDir = path.join(import.meta.dirname, 'fixtures', 'control-plane');
 
@@ -23,7 +23,10 @@ describe('Issue #27 control-plane golden fixture', () => {
     assert.deepEqual(brief.consequentialClaims, ['alpha safety']);
     assert.equal(meta.artifactSchemaVersion, 3);
 
-    assert.ok(gaps.every((gap) => gap.schemaVersion === GAP_SCHEMA_VERSION));
+    assert.ok(gaps.every((gap) => gap.schemaVersion <= GAP_SCHEMA_VERSION));
+    const normalizedGaps = gaps.map((gap) => normalizeGapRecord(gap));
+    assert.ok(normalizedGaps.every((gap) => gap.schemaVersion === GAP_SCHEMA_VERSION));
+    assert.ok(normalizedGaps.every((gap) => gap.evidenceStatus === gap.status));
     const root = gaps.find((gap) => gap.kind === 'root');
     assert.equal(root.rollup, true);
     assert.ok(gaps.filter((gap) => gap.requiredSlot).every((gap) => gap.status === 'verified'));

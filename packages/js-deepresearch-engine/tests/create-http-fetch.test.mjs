@@ -18,7 +18,12 @@ describe('createHttpFetch', () => {
   });
 
   it('accepts socks5 proxy URLs without throwing', () => {
-    assert.doesNotThrow(() => createHttpFetch('socks5://127.0.0.1:1080'));
+    const fetchFn = createHttpFetch('socks5://127.0.0.1:1080');
+    assert.deepEqual(fetchFn.transportOptions, {
+      proxy: true,
+      headersTimeoutMs: 900_000,
+      bodyTimeoutMs: 900_000,
+    });
   });
 
   it('accepts socks5h proxy URLs without throwing', () => {

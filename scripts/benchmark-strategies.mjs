@@ -2,7 +2,13 @@
 import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import '../src/config/bootstrap-env.mjs';
-import { ResearchRunner, createLlmProvider, saveResearchToWorkDir } from 'js-deepresearch-engine';
+import {
+  FileRunRecorder,
+  ResearchRunner,
+  createLlmProvider,
+  createWorkSessionDir,
+  saveResearchArtifacts,
+} from 'js-deepresearch-engine';
 import { parseArgs, applyResearchFlags } from '../src/cli-utils.mjs';
 import { createServices } from '../src/bootstrap.mjs';
 import { getDb } from '../src/storage/db.mjs';
@@ -104,9 +110,12 @@ export async function runStrategyBenchmark({
   presets,
   flags,
   runner = new ResearchRunner(),
-  saveArtifacts = saveResearchToWorkDir,
+  saveArtifacts = saveResearchArtifacts,
   onProgress = () => {},
 }) {
+  if (flags['no-work-dir']) {
+    throw new Error('--run mode requires work_dir artifacts. Remove --no-work-dir.');
+  }
   const services = createServices(getDb());
   let baseSettings = applyResearchFlags(services.settingsStore.get(), flags);
   const sessions = [];
@@ -116,27 +125,46 @@ export async function runStrategyBenchmark({
     const settings = applyStrategyPreset(baseSettings, preset);
     onProgress(`Running ${preset.label}...`);
 
-    const startedAt = Date.now();
-    const result = await runner.run({
+    const sessionDir = createWorkSessionDir({ settings, strategy: preset.strategy });
+    const recorder = new FileRunRecorder({
+      sessionDir,
+      strategy: preset.strategy,
       query,
-      settings,
-      onProgress: ({ message, progress, level }) => {
-        if (!flags.json) {
-          console.error(`[${level}] ${progress ?? '-'}% ${message}`);
-        }
-      },
+      metadata: { settings, benchmarkPreset: preset.label },
     });
+    const startedAt = Date.now();
+    let result;
+    try {
+      result = await runner.run({
+        query,
+        settings,
+        recorder,
+        onProgress: ({ message, progress, level }) => {
+          if (!flags.json) {
+            console.error(`[${level}] ${progress ?? '-'}% ${message}`);
+          }
+        },
+      });
+    } catch (error) {
+      recorder.finalize('failed', { error });
+      throw error;
+    }
     const wallClockDurationMs = Date.now() - startedAt;
 
-    if (flags['no-work-dir']) {
-      throw new Error('--run mode requires work_dir artifacts. Remove --no-work-dir.');
-    }
-
     const artifacts = saveArtifacts({
+      sessionDir,
       settings,
       strategy: preset.strategy,
       query,
       result,
+    });
+    recorder.finalize('completed', {
+      artifacts: {
+        reportPath: artifacts.reportPath,
+        findingsPath: artifacts.findingsPath,
+        sourcesPath: artifacts.sourcesPath,
+        metaPath: artifacts.metaPath,
+      },
     });
     wallClockByWorkDir.set(artifacts.sessionDir, wallClockDurationMs);
     sessions.push(`${preset.label}=${artifacts.sessionDir}`);

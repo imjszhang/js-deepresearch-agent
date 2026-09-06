@@ -75,6 +75,7 @@ export const defaultSettings = Object.freeze({
     read: {
       fetchMode: 'summary',
       maxContentChars: 8000,
+      maxFetchChars: 64000,
       enrichConcurrency: 2,
       sourceAssessment: {
         enabled: false,

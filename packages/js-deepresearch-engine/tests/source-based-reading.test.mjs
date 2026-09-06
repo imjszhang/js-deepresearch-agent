@@ -3,9 +3,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 import { fetchUrlContent } from '../src/research/content-fetcher.mjs';
+import { resetHttpFetchCache } from '../src/http/create-http-fetch.mjs';
 import {
   registerContentFetchHandler,
   resetContentFetchHandlers,
+  resolveContentFetchImpl,
   resolveUrlContent,
 } from '../src/research/content-resolver.mjs';
 import { reportPrompt } from '../src/research/prompts.mjs';
@@ -22,6 +24,7 @@ const originalFetch = globalThis.fetch;
 afterEach(() => {
   globalThis.fetch = originalFetch;
   resetContentFetchHandlers();
+  resetHttpFetchCache();
 });
 
 function mockHtmlFetch(html) {
@@ -125,6 +128,25 @@ describe('content resolver', () => {
     assert.equal(result.backend, 'test');
   });
 
+  it('uses distributed windows instead of head-only truncation for handler bodies', async () => {
+    registerContentFetchHandler(async () => ({
+      status: 'ok',
+      title: 'Long handler page',
+      content: `HEAD-${'a'.repeat(3000)}MIDDLE-${'b'.repeat(3000)}TAIL-${'c'.repeat(3000)}-END`,
+      backend: 'test',
+    }));
+
+    const result = await resolveUrlContent('https://example.com/long', {
+      settings: { research: { focused: { fetchBackend: 'auto' } } },
+      maxChars: 1200,
+    });
+
+    assert.match(result.content, /^HEAD-/);
+    assert.match(result.content, /b{20}/);
+    assert.match(result.content, /-END$/);
+    assert.match(result.content, /omitted \d+ chars/);
+  });
+
   it('falls back to HTTP when handlers return unsupported', async () => {
     registerContentFetchHandler(async () => ({ status: 'unsupported' }));
     globalThis.fetch = async () => ({
@@ -168,6 +190,39 @@ describe('content resolver', () => {
 
     assert.equal(result.status, 'failed');
     assert.match(result.error, /No js-eyes content handler matched URL/);
+  });
+
+  it('keeps direct fetch when no proxy is configured', () => {
+    assert.equal(resolveContentFetchImpl({ settings: {} }), globalThis.fetch);
+    assert.equal(resolveContentFetchImpl({ settings: { http: { proxy: '' } } }), globalThis.fetch);
+  });
+
+  it('builds a proxied fetch when http.proxy is set', () => {
+    const fetchImpl = resolveContentFetchImpl({
+      settings: { http: { proxy: 'socks5://127.0.0.1:1080' } },
+    });
+    assert.notEqual(fetchImpl, globalThis.fetch);
+    assert.equal(fetchImpl.transportOptions.proxy, true);
+  });
+
+  it('lets an explicit fetchImpl override the configured proxy', async () => {
+    let seen = 0;
+    const result = await resolveUrlContent('https://example.com/proxied', {
+      settings: {
+        http: { proxy: 'socks5://127.0.0.1:1080' },
+        research: { focused: { fetchBackend: 'http' } },
+      },
+      fetchImpl: async () => {
+        seen += 1;
+        return {
+          ok: true,
+          headers: { get: () => 'text/html' },
+          text: async () => '<html><body><p>Via injected fetch</p></body></html>',
+        };
+      },
+    });
+    assert.equal(seen, 1);
+    assert.match(result.content, /Via injected fetch/);
   });
 });
 
@@ -307,6 +362,49 @@ describe('source enricher', () => {
     assert.equal(finding.sources[0].fetchStatus, 'ok');
     assert.equal(finding.sources[0].summary, 'Focused summary about transformers.');
     assert.match(finding.sources[0].content, /transformers/);
+  });
+
+  it('stores a larger fetched body while bounding summary analysis to relevant passages', async () => {
+    const body = `${'unrelated preface '.repeat(1200)}TAILKEY official answer appears near the end.`;
+    registerContentFetchHandler(async () => ({
+      status: 'ok',
+      title: 'Long official page',
+      content: body,
+      backend: 'test',
+    }));
+    let assessmentInput = '';
+
+    const [finding] = await enrichFindings([{
+      question: 'TAILKEY official answer',
+      sources: [{ title: 'Long official page', url: 'https://example.com/long', snippet: 'short' }],
+    }], {
+      query: 'TAILKEY official answer',
+      fetchMode: 'summary',
+      maxUrlsPerIteration: 8,
+      maxUrlsTotal: 24,
+      maxContentChars: 8000,
+      maxFetchChars: 64000,
+      enrichConcurrency: 1,
+      llm: {
+        async complete({ messages }) {
+          assessmentInput = (messages || []).map((message) => message.content).join('\n');
+          return JSON.stringify({
+            summary: 'The official answer appears near the end.',
+            readability: 'readable',
+            contentKind: 'article',
+            publisherType: 'official',
+            firstParty: true,
+            evidenceTier: 'other_primary',
+            reason: 'readable official article',
+          });
+        },
+      },
+    });
+
+    assert.equal(finding.sources[0].content, body);
+    assert.ok(finding.sources[0].content.length > 8000);
+    assert.match(assessmentInput, /TAILKEY official answer appears near the end/);
+    assert.ok(assessmentInput.length < 15000);
   });
 
   it('extracts passages without calling the LLM in extract mode', async () => {

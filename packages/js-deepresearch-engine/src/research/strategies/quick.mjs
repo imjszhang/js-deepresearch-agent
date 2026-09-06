@@ -104,11 +104,23 @@ async function runQuickSingleRound(context) {
       });
     },
   });
-  return findings.map((finding, index) => ({
+  const normalizedFindings = findings.map((finding, index) => ({
     ...finding,
     queryOrigin: index === 0 ? 'user_query' : 'llm_planner',
     plannerMode: index === 0 ? null : 'initial',
   }));
+  context.recorder?.checkpoint?.('quick-round-complete', {
+    schemaVersion: 1,
+    strategy: 'quick',
+    query,
+    brief,
+    iteration: 1,
+    findings: normalizedFindings,
+    queryMemory: queryMemory?.exportCheckpoint?.() || null,
+    budget: context.budget?.exportCheckpoint?.() || context.budget?.snapshot?.() || null,
+    trace,
+  });
+  return normalizedFindings;
 }
 
 function addQuickTrace(trace, action, fields = {}) {

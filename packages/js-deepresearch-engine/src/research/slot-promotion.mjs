@@ -110,7 +110,7 @@ export function promoteSuccessfulSources({
       state.findings.push(finding);
       if (gap.status === 'blocked') {
         gap.status = 'body_read';
-        gap.blockedReason = null;
+        gap.evidenceStatus = 'body_read';
       }
       if (candidate) {
         candidate.gapIds = [...new Set([...(candidate.gapIds || []), gap.id])];

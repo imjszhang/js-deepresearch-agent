@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 2,
+  "query": "店面会话正在变成新的货架。Anthropic 开源 Commerce Agents，是在帮零售商把货架留在自己家里，还是在用可 fork 的正确做法把货架标准写成 Claude 的？",
+  "queryShape": "judgment",
+  "requiredAnswerSlots": [
+    {
+      "id": "judgment",
+      "answerSlot": "judgment",
+      "question": "Commerce Agents 是把货架留给零售商，还是把标准写成 Claude 的？",
+      "evidenceCriteria": ["first_party"]
+    }
+  ]
+}

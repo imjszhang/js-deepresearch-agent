@@ -169,4 +169,25 @@ export class QueryMemory {
   }
 
   snapshot() { return this.entries.map((entry) => ({ ...entry })); }
+
+  exportCheckpoint() {
+    return {
+      enabled: this.enabled,
+      similarityThreshold: this.similarityThreshold,
+      entries: this.snapshot(),
+      vectorCache: [...this.vectorCache.entries()].map(([query, vector]) => [query, [...vector]]),
+    };
+  }
+
+  restoreCheckpoint(checkpoint = {}) {
+    this.enabled = checkpoint.enabled !== false;
+    this.similarityThreshold = Number(checkpoint.similarityThreshold) || this.similarityThreshold;
+    this.entries = Array.isArray(checkpoint.entries)
+      ? checkpoint.entries.map((entry) => ({ ...entry }))
+      : [];
+    this.vectorCache = new Map(
+      (checkpoint.vectorCache || []).map(([query, vector]) => [query, [...vector]]),
+    );
+    return this;
+  }
 }

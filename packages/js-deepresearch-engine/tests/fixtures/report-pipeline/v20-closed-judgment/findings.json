@@ -1,0 +1,24 @@
+[
+  {
+    "question": "What does Anthropic say Commerce Agents is?",
+    "gapId": "gap-2",
+    "contractSlotId": "judgment",
+    "answerSlot": "judgment",
+    "sources": [
+      {
+        "id": "src-official",
+        "title": "Commerce Agents",
+        "url": "https://www.claude.com/blog/commerce-agents",
+        "content": "Anthropic published Commerce Agents as an open-source blueprint. Retailers can fork the reference implementation and keep checkout on their own site.",
+        "summary": "Anthropic published Commerce Agents as an open-source blueprint. Retailers can fork the reference implementation and keep checkout on their own site.",
+        "fetchStatus": "ok",
+        "contentOrigin": "fetched",
+        "assessment": {
+          "firstParty": true,
+          "publisherType": "official",
+          "contentKind": "article"
+        }
+      }
+    ]
+  }
+]

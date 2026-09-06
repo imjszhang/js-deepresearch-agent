@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import {
   BudgetManager,
   ResearchRunner,
+  applySlotStatusToClaims,
   assembleReport,
   extractQualityClaims,
   keepNarrativeSections,
@@ -13,6 +14,7 @@ import {
   shouldMoveWeakKeyClaim,
   validateNarrativeObject,
   validateReportOutput,
+  validateReportPlan,
 } from '../src/index.mjs';
 import { defaultSearchQueryPlan } from './helpers/search-query-planner-mock.mjs';
 import { emptyBulletLines } from '../src/research/report-builder.mjs';
@@ -75,12 +77,12 @@ Ollama is a local model runner. [1.1]
     const narrative = `# Research Report
 
 ## Summary
-Ollama is a local model runner. [1.1]
+Ollama is a local model runner for Apple Silicon and this dump-filter narrative stays long enough after Evidence is ignored. [1.1]
 
 ## Key Findings
 
 ### 官方定位
-- Ollama targets easy local inference. [1.1]
+- Ollama targets easy local inference on developer workstations and documents that workflow in official pages. [1.1]
 
 ### ${query}
 *   **[1.1] Ollama docs** (source body): Ollama runs local models on Apple Silicon.
@@ -268,7 +270,7 @@ Enough narrative remains after caveat normalization.
     );
   });
 
-  it('fails full validation when claim revision empties Key Findings', () => {
+  it('treats emptied Key Findings as a plan/contract miss, not a rendering failure', () => {
     const narrative = `# Research Report
 
 ## Summary
@@ -288,9 +290,12 @@ Short.
       limitations: revised.moved.map((text) => `Insufficient direct evidence for: ${text}`),
       query: 'topic',
     });
-    const check = validateReportOutput(assembled, { minChars: 80, mode: 'full', findings });
-    assert.equal(check.ok, false);
-    assert.ok(check.flags.includes('report_missing_key_claims') || check.flags.includes('report_empty_summary'));
+    assert.doesNotMatch(revised.report, /## Key Findings/);
+    const renderCheck = validateReportOutput(assembled, { minChars: 80, mode: 'full', findings });
+    assert.equal(renderCheck.flags.includes('report_missing_key_claims'), false);
+    const planCheck = validateReportPlan({ keyFindings: [] }, { requiredInKeyFindings: true });
+    assert.equal(planCheck.ok, false);
+    assert.ok(planCheck.flags.includes('report_missing_key_claims'));
   });
 
   it('writes a report after the exploration cap is exhausted', async () => {
@@ -347,8 +352,8 @@ Budget topic evidence remains available after the exploration token cap is reach
 describe('structured narrative', () => {
   const jsonNarrative = {
     title: 'Ollama on Apple Silicon',
-    summary: ['Ollama is a local model runner for Apple Silicon. [1.1]'],
-    keyFindings: [{ heading: '定位', claims: ['Ollama targets easy local inference. [1.1]'] }],
+    summary: ['Ollama is a local model runner for Apple Silicon, and this summary stays long enough to satisfy the labeled narrative minimum after assembly. [1.1]'],
+    keyFindings: [{ heading: '定位', claims: ['Ollama targets easy local inference on developer workstations and documents that workflow in official product pages. [1.1]'] }],
     caveats: ['Benchmarks remain limited.'],
   };
 
@@ -398,14 +403,17 @@ describe('structured narrative', () => {
       llm: {
         async complete({ purpose, messages }) {
           if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
+          if (purpose === 'research_profile') {
+            return JSON.stringify({ requiredAnswerSlots: [] });
+          }
           if (purpose === 'question_generation') return '[]';
           return `# Research Report
 
 ## Summary
-Ollama is a local model runner for Apple Silicon and this fallback narrative is long enough to pass the report length contract. [1.1]
+Ollama is a local model runner for Apple Silicon and this fallback narrative is long enough to pass the labeled report length contract after Evidence is ignored and claim revision keeps cited snippets. [1.1]
 
 ## Key Findings
-- Ollama targets easy local inference on developer workstations. [1.1]
+- Ollama targets easy local inference on developer workstations and keeps that cited snippet claim in the labeled narrative with enough remaining detail. [1.1]
 `;
         },
       },
@@ -433,9 +441,7 @@ Ollama is a local model runner for Apple Silicon and this fallback narrative is 
         async complete({ purpose, messages }) {
           if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
           if (purpose === 'research_profile') {
-            return JSON.stringify({
-              requiredAnswerSlots: [{ answerSlot: 'ollama', question: 'What is Ollama?' }],
-            });
+            return JSON.stringify({ requiredAnswerSlots: [] });
           }
           if (purpose === 'gap_support') {
             const text = (messages || []).map((item) => item.content).join('\n');
@@ -504,11 +510,11 @@ Ollama is a local model runner for Apple Silicon and this fallback narrative is 
           if (purpose === 'question_generation') return '[]';
           return JSON.stringify({
             title: '房产操作',
-            summary: ['Local notes describe informal property tactics with enough detail to evaluate. [1.1]'],
+            summary: ['Local notes describe informal property tactics with enough independently checkable detail to keep the labeled narrative above the minimum after weak claims are removed. [1.1]'],
             keyFindings: [{
               heading: '操作',
               claims: [
-                'The source discusses informal holding arrangements in enough detail to evaluate. [1.1]',
+                'The source discusses informal holding arrangements and tax or liquidity constraints in enough detail to evaluate independently. [1.1]',
                 'This key sentence has no backing evidence at all.',
               ],
             }],
@@ -542,6 +548,41 @@ Ollama is a local model runner for Apple Silicon and this fallback narrative is 
       extractQualityClaims(narrative).filter((claim) => claim.kind === 'key_claim').map((claim) => claim.text),
     );
     assert.ok(result.claims.some((claim) => claim.kind === 'evidence_entry'));
+  });
+});
+
+describe('required-slot follow-up cannot inflate confirmed claims', () => {
+  it('moves a follow-up-backed Summary claim into Caveats while the required slot is open', () => {
+    const claims = applySlotStatusToClaims([{
+      kind: 'key_claim',
+      text: 'Commerce Agents 把货架标准写成 Claude 的。 [1.1]',
+      citationKeys: ['1.1'],
+      citedSourceIds: ['src-follow'],
+      flags: [],
+      evaluation: { verdict: 'supported', flags: [] },
+    }], {
+      gaps: [
+        { id: 'gap-2', requiredSlot: true, contractSlotId: 'judgment', status: 'body_read' },
+        { id: 'gap-3', requiredSlot: false, parentGapId: 'gap-2', status: 'verified' },
+      ],
+      findings: [{
+        gapId: 'gap-3',
+        parentGapId: 'gap-2',
+        contractSlotId: 'judgment',
+        sources: [{ id: 'src-follow', content: 'reprint body', fetchStatus: 'ok' }],
+      }],
+    });
+    assert.ok(claims[0].flags.includes('slot_limited'));
+    const revised = reviseUnsupportedKeyClaims(`# Research Report
+
+## Summary
+Commerce Agents 把货架标准写成 Claude 的。 [1.1]
+
+## Key Findings
+- Commerce Agents 把货架标准写成 Claude 的。 [1.1]
+`, claims);
+    assert.equal(revised.moved.length, 1);
+    assert.doesNotMatch(revised.report, /把货架标准写成 Claude/);
   });
 });
 

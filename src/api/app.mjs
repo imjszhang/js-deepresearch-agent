@@ -60,11 +60,15 @@ export function createApp(db) {
       return;
     }
 
-    const record = jobRunner.start({
-      query,
-      overrides: req.body?.settings || {},
-    });
-    res.status(202).json(record);
+    try {
+      const record = jobRunner.start({
+        query,
+        overrides: req.body?.settings || {},
+      });
+      res.status(202).json(record);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
   });
 
   app.get('/api/research/:id', (req, res) => {

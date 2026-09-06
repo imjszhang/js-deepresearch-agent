@@ -1,6 +1,13 @@
 import { classifyClaimSection } from './claim-quality.mjs';
 import { getSourceEvidenceClass } from './focused-settings.mjs';
 import { DEFAULT_MAX_PASSAGE_CHARS, selectDisplayedEvidence } from './evidence-chain.mjs';
+import {
+  containsSourceDump,
+  parseMarkdownNarrative,
+  renderNarrativeMarkdown,
+} from './report-narrative.mjs';
+
+export { containsSourceDump, SOURCE_DUMP_LINE } from './report-narrative.mjs';
 
 function splitMarkdownSections(markdown) {
   const parts = [];
@@ -21,12 +28,6 @@ function splitMarkdownSections(markdown) {
 function formatSection(part) {
   if (!part.heading) return part.lines.join('\n').trim();
   return `${'#'.repeat(Math.max(1, part.level))} ${part.heading}\n${part.lines.join('\n')}`.trim();
-}
-
-export const SOURCE_DUMP_LINE = /\[[0-9]+(?:\.[0-9]+)?\][^\n]*\((?:source body|snippet only|source summary)\)\s*:/i;
-
-export function containsSourceDump(text = '') {
-  return SOURCE_DUMP_LINE.test(String(text));
 }
 
 function normalizeComparable(value = '') {
@@ -179,6 +180,7 @@ const WEAK_CLAIM_FLAGS = new Set([
   'missing_direct_evidence',
   'slot_blocked',
   'slot_limited',
+  'slot_premise_rejected',
 ]);
 
 function claimHasSourceContent(claim = {}) {
@@ -189,67 +191,48 @@ function claimHasSourceContent(claim = {}) {
   });
 }
 
+export function shouldMoveWeakPremiseFact(claim = {}) {
+  if (claim.kind !== 'premise_fact') return false;
+  const flags = claim.evaluation?.flags || claim.flags || [];
+  const verdict = claim.evaluation?.verdict;
+  if (flags.includes('slot_premise_exempt') && (verdict === 'supported' || verdict === 'partially_supported')) {
+    return false;
+  }
+  if (flags.includes('slot_premise_rejected')) return true;
+  if (flags.some((flag) => WEAK_CLAIM_FLAGS.has(flag))) return true;
+  if (verdict === 'unsupported' || verdict === 'conflicting') return true;
+  if (claimHasSourceContent(claim) && (!verdict || verdict === 'supported' || verdict === 'partially_supported' || verdict === 'unverifiable')) {
+    return false;
+  }
+  if (verdict && verdict !== 'supported' && verdict !== 'partially_supported') return true;
+  return false;
+}
+
 export function shouldMoveWeakKeyClaim(claim = {}) {
+  if (claim.kind === 'premise_fact') return shouldMoveWeakPremiseFact(claim);
   if (claim.kind !== 'key_claim') return false;
   const flags = claim.evaluation?.flags || claim.flags || [];
+  if (flags.includes('slot_premise_exempt') || flags.includes('slot_fact_exempt')) return false;
   if (flags.some((flag) => ['slot_blocked', 'slot_limited'].includes(flag))) return true;
   const verdict = claim.evaluation?.verdict;
   if (verdict === 'unsupported') return true;
   if (verdict !== 'unverifiable') return false;
   if (claimHasSourceContent(claim)) return false;
-  if (flags.some((flag) => WEAK_CLAIM_FLAGS.has(flag))) return true;
-  return !claim.citedSourceId
-    && !(claim.citedSourceIds || []).length
-    && !(claim.evidence || []).length;
-}
-
-function claimLineMatches(line, text) {
-  const stripped = String(line || '').replace(LIST_PREFIX, '').trim();
-  if (!stripped) return false;
-  if (stripped === text) return true;
-  if (!stripped.startsWith(text)) return false;
-  const next = stripped[text.length];
-  return !next || next === '[' || /[\s.。，,;；]/.test(next);
-}
-
-function isListLine(line) {
-  return LIST_PREFIX.test(String(line || ''));
-}
-
-function isHeadingLine(line) {
-  return /^#{1,6}\s+/.test(String(line || ''));
-}
-
-function removeClaimLines(narrative, text, { paragraphs = false } = {}) {
-  const lines = String(narrative || '').split('\n');
-  const kept = [];
-  let removed = false;
-  for (const line of lines) {
-    if (isHeadingLine(line)) {
-      kept.push(line);
-      continue;
-    }
-    if (isListLine(line) && claimLineMatches(line, text)) {
-      removed = true;
-      continue;
-    }
-    if (paragraphs && String(line).trim() && claimLineMatches(line, text)) {
-      removed = true;
-      continue;
-    }
-    kept.push(line);
-  }
-  const next = kept.join('\n').replace(/(\n[ \t]*){3,}/g, '\n\n');
-  return { text: next, removed };
-}
-
-function claimHasSlotStatusFlag(claim = {}) {
-  const flags = claim.evaluation?.flags || claim.flags || [];
-  return flags.some((flag) => flag === 'slot_blocked' || flag === 'slot_limited');
+  const cited = Boolean(
+    claim.citedSourceId
+    || (claim.citedSourceIds || []).length
+    || (claim.citationKeys || []).length
+    || (claim.evidence || []).length,
+  );
+  const snippetLike = new Set(['snippet_only', 'missing_direct_evidence']);
+  const otherWeak = flags.filter((flag) => !snippetLike.has(flag));
+  if (otherWeak.some((flag) => WEAK_CLAIM_FLAGS.has(flag))) return true;
+  if (flags.some((flag) => snippetLike.has(flag))) return !cited;
+  return !cited;
 }
 
 const SUMMARY_HEADINGS = new Set(['summary', 'executive summary', '摘要', '总结', '概述']);
-const INCOMPLETE_SUMMARY = 'Required answer slots remain limited or blocked. Confirmed facts appear only where dedicated evidence was verified; see Caveats.';
+const INCOMPLETE_SUMMARY = 'Required answer slots remain limited or blocked. Confirmed facts appear only where dedicated evidence was verified; unsupported conclusions were moved to Caveats and must not be treated as findings. See Caveats for the remaining open slots.';
 
 function isSummaryHeading(title = '') {
   const normalized = String(title).normalize('NFKC').trim().toLowerCase().replace(/[：:]$/, '');
@@ -300,23 +283,148 @@ function ensureNarrativeAfterRevision(report) {
   return insertAfterSummaryHeading(report, INCOMPLETE_SUMMARY);
 }
 
-export function reviseUnsupportedKeyClaims(report, claims = []) {
-  const weak = claims.filter(shouldMoveWeakKeyClaim);
-  let next = String(report || '');
+function sectionBodyIsEmpty(part) {
+  const body = (part.lines || []).join('\n').trim();
+  if (!body) return true;
+  const stripped = body.replace(/[#*_`[\]()>]/g, '').replace(/[；;。.!?！？,，、\s…\-–—:：]/g, '');
+  return stripped.length < 4;
+}
+
+export function stripEmptyNarrativeSections(markdown = '') {
+  const parts = splitMarkdownSections(markdown);
+  const kept = [];
+  for (let index = 0; index < parts.length; index += 1) {
+    const part = parts[index];
+    const kind = classifyClaimSection(part.heading);
+    if (part.level >= 3 && sectionBodyIsEmpty(part)) continue;
+    if (part.level === 2 && kind === 'key_claim' && !isSummaryHeading(part.heading) && sectionBodyIsEmpty(part)) {
+      const descendants = [];
+      for (let child = index + 1; child < parts.length; child += 1) {
+        if (parts[child].level <= 2) break;
+        descendants.push(parts[child]);
+      }
+      if (!descendants.some((item) => !sectionBodyIsEmpty(item))) continue;
+    }
+    kept.push(formatSection(part));
+  }
+  return kept.join('\n\n').trim();
+}
+
+function claimTextMatches(item, text) {
+  const value = normalizeComparable(String(item || '').replace(LIST_PREFIX, ''));
+  const target = normalizeComparable(text);
+  if (!value || !target) return false;
+  if (value === target) return true;
+  if (value.startsWith(target)) {
+    const next = value[target.length];
+    return !next || /[\s.。，,;；[]/.test(next);
+  }
+  return false;
+}
+
+function removeMatchingTexts(list = [], text) {
+  const next = [];
+  let removed = false;
+  for (const item of list) {
+    if (claimTextMatches(item, text)) {
+      removed = true;
+      continue;
+    }
+    next.push(item);
+  }
+  return { list: next, removed };
+}
+
+function isSummaryPlacement(claim = {}) {
+  return isSummaryHeading(claim.section) || (claim.placements || []).includes('summary');
+}
+
+export function reviseNarrativeDocument(document = {}, claims = []) {
+  let summary = [...(document.summary || [])];
+  let backgroundFacts = [...(document.backgroundFacts || [])];
+  let keyFindings = (document.keyFindings || []).map((group) => ({
+    heading: group.heading || '',
+    claims: (group.claims || []).map((claim) => (typeof claim === 'string' ? claim : claim.text)).filter(Boolean),
+  }));
   const moved = [];
-  let movedSlotStatus = false;
-  for (const claim of weak) {
+  const relocated = [];
+
+  const removeEverywhere = (text, { includeBackground = false } = {}) => {
+    const fromSummary = removeMatchingTexts(summary, text);
+    summary = fromSummary.list;
+    const nextGroups = [];
+    let fromFindings = false;
+    for (const group of keyFindings) {
+      const result = removeMatchingTexts(group.claims, text);
+      fromFindings = fromFindings || result.removed;
+      if (result.list.length) nextGroups.push({ ...group, claims: result.list });
+    }
+    keyFindings = nextGroups;
+    let fromBackground = false;
+    if (includeBackground) {
+      const result = removeMatchingTexts(backgroundFacts, text);
+      backgroundFacts = result.list;
+      fromBackground = result.removed;
+    }
+    return fromSummary.removed || fromFindings || fromBackground;
+  };
+
+  for (const claim of claims) {
+    const flags = claim.evaluation?.flags || claim.flags || [];
+    if (claim.kind !== 'key_claim' || !flags.includes('slot_fact_exempt')) continue;
     const text = String(claim.text || '').trim();
     if (!text) continue;
-    const slotStatus = claimHasSlotStatusFlag(claim);
-    const result = removeClaimLines(next, text, { paragraphs: slotStatus });
-    if (!result.removed) continue;
-    next = result.text;
-    moved.push(text);
-    if (slotStatus) movedSlotStatus = true;
+    const removalText = String(isSummaryPlacement(claim) ? (claim.parentClaimText || text) : text).trim();
+    if (!removeEverywhere(removalText)) continue;
+    if (!backgroundFacts.some((item) => claimTextMatches(item, text))) backgroundFacts.push(text);
+    relocated.push(text);
   }
+
+  for (const claim of claims.filter(shouldMoveWeakKeyClaim)) {
+    const text = String(claim.text || '').trim();
+    if (!text) continue;
+    const removalText = String(
+      claim.kind === 'key_claim' && isSummaryPlacement(claim)
+        ? (claim.parentClaimText || text)
+        : text,
+    ).trim();
+    if (!removeEverywhere(removalText, { includeBackground: claim.kind === 'premise_fact' })) continue;
+    moved.push(text);
+  }
+
+  const nextDocument = {
+    ...document,
+    summary,
+    backgroundFacts,
+    keyFindings,
+  };
   return {
-    report: (movedSlotStatus ? ensureNarrativeAfterRevision(next) : next).trim(),
+    document: nextDocument,
     moved,
+    relocated,
+    changed: moved.length > 0 || relocated.length > 0,
+  };
+}
+
+export function reviseUnsupportedKeyClaims(report, claims = [], options = {}) {
+  const sourceDocument = options.document || parseMarkdownNarrative(report);
+  const revision = reviseNarrativeDocument(sourceDocument, claims);
+  let next = renderNarrativeMarkdown(revision.document);
+  if (!revision.changed) {
+    return {
+      report: stripEmptyNarrativeSections(String(report || '')).trim() || next.trim(),
+      document: revision.document,
+      moved: revision.moved,
+      relocated: revision.relocated,
+      changed: false,
+    };
+  }
+  next = stripEmptyNarrativeSections(ensureNarrativeAfterRevision(next));
+  return {
+    report: next.trim(),
+    document: parseMarkdownNarrative(next),
+    moved: revision.moved,
+    relocated: revision.relocated,
+    changed: true,
   };
 }

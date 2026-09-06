@@ -109,6 +109,8 @@ describe('Issue #27 structured research control', () => {
       consequentialClaims: [' production ready ', 'production ready'],
     }, { depth: 'focused' });
     assert.equal(brief.schemaVersion, RESEARCH_BRIEF_SCHEMA_VERSION);
+    assert.equal(brief.queryShape, null);
+    assert.equal(brief.premise, null);
     assert.equal(brief.audience, 'Engineering leaders');
     assert.equal(brief.depth, 'focused');
     assert.deepEqual(brief.requiredAnswerSlots[0].requiredHosts, ['docs.example.com']);
@@ -214,7 +216,7 @@ describe('Issue #27 structured research control', () => {
               requiredAnswerSlots: [{ answerSlot: 'planner', question: 'planner' }],
             });
           }
-          return '# Research Report\n\n## Summary\n\nStructured brief survived planner merge and remains user-authored rather than overwritten. [1.1]\n\n## Key Findings\n\nThe user exclusions and required answer slots stayed intact after sanitization.\n\n## Caveats\n\nThe test evidence is intentionally limited and should not be treated as complete.';
+          return '# Research Report\n\n## Summary\n\nStructured brief survived planner merge and remains user-authored rather than overwritten by later inferred slots. [1.1]\n\n## Key Findings\n\nThe user exclusions and required answer slots stayed intact after sanitization and remain visible in the labeled narrative. [1.1]\n\n## Caveats\n\nThe test evidence is intentionally limited and should not be treated as complete.';
         },
       },
     });
@@ -830,7 +832,7 @@ describe('Issue #27 structured research control', () => {
               }],
             });
           }
-          return '# Research Report\n\n## Summary\n\nPer-query novelty is recorded without treating a later duplicate as new yield. [1.1]\n\n## Key Findings\n\nThe second query that reused the same URL did not inflate novelty.\n\n## Caveats\n\nThe test evidence is intentionally limited and should not be treated as complete.';
+          return '# Research Report\n\n## Summary\n\nPer-query novelty is recorded without treating a later duplicate as new yield in the labeled narrative. [1.1]\n\n## Key Findings\n\nThe second query that reused the same URL did not inflate novelty and this finding stays cited. [1.1]\n\n## Caveats\n\nThe test evidence is intentionally limited and should not be treated as complete.';
         },
       },
     });

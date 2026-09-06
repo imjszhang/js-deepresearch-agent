@@ -88,7 +88,7 @@ describe('source policy before rerank', () => {
     assert.equal(inferEvidenceScope({ search: { engine: 'searxng', local: { dirs: ['/notes'] } } }), 'mixed');
   });
 
-  it('fails closed on site violations, entity mismatches, and low rerank scores', () => {
+  it('fails closed on site violations and entity mismatches but treats rerank as ranking', () => {
     const gap = { question: '智谱AI的监管合规情况', requiredHosts: [] };
     const relevant = {
       url: 'https://caixin.com/zhipu',
@@ -113,7 +113,7 @@ describe('source policy before rerank', () => {
       entities: ['智谱AI', '智谱'],
       rerankProvider: 'http',
     }).reasonCode, 'entity_mismatch');
-    assert.equal(evaluateSourceRelevance({
+    const lowRerank = evaluateSourceRelevance({
       ...relevant,
       rerank: { provider: 'http', score: -0.12 },
     }, {
@@ -121,7 +121,10 @@ describe('source policy before rerank', () => {
       query: '智谱 监管',
       entities: ['智谱AI'],
       rerankProvider: 'http',
-    }).reasonCode, 'rerank_below_threshold');
+    });
+    assert.equal(lowRerank.accepted, true);
+    assert.equal(lowRerank.reasonCode, 'rerank_below_threshold_soft');
+    assert.equal(lowRerank.lowRerank, true);
     assert.equal(sourceMatchesEntities({
       title: '智谱丨BigModel 平台',
       snippet: '智谱大模型开放平台',
@@ -231,6 +234,84 @@ describe('source policy before rerank', () => {
     ), false);
   });
 
+  it('accepts a same-entity first-party query when leftover aspect terms are in another script', () => {
+    const gap = {
+      question: '在店面会话正在变成新的货架的前提下,Anthropic 开源 Commerce Agents 是在帮零售商把货架留在自己家里,还是在用「可 fork 的正确做法」把货架标准写成 Claude 的?',
+      answerSlot: 'judgment_on_commerce_agents_design',
+      evidenceCriteria: ['first_party'],
+    };
+    const entities = ['Anthropic', 'Commerce Agents', 'Claude'];
+    const researchQuery = '店面会话正在变成新的货架。Anthropic 开源 Commerce Agents，是在帮零售商把货架留在自己家里，还是在用「可 fork 的正确做法」把货架标准写成 Claude 的？';
+    assert.equal(queryMatchesGapScope(
+      'Anthropic Commerce Agents official blueprint GitHub',
+      gap,
+      entities,
+      researchQuery,
+    ), true);
+    assert.equal(queryMatchesGapScope(
+      'Anthropic Commerce Agents forkable official blueprint',
+      gap,
+      entities,
+      researchQuery,
+    ), true);
+    assert.equal(queryMatchesGapScope(
+      'Anthropic Commerce Agents 货架 GitHub',
+      gap,
+      entities,
+      researchQuery,
+    ), true);
+    assert.equal(queryMatchesGapScope(
+      'Anthropic Claude API pricing',
+      gap,
+      entities,
+      researchQuery,
+    ), false);
+    assert.equal(queryMatchesGapScope(
+      'OpenAI GPT official GitHub',
+      gap,
+      entities,
+      researchQuery,
+    ), false);
+    assert.equal(queryMatchesGapScope(
+      'Anthropic Commerce Agents announcement',
+      gap,
+      entities,
+      researchQuery,
+    ), true);
+    assert.equal(queryMatchesGapScope(
+      'Anthropic commerce-agents launch',
+      gap,
+      entities,
+      researchQuery,
+    ), true);
+    assert.equal(queryMatchesGapScope(
+      'Anthropic Commerce Agents announcement',
+      gap,
+      entities,
+      researchQuery,
+      [],
+      { targetGapId: 'gap-2' },
+    ), true);
+    assert.equal(queryMatchesGapScope(
+      'Anthropic Commerce Agents announcement',
+      { ...gap, id: 'gap-2' },
+      entities,
+      researchQuery,
+      [],
+      { targetGapId: 'gap-9' },
+    ), false);
+    assert.equal(queryMatchesGapScope(
+      'Anthropic Commerce Agents official GitHub',
+      { ...gap, evidenceCriteria: [] },
+      entities,
+      researchQuery,
+    ), false);
+    assert.equal(queryMatchesGapScope('Zhipu AI official GitHub', {
+      question: '智谱AI的营收、利润及现金流状况如何?',
+      claimFamily: 'financials',
+    }, ['智谱AI', 'Zhipu AI']), false);
+  });
+
   it('keeps unevaluated external rerank candidates pending instead of auto-admitting them', () => {
     const decision = evaluateSourceRelevance({
       url: 'https://example.com/zhipu',
@@ -284,7 +365,7 @@ describe('source policy before rerank', () => {
     assert.equal(decision.matchedAlias, 'Zhipu AI');
   });
 
-  it('does not let authority tier admit a pending or below-threshold candidate', () => {
+  it('keeps pending candidates closed but allows a below-threshold candidate as a low-ranked read', () => {
     const pending = selectReadsByPolicy({
       candidates: [{
         id: 'gov',
@@ -316,7 +397,28 @@ describe('source policy before rerank', () => {
       rerankProvider: 'http',
       minRerankScore: 0.01,
     });
-    assert.equal(low.accepted, false);
-    assert.equal(low.reasonCode, 'rerank_below_threshold');
+    assert.equal(low.accepted, true);
+    assert.equal(low.reasonCode, 'rerank_below_threshold_soft');
+    assert.equal(low.lowRerank, true);
+    const picked = selectReadsByPolicy({
+      candidates: [{
+        id: 'gov',
+        url: 'https://www.sec.gov/filing',
+        title: '智谱AI filing',
+        snippet: '智谱AI',
+        rerank: { provider: 'http', score: 0.001 },
+        assessment: { evidenceTier: 'other_primary' },
+      }],
+      gap: { id: 'gap-1', question: '智谱AI 股权', requiredHosts: [] },
+      relevance: {
+        query: '智谱AI 股权',
+        entities: ['智谱AI'],
+        rerankProvider: 'http',
+        minRerankScore: 0.01,
+      },
+      minCount: 1,
+      maxCount: 1,
+    });
+    assert.equal(picked.length, 1);
   });
 });

@@ -15,7 +15,7 @@ function evidence(...verdicts) {
   return verdicts.map((verdict, index) => ({ verdict, score: 0.5 + index * 0.1, passageId: `p-${index}` }));
 }
 
-describe('quality metrics v3 claim extraction', () => {
+describe('quality metrics v4 claim extraction', () => {
   it('classifies fact claims, caveats, and recommendations while excluding sources', () => {
     const claims = extractQualityClaims(`# Report
 
@@ -67,8 +67,8 @@ Ollama is an independent company developing local LLM tools [1.2]. It also offer
     })));
     assert.equal(metrics.evaluatedClaimCount, claims.length);
     assert.equal(metrics.claimExtractionVersion, CLAIM_EXTRACTION_VERSION);
-    assert.equal(CLAIM_EXTRACTION_VERSION, 5);
-    assert.equal(CLAIM_EVALUATION_VERSION, 4);
+    assert.equal(CLAIM_EXTRACTION_VERSION, 7);
+    assert.equal(CLAIM_EVALUATION_VERSION, 5);
   });
 
   it('keeps a trailing citation after a period with the preceding fact', () => {
@@ -235,6 +235,59 @@ describe('quality metrics v3 verdict aggregation', () => {
     assert.equal(metrics.rates.supportedRate, null);
     assert.equal(metrics.rates.supportedOrPartialRate, null);
     assert.equal(metrics.rates.keyClaimSupportedRate, null);
+  });
+
+  it('extracts premise facts without adding them to the official supported rate', () => {
+    const claims = extractQualityClaims(`# Report
+
+## Summary
+The required judgment remains unresolved after first-party bodies were read.
+
+## Confirmed Background Facts
+- Anthropic describes Commerce Agents as an open-source blueprint. [1.1]
+
+## Key Findings
+- Retailers therefore keep the shelf. [1.1]
+`);
+    assert.equal(claims.find((claim) => claim.text.includes('open-source blueprint'))?.kind, 'premise_fact');
+    assert.equal(claims.find((claim) => claim.text.includes('keep the shelf'))?.kind, 'key_claim');
+    const metrics = calculateQualityMetrics(claims.map((claim) => ({
+      ...claim,
+      evidence: evidence('supported'),
+      evaluation: buildClaimEvaluation({
+        ...claim,
+        evidence: evidence('supported'),
+      }),
+    })));
+    assert.equal(metrics.claimExtractionVersion, 7);
+    assert.equal(metrics.premiseFactCount, 1);
+    assert.equal(metrics.premiseFactSupportedCount, 1);
+    assert.equal(metrics.evaluatedClaimCount, 2);
+    assert.equal(metrics.rates.supportedRate, 1);
+    const keyOnly = calculateQualityMetrics(claims.filter((claim) => claim.kind === 'key_claim').map((claim) => ({
+      ...claim,
+      evidence: evidence('supported'),
+      evaluation: buildClaimEvaluation({
+        ...claim,
+        evidence: evidence('supported'),
+      }),
+    })));
+    const withPremiseUnsupportedKey = calculateQualityMetrics([
+      {
+        kind: 'key_claim',
+        text: 'Retailers therefore keep the shelf.',
+        evaluation: { verdict: 'unverifiable', flags: ['slot_limited'] },
+      },
+      {
+        kind: 'premise_fact',
+        text: 'Anthropic describes Commerce Agents as an open-source blueprint.',
+        evaluation: { verdict: 'supported', flags: ['slot_premise_exempt'] },
+      },
+    ]);
+    assert.equal(withPremiseUnsupportedKey.evaluatedClaimCount, 1);
+    assert.equal(withPremiseUnsupportedKey.rates.supportedRate, 0);
+    assert.equal(withPremiseUnsupportedKey.premiseFactSupportedCount, 1);
+    assert.equal(keyOnly.evaluatedClaimCount, 2);
   });
 
   it('derives the gate from key claims only', () => {

@@ -54,6 +54,16 @@ describe('work output', () => {
     assert.equal(fs.existsSync(sessionDir), true);
   });
 
+  it('allocates a collision-safe suffix for concurrent sessions in the same second', () => {
+    const cwd = makeTempRoot();
+    const settings = { research: { workDir: 'work_dir' } };
+    const date = new Date('2026-05-25T17:38:28.455Z');
+    const first = createWorkSessionDir({ settings, strategy: 'quick', cwd, date });
+    const second = createWorkSessionDir({ settings, strategy: 'quick', cwd, date });
+    assert.equal(first, path.join(cwd, 'work_dir', 'quick', '2026-05-25_173828'));
+    assert.equal(second, path.join(cwd, 'work_dir', 'quick', '2026-05-25_173828-001'));
+  });
+
   it('writes report and search artifacts into the session directory', () => {
     const cwd = makeTempRoot();
     const settings = {
@@ -115,11 +125,11 @@ describe('work output', () => {
     assert.equal(JSON.stringify(meta).includes('secret-embedding-key'), false);
     assert.deepEqual(meta.settings.providers.rerank, { provider: 'http', model: 'jina-reranker-v3' });
     assert.equal(meta.settings.relevance.minRerankScore, 0.01);
-    assert.equal(meta.artifactSchemaVersion, 3);
-    assert.equal(meta.qualityMetricsVersion, 3);
-    assert.equal(meta.claimExtractionVersion, 5);
-    assert.equal(meta.claimEvaluationVersion, 4);
-    for (const key of ['briefPath', 'gapsPath', 'passagesPath', 'claimsPath', 'qualityPath', 'tracePath']) {
+    assert.equal(meta.artifactSchemaVersion, 4);
+    assert.equal(meta.qualityMetricsVersion, 4);
+    assert.equal(meta.claimExtractionVersion, 7);
+    assert.equal(meta.claimEvaluationVersion, 5);
+    for (const key of ['briefPath', 'gapsPath', 'passagesPath', 'claimsPath', 'qualityPath', 'tracePath', 'reportPlanPath']) {
       assert.equal(fs.existsSync(artifacts[key]), true);
       assert.equal(meta.artifacts[key], artifacts[key]);
     }

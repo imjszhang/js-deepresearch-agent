@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, it } from 'node:test';
+import { FileRunRecorder } from 'js-deepresearch-engine';
 import {
   archiveResearchResult,
   createIntelStoreEngine,
@@ -31,6 +32,43 @@ describe('CLI intel and wiki commands', () => {
     for (const dir of tempDirs.splice(0)) {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it('requires an explicit live or offline mode before replaying an LLM call', () => {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'jdr-replay-cli-'));
+    tempDirs.push(cwd);
+    const result = runCli(['replay', 'work_dir/quick/session', '--call', 'llm-1'], { cwd });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /replay <sessionDir> --call <llm-call-id> \(--live\|--offline\)/);
+  });
+
+  it('replays a saved LLM response offline without network access', () => {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'jdr-replay-offline-'));
+    tempDirs.push(cwd);
+    const sessionDir = path.join(cwd, 'work_dir', 'quick', '2026-09-05_120000');
+    const recorder = new FileRunRecorder({
+      sessionDir,
+      runId: 'offline-run',
+      strategy: 'quick',
+      query: 'offline',
+    });
+    recorder.callStarted({
+      callId: 'llm-1',
+      kind: 'llm',
+      request: {
+        provider: 'openai-compatible',
+        endpoint: 'https://example.invalid/v1/chat/completions',
+        body: { model: 'test', messages: [{ role: 'user', content: 'prompt' }] },
+      },
+    });
+    recorder.callFinished({
+      callId: 'llm-1',
+      kind: 'llm',
+      response: { text: 'saved response' },
+    });
+    const result = runCli(['replay', sessionDir, '--call', 'llm-1', '--offline'], { cwd });
+    assert.equal(result.status, 0);
+    assert.equal(result.stdout.trim(), 'saved response');
   });
 
   function seedArchivedRun() {

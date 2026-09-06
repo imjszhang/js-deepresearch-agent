@@ -52,6 +52,10 @@ export function aggregateBenchmark({
       metricsVersion: quality.metricsVersion,
       claimExtractionVersion: quality.claimExtractionVersion,
       claimEvaluationVersion: quality.claimEvaluationVersion,
+      metricsComparable: quality.claimExtractionVersion >= 7 && quality.claimEvaluationVersion >= 5,
+      evaluationScope: quality.claimExtractionVersion >= 7
+        ? 'canonical_claims_v4'
+        : 'legacy_markdown_claims',
       storedEvaluationVersions: [...new Set(claimResults
         .map((result) => result.effectiveEvaluation?.evaluationVersion)
         .filter((value) => Number.isFinite(value)))],

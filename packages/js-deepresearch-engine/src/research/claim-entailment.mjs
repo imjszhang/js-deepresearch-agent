@@ -4,9 +4,44 @@ import { claimEntailmentPrompt } from './prompts.mjs';
 import { buildClaimEvaluation, CLAIM_VERDICTS } from './claim-quality.mjs';
 
 const ALLOWED_VERDICTS = new Set(CLAIM_VERDICTS);
+const ALLOWED_CLAIM_ROLES = new Set(['source_attributed_fact', 'research_judgment']);
+
+const NAMED_HTML_ENTITIES = Object.freeze({
+  amp: '&',
+  apos: "'",
+  gt: '>',
+  lt: '<',
+  nbsp: ' ',
+  quot: '"',
+});
+
+function decodeHtmlEntities(value = '') {
+  return String(value).replace(
+    /&(?:#(\d+)|#x([a-f0-9]+)|([a-z][a-z0-9]+));/gi,
+    (match, decimal, hexadecimal, named) => {
+      if (decimal || hexadecimal) {
+        const codePoint = Number.parseInt(decimal || hexadecimal, hexadecimal ? 16 : 10);
+        if (Number.isInteger(codePoint) && codePoint >= 0 && codePoint <= 0x10ffff) {
+          try {
+            return String.fromCodePoint(codePoint);
+          } catch {
+            return match;
+          }
+        }
+      }
+      return NAMED_HTML_ENTITIES[String(named || '').toLowerCase()] ?? match;
+    },
+  );
+}
 
 function normalizeQuote(value = '') {
-  return String(value).normalize('NFKC').replace(/\s+/g, '').toLowerCase();
+  return decodeHtmlEntities(value)
+    .normalize('NFKC')
+    .replace(/[\u2018\u2019\u02bc]/g, "'")
+    .replace(/[\u201c\u201d]/g, '"')
+    .replace(/[\u2010-\u2015\u2212]/g, '-')
+    .replace(/\s+/g, '')
+    .toLowerCase();
 }
 
 export function passageContainsQuote(passages = [], quote = '') {
@@ -16,7 +51,7 @@ export function passageContainsQuote(passages = [], quote = '') {
 }
 
 export function shouldJudgeClaim(claim = {}, passages = []) {
-  if (claim.kind !== 'key_claim') return false;
+  if (claim.kind !== 'key_claim' && claim.kind !== 'premise_fact') return false;
   if (!claim.citationKeys?.length) return false;
   const flags = claim.flags || claim.evaluation?.flags || [];
   if (flags.includes('uncited') || flags.includes('unresolved_citation')) return false;
@@ -35,10 +70,12 @@ function citedPassagesFor(claim, passages = []) {
 export function applyEntailmentVerdict(claim, judgment, passages = []) {
   const verdict = String(judgment?.verdict || '').trim();
   const quote = String(judgment?.quote || '').trim();
+  const claimRole = String(judgment?.claimRole || '').trim();
   if (!ALLOWED_VERDICTS.has(verdict) || verdict === 'conflicting') return claim;
   if (!passageContainsQuote(passages, quote)) return claim;
   const next = {
     ...claim,
+    ...(ALLOWED_CLAIM_ROLES.has(claimRole) ? { claimRole } : {}),
     evidence: [
       ...(claim.evidence || []),
       {

@@ -32,17 +32,25 @@ describe('CLI research cancellation', () => {
     tempDirs.push(dir);
     process.env.JDR_INTEL_STORE_DIR = path.join(dir, 'intel');
   }
+
+  function makeWorkRoot() {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jdr-cli-work-'));
+    tempDirs.push(dir);
+    return dir;
+  }
+
   it('marks history as cancelled when runner aborts', async () => {
     const db = createTestDb();
     const researchRepository = new ResearchRepository(db);
     const sourceRepository = new SourceRepository(db);
     const abortError = new Error('Research aborted');
     abortError.name = 'AbortError';
+    const workDir = makeWorkRoot();
 
     await assert.rejects(
       () => runCliResearch({
         query: 'deep research',
-        settings: { research: { strategy: 'quick' } },
+        settings: { research: { strategy: 'quick', workDir } },
         flags: {},
         services: { researchRepository, sourceRepository },
         runner: {
@@ -60,6 +68,12 @@ describe('CLI research cancellation', () => {
     const record = researchRepository.get('test-cancel-id');
     assert.equal(record.status, 'cancelled');
     assert.match(record.error, /Research aborted/);
+    const session = fs.readdirSync(path.join(workDir, 'quick'))[0];
+    const sessionDir = path.join(workDir, 'quick', session);
+    const run = JSON.parse(fs.readFileSync(path.join(sessionDir, 'run.json'), 'utf8'));
+    assert.equal(run.status, 'cancelled');
+    assert.equal(record.sessionDir, sessionDir);
+    assert.equal(fs.existsSync(path.join(sessionDir, 'failure.json')), true);
     db.close();
   });
 
@@ -117,6 +131,9 @@ describe('CLI research cancellation', () => {
           return { report: '# Report', findings: [], sources: [], quality: { gate: 'pass' } };
         },
       },
+      createSessionDir: () => {
+        throw new Error('--no-work-dir must not create a session');
+      },
       signalTarget: new EventEmitter(),
       onProgressLog: (...entry) => logs.push(entry),
     });
@@ -124,16 +141,17 @@ describe('CLI research cancellation', () => {
     db.close();
   });
 
-  it('marks invalid report generation as failed and writes no artifacts', async () => {
+  it('marks invalid report generation as failed, preserves the session, and writes no final artifacts', async () => {
     const db = createTestDb();
     const researchRepository = new ResearchRepository(db);
     let artifactWrites = 0;
     const error = new Error('Report generation produced no usable report');
     error.name = 'ReportGenerationError';
     error.code = 'REPORT_OUTPUT_INVALID';
+    const workDir = makeWorkRoot();
     await assert.rejects(() => runCliResearch({
       query: 'empty report',
-      settings: { research: { strategy: 'focused' } },
+      settings: { research: { strategy: 'focused', workDir } },
       flags: {},
       services: { researchRepository, sourceRepository: new SourceRepository(db) },
       runner: { run: async () => { throw error; } },
@@ -144,6 +162,11 @@ describe('CLI research cancellation', () => {
     assert.equal(artifactWrites, 0);
     assert.equal(researchRepository.get('invalid-report-id').status, 'failed');
     assert.equal(researchRepository.get('invalid-report-id').error, error.message);
+    const session = fs.readdirSync(path.join(workDir, 'focused'))[0];
+    const sessionDir = path.join(workDir, 'focused', session);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(sessionDir, 'run.json'), 'utf8')).status, 'failed');
+    assert.equal(fs.existsSync(path.join(sessionDir, 'failure.json')), true);
+    assert.equal(fs.existsSync(path.join(sessionDir, 'report.md')), false);
     db.close();
   });
 

@@ -1,3 +1,4 @@
+import { classifyInvalidReason } from '../../search/search-provider-error.mjs';
 import { hostnameOf } from './research-state.mjs';
 import { isOrthogonalGap } from './exploratory-sufficiency.mjs';
 import { nextSlotRepairAction } from './slot-repair-scheduler.mjs';
@@ -45,6 +46,8 @@ export async function decideAdaptiveAction({ llm, state, signal }) {
       'If a gap lists requiredHosts, those are commitments from the research profile. The planner may use site:host only for allowed hosts.',
       'preferredHosts are ranking hints; only requiredHosts or confirmed observed hosts may use site:host.',
       'Use read to pick unread sources for the current focus gap. Consecutive reads of different unread sources are allowed.',
+      'A failed or WAF fetch is not a completed read. You may retry that URL. Do not re-read a URL that already yielded a successful or irrelevant body.',
+      'If readiness.pass is true and budget.belowMin is still true, do not re-read finished sources. Read leftover unread or failed fetches, or search with plannerMode=angle_change.',
       'Use reflect only when you have a genuinely new orthogonal gap that is not a paraphrase of an existing gap.',
       'Use draft for a candidate answer that will be checked; failed drafts become repair gaps.',
       'Use finalize only when readiness.pass is true and you are not below the token floor.',
@@ -132,6 +135,28 @@ export function buildAngleChangeSearch(state, { reasonCode = 'fallback_angle_cha
     needsPlanner: true,
     reasonCode,
   };
+}
+
+export function unreadSourceIds(state, sourceIds = []) {
+  return [...new Set(sourceIds || [])].filter((id) => id && !state.readSourceIds?.has(id));
+}
+
+export function padFloorExploreAction(state, action, options = {}) {
+  const belowMin = Boolean(options.belowMin);
+  const gatePass = Boolean(options.readiness?.pass);
+  if (!belowMin || !gatePass || action?.action !== 'read') return action;
+  const unread = unreadSourceIds(state, action.sourceIds);
+  if (!unread.length) return fallbackAdaptiveAction(state, options);
+  if (unread.length === new Set(action.sourceIds || []).size) return action;
+  return { ...action, sourceIds: unread };
+}
+
+export function shouldSafetyCapInvalidStep(invalid, { belowMin = false, gatePass = false } = {}) {
+  if (belowMin && gatePass) {
+    const kind = classifyInvalidReason(invalid);
+    return !['repeat', 'duplicate', 'semantic'].includes(kind);
+  }
+  return true;
 }
 
 export function fallbackAdaptiveAction(state, options = {}) {

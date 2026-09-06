@@ -4,6 +4,7 @@ import {
   classifyFetchedBody,
   extractPublishedDate,
   isRawBinaryDocumentText,
+  isRetryableReadFailure,
   isSuccessfulBody,
   isWafOrErrorBody,
   sanitizeUnusableSourceBody,
@@ -92,5 +93,12 @@ describe('body quality helper', () => {
     assert.equal(cleaned.snippet, 'HKEX filing snippet');
     assert.equal(cleaned.fetchStatus, 'waf');
     assert.equal(cleaned.accessNotes, 'waf_or_shell');
+  });
+
+  it('treats failed and WAF fetches as retryable, but not successful or irrelevant bodies', () => {
+    assert.equal(isRetryableReadFailure({ status: 'failed', successful: false }), true);
+    assert.equal(isRetryableReadFailure({ status: 'waf', successful: false }), true);
+    assert.equal(isRetryableReadFailure({ status: 'irrelevant', successful: false }), false);
+    assert.equal(isRetryableReadFailure({ status: 'read', successful: true }), false);
   });
 });

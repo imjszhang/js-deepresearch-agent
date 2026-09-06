@@ -18,7 +18,7 @@ import {
 export const MIN_NARRATIVE_CHARS = 200;
 const CITATION_BLOCK = /\[(\d+\.\d+(?:\s*(?:[-,，])\s*\d+\.\d+)*)\]/g;
 const UNIT_PATTERN = 'RMB|CNY|HKD|USD|%|％|亿|万|百万|million|billion|tok\\/s|tokens?\\/s(?:ec)?';
-const LABELED_NARRATIVE_HEADING = /^(summary|executive summary|key findings|findings|摘要|总结|概述|关键发现|核心发现|主要发现)\b/i;
+const LABELED_NARRATIVE_HEADING = /^(summary|executive summary|key findings|findings|confirmed background facts|background facts|摘要|总结|概述|关键发现|核心发现|主要发现|已确认背景事实|背景事实)\b/i;
 
 export function sha256Hex(text) {
   return createHash('sha256').update(String(text ?? ''), 'utf8').digest('hex');
@@ -303,17 +303,31 @@ export function selectNarrativeClaims(claims = [], report = '', query = '') {
 export function extractLabeledNarrative(report = '') {
   const parts = [];
   let current = null;
+  let include = false;
+  let labeledLevel = 0;
   for (const line of String(report || '').split('\n')) {
     const heading = /^(#{1,6})\s+(.+)$/.exec(line);
     if (heading) {
-      current = { heading: heading[2].trim(), body: [] };
-      parts.push(current);
+      const level = heading[1].length;
+      const title = heading[2].trim();
+      if (LABELED_NARRATIVE_HEADING.test(title)) {
+        current = { heading: title, body: [] };
+        parts.push(current);
+        include = true;
+        labeledLevel = level;
+        continue;
+      }
+      if (include && current && level > labeledLevel) {
+        current.body.push(line);
+        continue;
+      }
+      include = false;
+      current = null;
       continue;
     }
     if (current) current.body.push(line);
   }
   return parts
-    .filter((part) => LABELED_NARRATIVE_HEADING.test(part.heading))
     .map((part) => part.body.join('\n').trim())
     .filter(Boolean)
     .join('\n\n');

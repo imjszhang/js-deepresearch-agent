@@ -2,6 +2,13 @@ export const RESEARCH_BRIEF_SCHEMA_VERSION = 2;
 export const RESEARCH_BRIEF_DEPTHS = Object.freeze(['quick', 'focused', 'exploratory']);
 export const ANSWER_SLOT_PRIORITIES = Object.freeze(['critical', 'normal']);
 export const REQUIRED_HOST_MODES = Object.freeze(['any', 'all']);
+export const RESEARCH_QUERY_SHAPES = Object.freeze([
+  'judgment',
+  'inventory',
+  'comparison',
+  'definitional',
+  'open',
+]);
 const HOST_IN_QUERY = /\b(?:[a-z0-9-]+\.)+(?:com|org|net|edu|gov|io|hk|cn|uk|jp|ai|info)\b/gi;
 const HOSTNAME_SHAPE = /^(?:[a-z0-9-]+\.)+[a-z]{2,}$/;
 const KNOWN_SOURCE_TYPES = new Set(['primary_filing', 'numeric']);
@@ -26,6 +33,11 @@ function sanitizeSourceTypes(values) {
 
 function requiredHostMode(value) {
   return REQUIRED_HOST_MODES.includes(value) ? value : 'any';
+}
+
+function sanitizeQueryShape(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  return RESEARCH_QUERY_SHAPES.includes(raw) ? raw : null;
 }
 
 function lastDayOfMonth(year, month) {
@@ -144,6 +156,8 @@ export function sanitizeResearchBrief(input = {}, {
   return {
     schemaVersion: RESEARCH_BRIEF_SCHEMA_VERSION,
     query: resolvedQuery,
+    queryShape: sanitizeQueryShape(source.queryShape),
+    premise: text(source.premise) || null,
     audience: text(source.audience) || null,
     decision: text(source.decision) || null,
     assumedExpertise: text(source.assumedExpertise, 120) || null,
@@ -208,6 +222,8 @@ export function mergeResearchBrief(base, plan = {}, options = {}) {
   );
   return sanitizeResearchBrief({
     ...sanitizedBase,
+    queryShape: pickScalar('queryShape'),
+    premise: pickScalar('premise'),
     audience: pickScalar('audience'),
     decision: pickScalar('decision'),
     assumedExpertise: pickScalar('assumedExpertise'),

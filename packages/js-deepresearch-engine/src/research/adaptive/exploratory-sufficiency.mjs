@@ -1,5 +1,7 @@
 import { isSuccessfulBody } from '../body-quality.mjs';
+import { FIRST_PARTY_RETRIEVAL_TERMS, gapAsksFirstParty } from '../evidence-criteria.mjs';
 import { evaluateEvidenceSufficiency } from '../quality-gates.mjs';
+import { queryMatchesGapScope, resolveEntityAliases } from './source-policy.mjs';
 
 const DEFINITIONAL = /^(what(?:['’]?s| is| are)|who(?:['’]?s| is| are)|define|definition of|explain|什么是|谁是|定义)\b/i;
 const COMPARISON = /\b(compare|versus|vs\.?|comparison|对比|比较)\b/i;
@@ -89,6 +91,50 @@ export function isOrthogonalGap(gaps, question) {
   return !(gaps || []).some((gap) => similarQuestions(gap.question, text));
 }
 
+function questionHasEntity(question, entities = [], extraAliases = []) {
+  const normalized = String(question || '').normalize('NFKC').toLowerCase();
+  return resolveEntityAliases(entities, extraAliases).some((alias) => {
+    const token = String(alias || '').normalize('NFKC').toLowerCase().trim();
+    return token.length >= 2 && normalized.includes(token);
+  });
+}
+
+function hasBoundedLatinTerm(text, term) {
+  const token = String(term || '').toLowerCase();
+  if (!token) return false;
+  const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?<![a-z0-9])${escaped}(?![a-z0-9])`, 'i').test(text);
+}
+
+export function questionOverlapsRequiredGap(question, gap, extras = {}) {
+  if (!gap?.requiredSlot || gap.rollup) return false;
+  const text = String(question || '').trim();
+  if (!text) return false;
+  const entities = extras.entities || [];
+  const aliases = extras.entityAliases || [];
+  const hasEntity = !entities.length || questionHasEntity(text, entities, aliases);
+  if (!hasEntity) return false;
+  if (queryMatchesGapScope(text, gap, entities, extras.extraScope || [], aliases)) return true;
+  if (gapAsksFirstParty(gap) && FIRST_PARTY_RETRIEVAL_TERMS.some((term) => hasBoundedLatinTerm(text, term))) {
+    return true;
+  }
+  return false;
+}
+
+export function findOwningRequiredGap(question, gaps = [], extras = {}) {
+  const required = (gaps || []).filter((gap) => gap?.requiredSlot && !gap.rollup);
+  if (!required.length) return null;
+  const scoped = required.filter((gap) => questionOverlapsRequiredGap(question, gap, extras));
+  if (scoped.length === 1) return scoped[0];
+  const entityHits = required.filter(() => questionHasEntity(
+    question,
+    extras.entities || [],
+    extras.entityAliases || [],
+  ));
+  if (!scoped.length && entityHits.length === 1 && required.length === 1) return entityHits[0];
+  return null;
+}
+
 export function evaluateExploratorySufficiency({
   query,
   findings = [],
@@ -123,7 +169,10 @@ export function evaluateExploratorySufficiency({
   }
 
   const requiredHostMissing = resolvedGaps.some((gap) => (
-    ((gap.requiredHosts || []).length > 0 || (gap.requiredSourceTypes || []).includes('primary_filing'))
+    (state?.gapNeedsPrimaryEvidence?.(gap)
+      || (gap.requiredHosts || []).length > 0
+      || (gap.requiredSourceTypes || []).includes('primary_filing')
+      || (gap.evidenceCriteria || []).some((item) => String(item).toLowerCase().includes('first_party')))
     && gap.priority === 'critical'
     && !['verified'].includes(gap.status)
     && !(state?.gapHasRequiredHostBody?.(gap.id))

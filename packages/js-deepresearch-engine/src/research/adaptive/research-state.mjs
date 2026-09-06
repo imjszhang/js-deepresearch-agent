@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto';
 import { ActionCostTracker, buildBudgetView, estimateReportPromptTokens } from './budget-view.mjs';
+import { evaluateEvidenceCriteria, gapNeedsRequiredEvidence } from '../evidence-criteria.mjs';
 import {
   evaluateExploratorySufficiency,
+  findOwningRequiredGap,
   similarQuestions,
   sourceHasBody,
 } from './exploratory-sufficiency.mjs';
@@ -19,7 +21,14 @@ import {
 } from './source-policy.mjs';
 import { sourceDiversityKey } from '../source-candidates.mjs';
 import { UrlPool } from './url-pool.mjs';
-import { collectGapSources, evaluateGapEvidence, rollupRootGap } from '../gap-state.mjs';
+import {
+  collectGapSources,
+  evaluateGapEvidence,
+  evidenceStatusOf,
+  isRepairTerminal,
+  normalizeRepairState,
+  rollupRootGap,
+} from '../gap-state.mjs';
 import { compactSearchSnippets, getSearchMeta } from '../../search/search-result.mjs';
 import { inferSearchOutcome } from '../search-trace.mjs';
 import { serializeSearchError } from '../../search/search-provider-error.mjs';
@@ -140,6 +149,7 @@ export class ResearchState {
       rerankEvaluated: 0,
       rerankAccepted: 0,
       rerankRejected: 0,
+      rerankLowScore: 0,
       rerankCalls: 0,
       uniqueGapCandidateEvaluations: 0,
       cacheHits: 0,
@@ -186,8 +196,21 @@ export class ResearchState {
   addGap(question, priority = 'normal', options = {}) {
     const text = String(question || '').trim();
     if (!text) return null;
-    if (options.deduplicate !== false
-      && this.gaps.some((gap) => !gap.rollup && similarQuestions(gap.question, text))) return null;
+    if (options.deduplicate !== false) {
+      if (this.gaps.some((gap) => !gap.rollup && similarQuestions(gap.question, text))) return null;
+      if (!options.requiredSlot && !options.contractSlotId && options.attachOverlapping !== false) {
+        const owner = findOwningRequiredGap(text, this.gaps, {
+          entities: this.brief?.entities || this.profile?.brief?.entities || [],
+          entityAliases: this.brief?.entityAliases || this.profile?.brief?.entityAliases || [],
+          extraScope: [this.query],
+        });
+        if (owner) {
+          owner.followUpQuestions = [...new Set([...(owner.followUpQuestions || []), text])];
+          owner.nextQueries = [...new Set([...(owner.nextQueries || []), text])];
+          return null;
+        }
+      }
+    }
     const nextDepth = options.depth ?? 1;
     if (this.maxGapDepth > 0 && nextDepth > this.maxGapDepth) return null;
     const gap = createGapRecord({
@@ -208,6 +231,8 @@ export class ResearchState {
       kind: options.kind,
       rollup: options.rollup,
       evidenceCriteria: options.evidenceCriteria,
+      parentGapId: options.parentGapId,
+      followUpQuestions: options.followUpQuestions,
     });
     this.gaps.push(gap);
     return gap;
@@ -218,10 +243,17 @@ export class ResearchState {
   }
 
   gapNeedsPrimaryEvidence(gap = this.gaps[0]) {
-    return Boolean(
-      gap?.requiredHosts?.length
-      || (gap?.requiredSourceTypes || []).includes('primary_filing'),
-    );
+    return gapNeedsRequiredEvidence(gap);
+  }
+
+  evidenceCriteriaExtras() {
+    return {
+      query: this.query,
+      brief: this.brief,
+      profile: this.profile,
+      entities: this.brief?.entities || this.profile?.brief?.entities || [],
+      entityAliases: this.brief?.entityAliases || this.profile?.brief?.entityAliases || [],
+    };
   }
 
   sourceSatisfiesPrimary(source, gap) {
@@ -241,7 +273,7 @@ export class ResearchState {
 
   gapCovered(gapId) {
     const gap = this.getGap(gapId);
-    if (gap && ['verified', 'resolved'].includes(gap.status)) return true;
+    if (gap && ['verified', 'resolved'].includes(evidenceStatusOf(gap))) return true;
     if (this.gapNeedsPrimaryEvidence(gap) && !this.gapHasRequiredHostBody(gapId)) return false;
     return this.findings.some((finding) => finding.gapId === gapId
       && (finding.sources || []).some(sourceHasBody));
@@ -256,7 +288,12 @@ export class ResearchState {
     const hostsSatisfied = requiredHostCoverage(sources, gap).satisfied;
     const primarySatisfied = !(gap.requiredSourceTypes || []).includes('primary_filing')
       || sources.some((source) => this.sourceSatisfiesPrimary(source, { ...gap, requiredHosts: [] }));
-    return hostsSatisfied && primarySatisfied;
+    const criteria = evaluateEvidenceCriteria({
+      gap,
+      sources,
+      extras: this.evidenceCriteriaExtras(),
+    });
+    return hostsSatisfied && primarySatisfied && criteria.missing.length === 0;
   }
 
   hasBodyEvidence() {
@@ -307,7 +344,7 @@ export class ResearchState {
   }
 
   syncGapCoverage() {
-    const verifiedBefore = new Set(this.gaps.filter((gap) => gap.status === 'verified').map((gap) => gap.id));
+    const verifiedBefore = new Set(this.gaps.filter((gap) => evidenceStatusOf(gap) === 'verified').map((gap) => gap.id));
     for (const gap of this.gaps) {
       const sources = collectGapSources(gap, this.findings);
       gap.readSourceIds = [...new Set([
@@ -315,7 +352,7 @@ export class ResearchState {
         ...sources.map((source) => source.id || source.url).filter(Boolean),
       ])];
       if (gap.status === 'missing') continue;
-      if (gap.status === 'blocked' && !sources.length) continue;
+      const priorRepair = normalizeRepairState(gap);
       Object.assign(gap, evaluateGapEvidence(gap, sources, {
         passageIds: this.findings
           .filter((finding) => finding.gapId === gap.id)
@@ -324,19 +361,56 @@ export class ResearchState {
         entities: this.brief?.entities || this.profile?.brief?.entities || [],
         entityAliases: this.brief?.entityAliases || this.profile?.brief?.entityAliases || [],
         query: this.query,
+        brief: this.brief,
+        profile: this.profile,
       }));
-      if (gap.status === 'verified') gap.resolvedAtStep = this.step;
+      if (priorRepair?.terminal && evidenceStatusOf(gap) !== 'verified') {
+        gap.repairState = priorRepair;
+        gap.blockedReason = priorRepair.reason || null;
+      }
+      if (evidenceStatusOf(gap) === 'verified') {
+        gap.resolvedAtStep = this.step;
+        this.clearRepairTerminal(gap.id);
+      }
     }
     rollupRootGap(this.gaps);
     this.marginal.recentMaterialGapsClosed = this.gaps.filter((gap) => (
-      gap.status === 'verified' && !verifiedBefore.has(gap.id)
+      evidenceStatusOf(gap) === 'verified' && !verifiedBefore.has(gap.id)
     )).length;
   }
 
+  markRepairTerminal(gapId, reason = null, extra = {}) {
+    const gap = this.getGap(gapId);
+    if (!gap) return;
+    const nextReason = reason || gap.blockedReason || gap.repairState?.reason || 'repair_exhausted';
+    gap.repairState = {
+      status: 'blocked',
+      reason: nextReason,
+      failures: Number(gap.repairFailures) || Number(gap.repairState?.failures) || 0,
+      exhausted: true,
+      terminal: true,
+      exhaustedAtStep: extra.step ?? this.step ?? null,
+      phase: extra.phase || null,
+    };
+    gap.blockedReason = nextReason;
+  }
+
+  clearRepairTerminal(gapId) {
+    const gap = this.getGap(gapId);
+    if (!gap) return;
+    gap.repairState = null;
+    gap.blockedReason = null;
+  }
+
   markGapStatus(gapId, status, reason = null) {
+    if (status === 'blocked') {
+      this.markRepairTerminal(gapId, reason);
+      return;
+    }
     const gap = this.getGap(gapId);
     if (!gap) return;
     gap.status = status;
+    gap.evidenceStatus = status;
     if (reason) gap.blockedReason = reason;
   }
 
@@ -353,7 +427,7 @@ export class ResearchState {
       if (!query) continue;
       this.plannerRejections.push({
         query,
-        reason: item.reason || 'rejected',
+        reason: item?.reason || 'rejected',
         duplicateOf: item.duplicateOf || null,
         step: this.step,
         plannerMode: extra.plannerMode || item.plannerMode || null,
@@ -448,10 +522,12 @@ export class ResearchState {
   }
 
   setPlannerFailure(failure, extra = {}) {
-    if (!failure) return;
+    if (failure == null || failure === false) return;
     this.recovery.plannerFailures += 1;
     this.recovery.lastPlannerFailure = {
-      reason: typeof failure === 'object' ? (failure.reason || failure.code || failure) : failure,
+      reason: typeof failure === 'object'
+        ? (failure.reason || failure.code || String(failure))
+        : failure,
       gapId: extra.gapId || null,
       step: this.step,
       stage: extra.stage || extra.plannerMode || 'planner',
@@ -546,9 +622,9 @@ export class ResearchState {
 
   focusGap() {
     const actionable = this.gaps.filter((gap) => (
-      ['open', 'searched', 'missing'].includes(gap.status)
-      || (gap.status === 'body_read' && this.gapNeedsPrimaryEvidence(gap))
-    ) && gap.status !== 'blocked');
+      ['open', 'searched', 'missing'].includes(evidenceStatusOf(gap))
+      || (evidenceStatusOf(gap) === 'body_read' && this.gapNeedsPrimaryEvidence(gap))
+    ) && !isRepairTerminal(gap));
     const pool = actionable.length ? actionable : this.gaps;
     if (!pool.length) return this.gaps[0];
     return pool[this.step % pool.length];
@@ -621,8 +697,8 @@ export class ResearchState {
       findingsCount: this.findings.length,
       bodyEvidenceCoverage: {
         hasBodyEvidence: this.hasBodyEvidence(),
-        resolvedGaps: gaps.filter((gap) => gap.covered || ['verified', 'resolved', 'body_read'].includes(gap.status)).map((gap) => gap.id),
-        openGaps: gaps.filter((gap) => ['open', 'searched', 'missing'].includes(gap.status) && !gap.covered).map((gap) => gap.id),
+        resolvedGaps: gaps.filter((gap) => gap.covered || ['verified', 'resolved', 'body_read'].includes(evidenceStatusOf(gap))).map((gap) => gap.id),
+        openGaps: gaps.filter((gap) => ['open', 'searched', 'missing'].includes(evidenceStatusOf(gap)) && !gap.covered).map((gap) => gap.id),
       },
       cycle: { ...this.cycle },
       readiness: this.readiness,
@@ -661,27 +737,117 @@ export class ResearchState {
       relevance: { ...this.relevance },
       recovery: {
         ...this.recovery,
-        blockedGaps: gaps.filter((gap) => gap.status === 'blocked').map((gap) => ({
+        blockedGaps: gaps.filter((gap) => !gap.rollup && isRepairTerminal(gap)).map((gap) => ({
           gapId: gap.id,
           answerSlot: gap.answerSlot || null,
-          blockedReason: gap.blockedReason || 'repair_exhausted',
-          failures: Number(gap.repairFailures) || 0,
+          blockedReason: gap.blockedReason || gap.repairState?.reason || 'repair_exhausted',
+          failures: Number(gap.repairFailures) || Number(gap.repairState?.failures) || 0,
+          repairState: gap.repairState || null,
         })),
       },
     };
+  }
+
+  exportCheckpoint({ queryMemory = null, loopLocal = null, focusedLocal = null } = {}) {
+    return {
+      schemaVersion: 1,
+      query: this.query,
+      evidenceScope: this.evidenceScope,
+      maxSteps: this.maxSteps,
+      maxGapDepth: this.maxGapDepth,
+      minLlmTokens: this.minLlmTokens,
+      targetLlmTokens: this.targetLlmTokens,
+      step: this.step,
+      lastAction: this.lastAction,
+      profile: this.profile,
+      brief: this.brief,
+      gaps: this.gaps.map((gap) => ({ ...gap })),
+      findings: this.findings,
+      candidates: [...this.candidates.entries()],
+      urlPool: this.urlPool.exportCheckpoint(),
+      readSourceIds: [...this.readSourceIds],
+      observedHosts: [...this.observedHosts],
+      knowledge: this.knowledge,
+      observations: this.observations,
+      diary: this.diary,
+      evaluationRetries: this.evaluationRetries,
+      forbidFinalizeUntilExplore: this.forbidFinalizeUntilExplore,
+      forbidSearchUntilRead: this.forbidSearchUntilRead,
+      embeddingTraces: this.embeddingTraces,
+      marginal: this.marginal,
+      relevance: this.relevance,
+      recovery: this.recovery,
+      rerankCache: [...this.rerankCache.entries()],
+      cycle: this.cycle,
+      searchOutcomes: this.searchOutcomes,
+      plannerRejections: this.plannerRejections,
+      slotSupportCache: [...this.slotSupportCache.entries()],
+      lastAgentSnapshotChars: this.lastAgentSnapshotChars,
+      budgetView: this.budgetView,
+      readiness: this.readiness,
+      sufficiency: this.sufficiency,
+      actionCosts: this.actionCosts.exportCheckpoint(),
+      budget: this.budgetManager?.exportCheckpoint?.() || this.budgetManager?.snapshot?.() || null,
+      queryMemory: queryMemory?.exportCheckpoint?.() || null,
+      loopLocal,
+      focusedLocal,
+    };
+  }
+
+  restoreCheckpoint(checkpoint = {}, { queryMemory = null } = {}) {
+    this.evidenceScope = checkpoint.evidenceScope || this.evidenceScope;
+    this.maxSteps = Number(checkpoint.maxSteps) || 0;
+    this.maxGapDepth = Math.max(0, Number(checkpoint.maxGapDepth) || 0);
+    this.minLlmTokens = Number(checkpoint.minLlmTokens) || 0;
+    this.targetLlmTokens = Number(checkpoint.targetLlmTokens) || this.minLlmTokens;
+    this.step = Number(checkpoint.step) || 0;
+    this.lastAction = checkpoint.lastAction || null;
+    this.profile = checkpoint.profile || this.profile;
+    this.brief = checkpoint.brief || this.brief;
+    this.gaps = (checkpoint.gaps || []).map((gap) => ({ ...gap }));
+    this.findings = Array.isArray(checkpoint.findings) ? checkpoint.findings : [];
+    this.candidates = new Map(checkpoint.candidates || []);
+    this.urlPool.restoreCheckpoint(checkpoint.urlPool || {});
+    this.readSourceIds = new Set(checkpoint.readSourceIds || []);
+    this.observedHosts = new Set(checkpoint.observedHosts || []);
+    this.knowledge = Array.isArray(checkpoint.knowledge) ? checkpoint.knowledge : [];
+    this.observations = Array.isArray(checkpoint.observations) ? checkpoint.observations : [];
+    this.diary = Array.isArray(checkpoint.diary) ? checkpoint.diary : [];
+    this.evaluationRetries = Number(checkpoint.evaluationRetries) || 0;
+    this.forbidFinalizeUntilExplore = Boolean(checkpoint.forbidFinalizeUntilExplore);
+    this.forbidSearchUntilRead = Boolean(checkpoint.forbidSearchUntilRead);
+    this.embeddingTraces = Array.isArray(checkpoint.embeddingTraces) ? checkpoint.embeddingTraces : [];
+    this.marginal = { ...this.marginal, ...(checkpoint.marginal || {}) };
+    this.relevance = { ...this.relevance, ...(checkpoint.relevance || {}) };
+    this.recovery = { ...this.recovery, ...(checkpoint.recovery || {}) };
+    this.rerankCache = new Map(checkpoint.rerankCache || []);
+    this.cycle = { ...this.cycle, ...(checkpoint.cycle || {}) };
+    this.searchOutcomes = Array.isArray(checkpoint.searchOutcomes) ? checkpoint.searchOutcomes : [];
+    this.plannerRejections = Array.isArray(checkpoint.plannerRejections) ? checkpoint.plannerRejections : [];
+    this.slotSupportCache = new Map(checkpoint.slotSupportCache || []);
+    this.lastAgentSnapshotChars = checkpoint.lastAgentSnapshotChars ?? null;
+    this.budgetView = checkpoint.budgetView || null;
+    this.readiness = checkpoint.readiness || null;
+    this.sufficiency = checkpoint.sufficiency || null;
+    this.actionCosts.restoreCheckpoint(checkpoint.actionCosts || {});
+    this.budgetManager?.restoreCheckpoint?.(checkpoint.budget || {});
+    queryMemory?.restoreCheckpoint?.(checkpoint.queryMemory || {});
+    return this;
   }
 
   snapshotForAgent() {
     const gaps = this.gaps.filter((gap) => !gap.rollup).map((gap) => ({
       id: gap.id,
       question: gap.question,
-      status: gap.status,
+      status: evidenceStatusOf(gap),
+      evidenceStatus: evidenceStatusOf(gap),
       priority: gap.priority || null,
       requiredHosts: gap.requiredHosts || [],
       preferredHosts: gap.preferredHosts || [],
       requiredSlot: Boolean(gap.requiredSlot),
       slotSupport: gap.slotSupport?.verdict || null,
-      blockedReason: gap.blockedReason || null,
+      repairTerminal: isRepairTerminal(gap),
+      blockedReason: gap.blockedReason || gap.repairState?.reason || null,
     }));
     const focusGapId = this.focusGap()?.id || 'gap-1';
     const unread = this.rankedCandidates()
@@ -704,7 +870,7 @@ export class ResearchState {
       budget: this.budgetView,
       readiness: readiness ? {
         pass: readiness.pass,
-        failures: (readiness.failures || []).slice(0, 8).map((failure) => ({
+        failures: (readiness.failures || []).slice(0, 8).filter(Boolean).map((failure) => ({
           code: failure.code || failure.reason || null,
           message: failure.message || null,
           gapId: failure.gapId || null,
@@ -873,13 +1039,18 @@ export class ResearchState {
       if (!action.sourceIds?.length) return 'missing_source_ids';
       if (action.sourceIds.some((id) => !this.candidates.has(id))) return 'unknown_source';
       const targetGapId = action.gapId || this.focusGap()?.id;
-      const rejected = action.sourceIds
-        .map((id) => this.candidates.get(id)?.gapMatches?.[targetGapId]?.relevanceDecision)
-        .find((decision) => decision?.accepted === false);
-      if (rejected) return rejected.reasonCode || 'relevance_rejected';
-      if (this.lastAction === 'read') {
-        const unread = action.sourceIds.filter((id) => !this.readSourceIds.has(id));
-        if (!unread.length) return 'repeat_action';
+      const unread = action.sourceIds.filter((id) => !this.readSourceIds.has(id));
+      if (!unread.length) return 'repeat_action';
+      const eligibleUnread = unread.filter((id) => {
+        const candidate = this.candidates.get(id);
+        const decision = this.candidateDecisionForGap(candidate, targetGapId);
+        return decision?.accepted !== false;
+      });
+      if (!eligibleUnread.length) {
+        const rejected = unread
+          .map((id) => this.candidateDecisionForGap(this.candidates.get(id), targetGapId))
+          .find((decision) => decision?.accepted === false);
+        return rejected?.reasonCode || 'relevance_rejected';
       }
     }
     if (action.action === this.lastAction && !['answer', 'stop', 'read', 'search', 'draft', 'finalize'].includes(action.action)) {
@@ -914,8 +1085,12 @@ export class ResearchState {
   }
 
   unresolvedReportNotes() {
-    const unresolved = this.gaps.filter((gap) => ['open', 'searched', 'missing', 'blocked'].includes(gap.status)
-      || (gap.status === 'body_read' && this.gapNeedsPrimaryEvidence(gap) && !this.gapHasRequiredHostBody(gap.id)));
+    const unresolved = this.gaps.filter((gap) => {
+      const status = evidenceStatusOf(gap);
+      return ['open', 'searched', 'missing'].includes(status)
+        || isRepairTerminal(gap)
+        || (status === 'body_read' && this.gapNeedsPrimaryEvidence(gap) && !this.gapHasRequiredHostBody(gap.id));
+    });
     const blockedHosts = [...new Set(unresolved.flatMap((gap) => gap.requiredHosts || []))];
     const secondaryOnly = this.findings.flatMap((finding) => (finding.sources || [])
       .filter(sourceHasBody)

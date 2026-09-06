@@ -2,6 +2,9 @@ export class OllamaProvider {
   constructor(config) {
     this.config = config;
     this.fetch = typeof config.fetch === 'function' ? config.fetch : globalThis.fetch;
+    this.provider = 'ollama';
+    this.model = config.model || null;
+    this.transportOptions = this.fetch?.transportOptions || null;
   }
 
   async complete(args) {
@@ -9,23 +12,32 @@ export class OllamaProvider {
     return result.text;
   }
 
-  async completeWithMetadata({ messages, signal, temperature }) {
+  buildRecordedRequest({ messages, temperature } = {}) {
     const baseUrl = (this.config.baseUrl || 'http://127.0.0.1:11434').replace(/\/$/, '');
-    const response = await this.fetch(`${baseUrl}/api/chat`, {
-      method: 'POST',
-      signal,
-      headers: {
-        'content-type': 'application/json',
-        ...(this.config.apiKey ? { authorization: `Bearer ${this.config.apiKey}` } : {}),
-      },
-      body: JSON.stringify({
+    return {
+      provider: this.provider,
+      endpoint: `${baseUrl}/api/chat`,
+      body: {
         model: this.config.model,
         messages,
         stream: false,
         options: {
           temperature: temperature ?? this.config.temperature,
         },
-      }),
+      },
+    };
+  }
+
+  async completeWithMetadata({ messages, signal, temperature }) {
+    const request = this.buildRecordedRequest({ messages, temperature });
+    const response = await this.fetch(request.endpoint, {
+      method: 'POST',
+      signal,
+      headers: {
+        'content-type': 'application/json',
+        ...(this.config.apiKey ? { authorization: `Bearer ${this.config.apiKey}` } : {}),
+      },
+      body: JSON.stringify(request.body),
     });
 
     if (!response.ok) {

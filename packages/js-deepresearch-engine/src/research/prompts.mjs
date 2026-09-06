@@ -1,6 +1,7 @@
 import { getSourceEvidenceClass } from './focused-settings.mjs';
 import { DEFAULT_MAX_PASSAGE_CHARS, selectDisplayedEvidence } from './evidence-chain.mjs';
 import { partitionFindingsForReport } from './report-evidence.mjs';
+import { buildReportContract, formatContractPromptBlock } from './report-contract.mjs';
 
 export function searchQueryPlannerPrompt({
   mode = 'initial',
@@ -32,7 +33,10 @@ export function searchQueryPlannerPrompt({
         'You write natural-language web search queries for a research agent.',
         `Return JSON only: ${schema}`,
         `Write at most ${limit} complementary queries. Do not paraphrase.`,
-        'Write queries a human would type into a search engine. Match the language of the research question and target sources.',
+        'Write queries a human would type into a search engine.',
+        'Choose each search query\'s language from the sources that can settle the slot, not from the language of the research question.',
+        'A Chinese question about an English-native product, official docs, or repository should use English search queries when those sources are written in English. A local filing, disclosure, or local-press slot should use that venue\'s language.',
+        'Complementary queries in one batch may use different languages. Do not set searchOptions.language to the user\'s question language by default. If you set language, match the search query you wrote, or omit it.',
         'Never copy internal identifiers, snake_case slot names, evidenceCriteria codes, or English boilerplate such as "primary source evidence".',
         'Do not invent or rewrite queries by concatenating slot names, hosts, or missing-evidence codes.',
         'site: is optional. Use it only for hosts listed in allowedSiteHosts. preferredHosts are ranking hints, not site: targets unless they appear in allowedSiteHosts.',
@@ -137,7 +141,7 @@ function formatFindingBlock(finding, index, { passages, maxPassageChars }) {
   return `Question: ${finding.question}\nEvidence grade: ${finding.evidenceGrade || 'verified'}\nSources:\n${sources}`;
 }
 
-const NARRATIVE_SCHEMA = '{"title":"...","summary":["... [1.1]"],"keyFindings":[{"heading":"...","claims":["... [1.2]"]}],"caveats":["..."]}';
+const NARRATIVE_SCHEMA = '{"title":"...","summary":["... [1.1]"],"backgroundFacts":["... [1.1]"],"keyFindings":[{"heading":"...","claims":["... [1.2]"]}],"caveats":["..."]}';
 const REPORT_FINDING_INDEX = Symbol('reportFindingIndex');
 
 export function reportPrompt({
@@ -148,20 +152,28 @@ export function reportPrompt({
   passages = [],
   maxPassageChars = DEFAULT_MAX_PASSAGE_CHARS,
   gaps = [],
+  brief = {},
+  contract = null,
 } = {}) {
+  const resolvedContract = contract || buildReportContract({ gaps, brief, strategy });
   const indexedFindings = findings.map((finding, index) => ({
     ...finding,
     [REPORT_FINDING_INDEX]: index,
   }));
-  const partitioned = partitionFindingsForReport({ findings: indexedFindings, gaps, strategy });
+  const partitioned = partitionFindingsForReport({ findings: indexedFindings, gaps, strategy, brief });
   const verifiedBlock = partitioned.verified.map((finding) => (
     formatFindingBlock(finding, finding[REPORT_FINDING_INDEX], { passages, maxPassageChars })
   )).join('\n\n---\n\n');
+  const backgroundBlock = resolvedContract.openJudgment
+    ? (partitioned.backgroundVerified || []).map((finding) => (
+      formatFindingBlock(finding, finding[REPORT_FINDING_INDEX], { passages, maxPassageChars })
+    )).join('\n\n---\n\n')
+    : '';
   const limitedBlock = partitioned.limited.map((finding) => (
     formatFindingBlock(finding, finding[REPORT_FINDING_INDEX], { passages, maxPassageChars })
   )).join('\n\n---\n\n');
-  const blockedBlock = partitioned.blocked.map((finding) => (
-    `${finding.question} [${finding.gapId || 'unresolved'}] status=${finding.evidenceGrade}`
+  const blockedBlock = (resolvedContract.unresolvedRequiredSlots || []).map((slot) => (
+    `${slot.question || slot.id} (internal status: ${slot.status || 'unresolved'})`
   )).join('\n');
 
   const snippetPolicy = strategy === 'quick'
@@ -183,13 +195,24 @@ export function reportPrompt({
         'Do not include evidence, sources, Evidence, or Sources fields.',
         'Do not copy Evidence class labels or source-body dumps into claims.',
         'The runtime appends Evidence and Sources from collected findings.',
+        formatContractPromptBlock(resolvedContract),
         'Only verified/resolved evidence may enter Summary or Key Findings as confirmed facts.',
-        'Limited or body_read evidence may only appear in Caveats with hedging language.',
-        'Blocked, missing, open, or searched slots are gap notes only and must not be written as confirmed evidence.',
+        'Follow-up findings inherit the evidence-grade ceiling of their parent required slot. Do not treat a verified follow-up as confirmed if that required slot is still body_read or blocked.',
+        resolvedContract.openJudgment
+          ? 'Independently verified first-party facts go in backgroundFacts. Attribute them to the source and do not rewrite them as the research conclusion.'
+          : '',
+        resolvedContract.openJudgment
+          ? 'backgroundFacts must be atomic, cited, and copied from successful first-party bodies. They do not close the required judgment slot and must not include lock-in or control-retention conclusions.'
+          : 'Verified first-party facts may appear as backgroundFacts without being treated as weaker evidence.',
+        resolvedContract.closedJudgment
+          ? 'Closed judgment slots must appear in keyFindings. Never describe a verified slot as unresolved, still open, or background-only.'
+          : '',
+        'Limited or body_read evidence may only appear in Caveats with hedging language, except for eligible backgroundFacts.',
+        'Blocked, missing, open, or searched required slots are gap notes only and must not be written as confirmed evidence.',
         snippetPolicy,
         'If evidence is insufficient, say so in caveats instead of inventing details.',
         'Finish every sentence. Do not stop mid-clause or mid-citation.',
-      ].join(' '),
+      ].filter(Boolean).join(' '),
     },
     {
       role: 'user',
@@ -197,8 +220,9 @@ export function reportPrompt({
         `Research query:\n${query}`,
         limitations.length ? `Quality constraints:\n${limitations.map((item) => `- ${item}`).join('\n')}\nDo not state these unsupported areas as established facts.` : '',
         verifiedBlock ? `Verified evidence (may support Summary/Key Findings):\n${verifiedBlock}` : 'Verified evidence: none.',
-        limitedBlock ? `Limited evidence (Caveats only, hedge every claim):\n${limitedBlock}` : '',
-        blockedBlock ? `Unresolved or blocked slots (gap notes only, do not confirm):\n${blockedBlock}` : '',
+        backgroundBlock ? `First-party bodies usable only as Confirmed Background Facts while the judgment slot remains open:\n${backgroundBlock}` : '',
+        limitedBlock ? `Limited evidence (Caveats only unless already listed as a first-party background fact):\n${limitedBlock}` : '',
+        blockedBlock ? `Unresolved required slots (gap notes only, do not confirm):\n${blockedBlock}` : '',
       ].filter(Boolean).join('\n\n'),
     },
   ];
@@ -214,9 +238,12 @@ export function claimEntailmentPrompt({ claim, passages = [] }) {
       role: 'system',
       content: [
         'Judge whether the cited source passages entail the claim.',
-        'Return JSON only: {"verdict":"supported|partially_supported|unsupported|unverifiable","quote":"..."}',
+        'Return JSON only: {"verdict":"supported|partially_supported|unsupported|unverifiable","quote":"...","claimRole":"source_attributed_fact|research_judgment"}',
         'supported: a passage clearly states the claim. partially_supported: a passage supports only part of it.',
         'unsupported: a passage contradicts the claim. unverifiable: the passages do not decide it.',
+        'claimRole=source_attributed_fact only when the claim reports an observable statement, mechanism, term, number, or action directly attributable to the cited source.',
+        'claimRole=research_judgment for synthesis, intent, causal interpretation, strategic conclusion, recommendation, lock-in/control conclusion, or any inference beyond what the quoted source directly states.',
+        'When uncertain, use research_judgment. The role does not change the entailment verdict.',
         'quote must be a verbatim excerpt copied from one passage. Do not invent quotes.',
         'If a passage includes source assessment metadata, consider whether that publisher and content type can support the claim as written.',
       ].join(' '),
@@ -229,7 +256,12 @@ export function claimEntailmentPrompt({ claim, passages = [] }) {
 }
 
 export function gapSlotSupportPrompt({ query, slots = [], compact = false } = {}) {
-  const slotBlock = slots.map(({ gap, passages = [] }, index) => {
+  const slotBlock = slots.map(({
+    gap,
+    passages = [],
+    slotMode = 'source_fact',
+    consequentialClaims = [],
+  }, index) => {
     const passageBlock = passages.map((passage, passageIndex) => {
       const assessment = formatAssessment(passage.assessment);
       return [`[${gap.id}:P${passageIndex + 1} id=${passage.id}] ${passage.text}`, assessment].filter(Boolean).join('\n');
@@ -239,6 +271,10 @@ export function gapSlotSupportPrompt({ query, slots = [], compact = false } = {}
       `gapId: ${gap.id}`,
       `answerSlot: ${gap.answerSlot || gap.question}`,
       `question: ${gap.question}`,
+      `slotMode: ${slotMode}`,
+      consequentialClaims.length
+        ? `decision alternatives:\n${consequentialClaims.map((claim) => `- ${claim}`).join('\n')}`
+        : '',
       gap.evidenceCriteria?.length ? `evidenceCriteria: ${gap.evidenceCriteria.join('; ')}` : '',
       `passages:\n${passageBlock}`,
       passages.some((passage) => passage.assessment)
@@ -257,7 +293,9 @@ export function gapSlotSupportPrompt({ query, slots = [], compact = false } = {}
         `Return JSON only: ${schema}`,
         'supported: a passage clearly answers the slot. partially_supported: only part of the slot is answered.',
         'unsupported: passages do not answer the slot. conflicting: passages disagree. unverifiable: cannot decide.',
+        'For slotMode=research_judgment, supported means the passages collectively establish enough quoted factual premises to make a bounded comparative judgment. No source needs to state the analyst conclusion verbatim. Use partially_supported when only one decision alternative or a material premise is evidenced.',
         'quote must be a verbatim excerpt copied from one provided passage. Do not invent quotes.',
+        'For a research judgment, quote one decisive premise and list every passage used for the synthesis in supportingPassageIds.',
         'Do not use search snippets. Embedding scores are only for ranking, not for closing a slot.',
         'If a passage includes source assessment metadata, weigh publisher type and content kind together with the quoted text.',
       ].join(' '),
@@ -323,13 +361,62 @@ export function reportRetryPrompt({
   passages = [],
   maxPassageChars = DEFAULT_MAX_PASSAGE_CHARS,
   gaps = [],
+  brief = {},
+  contract = null,
 } = {}) {
-  const messages = reportPrompt({ query, findings, limitations, strategy, passages, maxPassageChars, gaps });
+  const messages = reportPrompt({ query, findings, limitations, strategy, passages, maxPassageChars, gaps, brief, contract });
+  const resolvedContract = contract || buildReportContract({ gaps, brief, strategy });
   return [
     ...messages,
     {
       role: 'user',
-      content: 'The previous narrative was unusable, truncated, incomplete, or not valid JSON. Return a complete Markdown narrative now with a title, Summary, and Key Findings. Finish every sentence. Do not write Evidence or Sources sections. Do not copy source-body dumps. Do not return analysis or an empty response.',
+      content: [
+        'The previous narrative was unusable, truncated, incomplete, or not valid JSON. Return complete JSON with a title, summary, optional backgroundFacts, and keyFindings only when the report contract allows them.',
+        formatContractPromptBlock(resolvedContract),
+        'Finish every sentence. Do not write Evidence or Sources sections. Do not copy source-body dumps. Do not return analysis or an empty response.',
+      ].join('\n'),
+    },
+  ];
+}
+
+export function reportRevisionRetryPrompt({
+  query,
+  findings,
+  limitations = [],
+  strategy = 'focused',
+  passages = [],
+  maxPassageChars = DEFAULT_MAX_PASSAGE_CHARS,
+  gaps = [],
+  brief = {},
+  contract = null,
+  premiseFacts = [],
+  keyClaims = [],
+  admissibleClaims = [],
+} = {}) {
+  const messages = reportPrompt({ query, findings, limitations, strategy, passages, maxPassageChars, gaps, brief, contract });
+  const resolvedContract = contract || buildReportContract({ gaps, brief, strategy });
+  const structured = (admissibleClaims || []).filter((item) => item?.text);
+  const claimBlock = structured.length
+    ? structured.map((item) => `- placement=${item.placement || 'key_findings'}; slot=${(item.boundSlotIds || []).join(',') || 'none'}: ${item.text}`).join('\n')
+    : [
+      ...(premiseFacts || []).filter(Boolean).map((item) => `- placement=background: ${item}`),
+      ...(keyClaims || []).filter(Boolean).map((item) => `- placement=key_findings: ${item}`),
+    ].join('\n');
+  return [
+    ...messages,
+    {
+      role: 'user',
+      content: [
+        'The previous narrative failed post-revision validation. Regenerate complete JSON only.',
+        formatContractPromptBlock(resolvedContract),
+        resolvedContract.openJudgment
+          ? 'State in summary that the required judgment remains unresolved.'
+          : 'Do not say a verified required slot is unresolved. Keep keyFindings when the contract requires them.',
+        claimBlock
+          ? `Keep these admissible claims. Same canonical fact may appear in summary and keyFindings, but do not omit a required keyFindings placement just because the sentence already appeared in summary:\n${claimBlock}`
+          : 'No admissible claims remain. Do not invent replacements.',
+        'Do not write Evidence or Sources sections.',
+      ].join('\n\n'),
     },
   ];
 }

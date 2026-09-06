@@ -45,7 +45,12 @@ export async function completeStructuredJson({
     const parsed = extractJsonObject(raw);
     const metadata = lastCallMetadata(llm);
     const truncated = isTruncatedCall(metadata);
-    const accepted = accept(parsed) && !truncated;
+    let accepted;
+    try {
+      accepted = Boolean(accept(parsed)) && !truncated;
+    } catch {
+      accepted = false;
+    }
     return {
       raw,
       parsed,

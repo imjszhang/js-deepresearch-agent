@@ -79,6 +79,7 @@ export function classifyInvalidReason(invalid) {
   if (['duplicate_query', 'duplicate_results', 'duplicate_batch_query'].includes(reason)) {
     return 'duplicate';
   }
+  if (reason === 'repeat_action') return 'repeat';
   if (['rate_limited', 'provider_error'].includes(reason)) return 'transient';
   if (['max_steps', 'budget_exhausted'].includes(reason)) return 'cap';
   if (RELEVANCE_REJECTED.has(reason)) return 'relevance_rejected';

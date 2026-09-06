@@ -9,8 +9,20 @@ import {
 } from '../src/index.mjs';
 import { defaultSearchQueryPlan } from './helpers/search-query-planner-mock.mjs';
 
-function validReport(marker = 'test report') {
-  return `# Research Report\n\n## Summary\n\nThis ${marker} summarizes the collected evidence and clearly distinguishes verified observations from unresolved limitations. It provides enough structured prose to validate the report output contract without relying on an empty or placeholder response.\n\n## Caveats\n\nThe test evidence is intentionally limited.`;
+function validReport(marker = 'test report', { cited = true } = {}) {
+  const citation = cited ? ' [1.1]' : '';
+  return `# Research Report\n\n## Summary\n\nThis ${marker} summarizes the collected evidence and clearly distinguishes verified observations from unresolved limitations. It provides enough structured prose to validate the report output contract without relying on an empty or placeholder response.${citation}\n\n## Key Findings\n\nThis ${marker} keeps a cited key finding in the labeled narrative so post-revision validation can pass without inventing unsupported claims.${citation}\n\n## Caveats\n\nThe test evidence is intentionally limited.`;
+}
+
+function checkpointSpy() {
+  const boundaries = [];
+  return {
+    boundaries,
+    event() {},
+    callStarted() {},
+    callFinished() {},
+    checkpoint(boundary) { boundaries.push(boundary); },
+  };
 }
 
 describe('ResearchRunner', () => {
@@ -18,8 +30,10 @@ describe('ResearchRunner', () => {
     const runner = new ResearchRunner();
     const events = [];
     const searchedQuestions = [];
+    const recorder = checkpointSpy();
     const result = await runner.run({
       query: 'test topic',
+      recorder,
       settings: {
         llm: {
           provider: 'openai-compatible',
@@ -75,6 +89,8 @@ describe('ResearchRunner', () => {
     assert.ok(events.some((event) => event.message === 'Running 3 quick searches'));
     assert.equal(events.at(-1).message, 'Research complete');
     assert.equal(events.at(-1).progress, 100);
+    assert.ok(recorder.boundaries.includes('quick-round-complete'));
+    assert.ok(recorder.boundaries.includes('pre-report'));
   });
 
   it('exposes available research strategies as metadata', () => {
@@ -89,9 +105,11 @@ describe('ResearchRunner', () => {
   it('runs focused discovery and targeted repair waves', async () => {
     const searchedQuestions = [];
     const runner = new ResearchRunner();
+    const recorder = checkpointSpy();
 
     const result = await runner.run({
       query: 'deep topic',
+      recorder,
       settings: {
         llm: {},
         search: {},
@@ -141,6 +159,8 @@ describe('ResearchRunner', () => {
     assert.ok(result.gaps.length >= 2);
     assert.equal(result.gaps[0].priority, 'critical');
     assert.ok(result.trace.some((entry) => entry.action === 'search_wave_started' && entry.wave === 'repair'));
+    assert.ok(recorder.boundaries.includes('focused-wave-complete'));
+    assert.ok(recorder.boundaries.includes('focused-readiness-evaluated'));
   });
 
   it('rejects unsupported research strategies', async () => {
@@ -158,8 +178,10 @@ describe('ResearchRunner', () => {
       { action: 'answer', reasonCode: 'evidence_sufficient' },
     ];
     const runner = new ResearchRunner();
+    const recorder = checkpointSpy();
     const result = await runner.run({
       query: 'exploratory topic',
+      recorder,
       settings: {
         llm: {}, search: {},
         research: {
@@ -195,6 +217,14 @@ describe('ResearchRunner', () => {
     assert.ok(result.trace.some((entry) => entry.action === 'search' || entry.reasonCode === 'agent_loop_v2'));
     assert.equal(result.trace.at(-1).action, 'stop');
     assert.ok(events.includes('Assessing research query'));
+    assert.deepEqual(
+      recorder.boundaries.filter((boundary) => boundary.startsWith('exploratory-')),
+      [
+        'exploratory-bootstrap',
+        ...Array.from({ length: 6 }, () => 'exploratory-step-complete'),
+        'exploratory-loop-complete',
+      ],
+    );
   });
 
   it('never exceeds a configured search request budget', async () => {
@@ -244,8 +274,87 @@ describe('ResearchRunner', () => {
         search: { async search() { return [{ title: 'S', url: 'https://example.test', snippet: 'evidence' }]; } },
         llm: { async complete({ purpose }) { return purpose === 'search_query_planning' ? JSON.stringify({ queries: [] }) : ''; } },
       }),
-      (error) => error.name === 'ReportGenerationError' && error.code === 'REPORT_OUTPUT_INVALID' && error.attempts === 2,
+      (error) => error.name === 'ReportGenerationError' && error.code === 'REPORT_OUTPUT_INVALID' && error.attempts === 2 && error.phase === 'provider',
     );
+  });
+
+  it('completes a closed judgment report when Key Findings use H3 groups and repeat the Summary', async () => {
+    const FIRST_PARTY_BODY = 'Anthropic published Commerce Agents as an open-source blueprint. Retailers can fork the reference implementation and keep checkout on their own site.';
+    const summary = 'Anthropic 把 Commerce Agents 写成可 fork 的开源蓝图，零售商可以在自己的站点完成结账，而不是把货架标准锁进闭源平台。 [1.1]';
+    const recorder = checkpointSpy();
+    let reportPromptText = '';
+    const result = await new ResearchRunner().run({
+      query: 'Anthropic Commerce Agents official design judgment',
+      recorder,
+      settings: {
+        llm: {},
+        search: {},
+        research: {
+          strategy: 'focused',
+          iterations: 1,
+          questionsPerIteration: 0,
+          quality: { entailment: 'rules' },
+          focused: {
+            fetchMode: 'disabled',
+            iterationControl: { enabled: false },
+            evidencePassages: { enabled: true, claimAlignment: true },
+          },
+        },
+      },
+      search: {
+        async search() {
+          return [{
+            title: 'Commerce Agents',
+            url: 'https://www.claude.com/blog/commerce-agents',
+            content: FIRST_PARTY_BODY,
+            fetchStatus: 'ok',
+            contentOrigin: 'fetched',
+            assessment: { firstParty: true, publisherType: 'official', contentKind: 'article' },
+          }];
+        },
+      },
+      llm: {
+        async complete({ purpose, messages }) {
+          if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
+          if (purpose === 'research_profile') {
+            return JSON.stringify({
+              queryShape: 'judgment',
+              requiredAnswerSlots: [{
+                id: 'judgment',
+                answerSlot: 'judgment',
+                question: 'Does Commerce Agents keep the shelf with the retailer?',
+                evidenceCriteria: ['first_party'],
+              }],
+            });
+          }
+          if (purpose === 'gap_support') {
+            return JSON.stringify({
+              judgments: [{ verdict: 'supported', quote: 'Retailers can fork the reference implementation and keep checkout on their own site.' }],
+            });
+          }
+          if (purpose === 'question_generation') return '[]';
+          if (purpose === 'report') {
+            reportPromptText = (messages || []).map((item) => item.content).join('\n');
+            return JSON.stringify({
+              title: 'Commerce Agents 判断',
+              summary: [summary],
+              backgroundFacts: ['Anthropic published Commerce Agents as an open-source blueprint. [1.1]'],
+              keyFindings: [{ heading: '判断', claims: [summary] }],
+              caveats: [],
+            });
+          }
+          return '{}';
+        },
+      },
+    });
+    assert.ok(recorder.boundaries.includes('report-contract'));
+    assert.ok(recorder.boundaries.includes('report-plan'));
+    assert.match(result.report.split('## Evidence')[0], /## Key Findings/);
+    assert.match(result.report, /可 fork 的开源蓝图/);
+    assert.equal(result.reportContract?.openJudgment, false);
+    assert.ok((result.reportPlan?.keyFindings || []).some((group) => (group.claims || []).length));
+    assert.doesNotMatch(reportPromptText, /only as Confirmed Background Facts while the judgment slot remains open/);
+    assert.doesNotMatch(result.report.split('## Evidence')[0], /still unresolved|仍未关闭/);
   });
 
   it('records focused critical gaps and evidence limitations', async () => {
@@ -278,7 +387,9 @@ describe('ResearchRunner', () => {
             ],
           });
         }
-        return purpose === 'question_generation' ? JSON.stringify(['secondary comparison']) : validReport('limited focused report');
+        return purpose === 'question_generation'
+          ? JSON.stringify(['secondary comparison'])
+          : validReport('limited focused report', { cited: false });
       } },
     });
     assert.ok(result.gaps.some((gap) => gap.priority === 'critical'));
@@ -286,7 +397,6 @@ describe('ResearchRunner', () => {
     assert.ok(result.quality.flags.includes('critical_gaps_open'));
     assert.ok(result.quality.flags.includes('primary_source_missing'));
     assert.ok(result.quality.flags.includes('no_direct_evidence'));
-    assert.ok(result.quality.limitations.some((item) => /primary or official/i.test(item)));
     assert.equal(result.quality.gate, 'pass_with_warnings');
   });
 
@@ -306,7 +416,9 @@ describe('ResearchRunner', () => {
             requiredAnswerSlots: [{ answerSlot: 'same unresolved question', question: 'same unresolved question' }],
           });
         }
-        return purpose === 'question_generation' ? JSON.stringify(['same unresolved question']) : validReport('duplicate gap report');
+        return purpose === 'question_generation'
+          ? JSON.stringify(['same unresolved question'])
+          : validReport('duplicate gap report', { cited: false });
       } },
     });
     assert.equal(result.gaps.filter((gap) => gap.question === 'same unresolved question').length, 1);

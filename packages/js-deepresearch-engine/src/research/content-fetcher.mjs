@@ -54,10 +54,104 @@ function extractLinks(html = '', baseUrl = '') {
 }
 
 const DEFAULT_DOCUMENT_MAX_CHARS = 32000;
+const DEFAULT_MAX_ATTEMPTS = 3;
+const MAX_RETRY_AFTER_MS = 15000;
 
-function truncateContent(content, maxChars) {
+function abortError(message = 'Research aborted') {
+  const error = new Error(message);
+  error.name = 'AbortError';
+  return error;
+}
+
+function parseRetryAfterMs(response) {
+  const header = response?.headers?.get?.('retry-after');
+  if (!header) return null;
+  const seconds = Number(header);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.min(seconds * 1000, MAX_RETRY_AFTER_MS);
+  const date = Date.parse(header);
+  if (!Number.isNaN(date)) return Math.min(Math.max(0, date - Date.now()), MAX_RETRY_AFTER_MS);
+  return null;
+}
+
+export function classifyFetchFailure({
+  error = null,
+  httpStatus = null,
+  aborted = false,
+  timedOut = false,
+} = {}) {
+  if (aborted) return { errorType: 'aborted', retryable: false, httpStatus };
+  if (timedOut) return { errorType: 'timeout', retryable: true, httpStatus };
+  if (httpStatus === 429) return { errorType: 'http_429', retryable: true, httpStatus };
+  if (httpStatus >= 500 && httpStatus <= 599) return { errorType: 'http_5xx', retryable: true, httpStatus };
+  if (httpStatus >= 400) return { errorType: 'http_4xx', retryable: false, httpStatus };
+  if (error) return { errorType: 'network', retryable: true, httpStatus };
+  return { errorType: 'unknown', retryable: false, httpStatus };
+}
+
+function failedFetchResult({
+  error,
+  errorType,
+  httpStatus = null,
+  attempts = 1,
+  retryable = false,
+  retryAfterMs = null,
+  accessedAt,
+  accessStatus,
+  accessNotes,
+} = {}) {
+  return {
+    status: 'failed',
+    error,
+    errorType,
+    httpStatus,
+    fetchAttempts: attempts,
+    retryable,
+    retryAfterMs,
+    accessedAt,
+    accessStatus: accessStatus || (httpStatus ? `http_${httpStatus}` : 'failed'),
+    accessNotes: accessNotes || error,
+  };
+}
+
+async function sleep(ms, signal) {
+  const delay = Math.max(0, Number(ms) || 0);
+  if (!delay) return;
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, delay);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(abortError());
+    };
+    if (signal?.aborted) {
+      clearTimeout(timer);
+      reject(abortError());
+      return;
+    }
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+export function truncateContent(content, maxChars) {
   if (!maxChars || content.length <= maxChars) return content;
-  return `${content.slice(0, maxChars)}\n[...truncated]`;
+  const windowCount = maxChars >= 1200 ? 4 : 2;
+  const windowSize = Math.max(1, Math.floor(maxChars / windowCount));
+  const maxStart = Math.max(0, content.length - windowSize);
+  const windows = [];
+  let previousEnd = 0;
+  for (let index = 0; index < windowCount; index += 1) {
+    const start = index === 0
+      ? 0
+      : (index === windowCount - 1
+        ? maxStart
+        : Math.round((maxStart * index) / (windowCount - 1)));
+    const end = Math.min(content.length, start + windowSize);
+    if (windows.length && start > previousEnd) {
+      windows.push(`\n[...omitted ${start - previousEnd} chars...]\n`);
+    }
+    windows.push(content.slice(start, end));
+    previousEnd = end;
+  }
+  return windows.join('');
 }
 
 async function readResponseBytes(response) {
@@ -72,11 +166,12 @@ function decodeText(bytes) {
   return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
 }
 
-export async function fetchUrlContent(url, {
+async function fetchUrlContentOnce(url, {
   signal,
   maxChars = 8000,
   timeoutMs = 15000,
   convertDocument,
+  fetchImpl = globalThis.fetch,
 } = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -84,16 +179,14 @@ export async function fetchUrlContent(url, {
   if (signal) {
     if (signal.aborted) {
       clearTimeout(timeout);
-      const error = new Error('Research aborted');
-      error.name = 'AbortError';
-      throw error;
+      throw abortError();
     }
     signal.addEventListener('abort', () => controller.abort(), { once: true });
   }
 
   try {
     const accessedAt = new Date().toISOString();
-    const response = await fetch(url, {
+    const response = await fetchImpl(url, {
       signal: controller.signal,
       headers: {
         'user-agent': 'js-deepresearch-agent/1.0 (+research)',
@@ -110,13 +203,13 @@ export async function fetchUrlContent(url, {
     });
 
     if (!response.ok) {
-      return {
-        status: 'failed',
+      const failure = classifyFetchFailure({ httpStatus: response.status });
+      return failedFetchResult({
         error: `HTTP ${response.status}`,
+        ...failure,
+        retryAfterMs: parseRetryAfterMs(response),
         accessedAt,
-        accessStatus: `http_${response.status}`,
-        accessNotes: `HTTP ${response.status}`,
-      };
+      });
     }
 
     const contentType = response.headers.get('content-type') || '';
@@ -194,16 +287,47 @@ export async function fetchUrlContent(url, {
   } catch (error) {
     if (signal?.aborted) throw error;
     if (error?.name === 'AbortError') {
-      return {
-        status: 'failed',
+      return failedFetchResult({
         error: `Timed out after ${timeoutMs}ms`,
-      };
+        ...classifyFetchFailure({ timedOut: true }),
+      });
     }
-    return {
-      status: 'failed',
+    return failedFetchResult({
       error: error?.message || 'Fetch failed',
-    };
+      ...classifyFetchFailure({ error }),
+    });
   } finally {
     clearTimeout(timeout);
   }
+}
+
+export async function fetchUrlContent(url, {
+  signal,
+  maxChars = 8000,
+  timeoutMs = 15000,
+  convertDocument,
+  maxAttempts = DEFAULT_MAX_ATTEMPTS,
+  fetchImpl = globalThis.fetch,
+} = {}) {
+  const attempts = Math.max(1, Number(maxAttempts) || DEFAULT_MAX_ATTEMPTS);
+  let lastFailure = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    if (signal?.aborted) throw abortError();
+    const result = await fetchUrlContentOnce(url, {
+      signal,
+      maxChars,
+      timeoutMs,
+      convertDocument,
+      fetchImpl,
+    });
+    if (result.status === 'ok') {
+      return { ...result, fetchAttempts: attempt };
+    }
+    lastFailure = { ...result, fetchAttempts: attempt };
+    const canRetry = result.retryable === true && attempt < attempts;
+    if (!canRetry) return lastFailure;
+    const delay = result.retryAfterMs ?? (250 * attempt);
+    await sleep(delay, signal);
+  }
+  return lastFailure;
 }

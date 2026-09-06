@@ -13,6 +13,7 @@ import {
 import { isWafOrErrorBody } from '../scripts/benchmark/source-policy.mjs';
 import {
   auditAsOfCompliance,
+  auditCitationIntegrity,
   auditClaim,
   auditContractMaterialization,
   auditRelevanceIntegrity,
@@ -661,6 +662,112 @@ describe('query provenance audit', () => {
     ]);
     assert.equal(audit.applicable, true);
     assert.equal(audit.pass, true);
+  });
+});
+
+describe('commerce judgment background facts', () => {
+  const query = '店面会话正在变成新的货架。Anthropic 开源 Commerce Agents，是在帮零售商把货架留在自己家里，还是在用「可 fork 的正确做法」把货架标准写成 Claude 的？';
+  const report = `# Commerce Agents
+
+## Summary
+The required judgment remains unresolved after first-party bodies were read. Official pages describe an open-source blueprint, but they do not prove that retailers keep the shelf or that Claude locks the standard. [1.1]
+
+## Confirmed Background Facts
+- Anthropic describes Commerce Agents as an open-source blueprint that retailers can fork while keeping checkout on their own site. [1.1]
+
+## Caveats
+- Slot judgment: first-party bodies were read but they are not sufficient to support the required judgment. Do not treat the strategic conclusion as confirmed.
+- Slot judgment: evidence repair exhausted (query_planner_exhausted); do not treat it as confirmed.
+
+## Evidence
+*   **[1.1] Commerce Agents** (source body): Anthropic published Commerce Agents as an open-source blueprint.
+
+## Sources
+- [1.1] Commerce Agents | https://www.claude.com/blog/commerce-agents
+`;
+
+  it('counts background facts in narrative integrity without washing official readiness', () => {
+    const audit = auditStrategyRun({
+      query,
+      strategy: 'exploratory',
+      report,
+      findings: [{
+        question: query,
+        gapId: 'gap-2',
+        sources: [{
+          id: 'src-official',
+          title: 'Commerce Agents',
+          url: 'https://www.claude.com/blog/commerce-agents',
+          content: 'Anthropic published Commerce Agents as an open-source blueprint. Retailers can fork the reference implementation.',
+          fetchStatus: 'ok',
+          contentOrigin: 'fetched',
+          assessment: { firstParty: true, publisherType: 'official' },
+        }],
+      }],
+      sources: [{
+        id: 'src-official',
+        title: 'Commerce Agents',
+        url: 'https://www.claude.com/blog/commerce-agents',
+        content: 'Anthropic published Commerce Agents as an open-source blueprint. Retailers can fork the reference implementation.',
+        fetchStatus: 'ok',
+        contentOrigin: 'fetched',
+        evidenceClass: 'source_body',
+      }],
+      claims: [
+        {
+          kind: 'premise_fact',
+          text: 'Anthropic describes Commerce Agents as an open-source blueprint that retailers can fork while keeping checkout on their own site. [1.1]',
+          citationKeys: ['1.1'],
+          citedSourceIds: ['src-official'],
+          evaluation: { verdict: 'supported', flags: ['slot_premise_exempt'] },
+        },
+        {
+          kind: 'key_claim',
+          text: 'Retailers therefore keep the shelf.',
+          evaluation: { verdict: 'unverifiable', flags: ['slot_limited'] },
+        },
+      ],
+      gaps: [{
+        id: 'gap-2',
+        requiredSlot: true,
+        contractSlotId: 'judgment',
+        answerSlot: 'judgment',
+        evidenceStatus: 'body_read',
+        status: 'body_read',
+        schemaVersion: 5,
+      }],
+      brief: {
+        query,
+        queryShape: 'judgment',
+        requiredAnswerSlots: [{ id: 'judgment', answerSlot: 'judgment', requiredSlot: true }],
+      },
+      quality: {
+        readiness: { pass: false },
+        completionStatus: 'incomplete',
+        stopReason: 'safety_cap',
+        stopDetail: 'query_planner_exhausted',
+        metrics: { rates: { supportedRate: 0 }, premiseFactCount: 1, premiseFactSupportedCount: 1 },
+      },
+      trace: [{ action: 'search', queryOrigin: 'user_query', resultCount: 1 }],
+    });
+    assert.equal(audit.reportIntegrity.pass, true, JSON.stringify(audit.reportIntegrity.checks));
+    assert.equal(audit.citationIntegrity.pass, true, JSON.stringify(audit.citationIntegrity.checks));
+    assert.equal(audit.evidenceProvenance.pass, true, JSON.stringify(audit.evidenceProvenance.checks));
+    assert.ok(audit.reportIntegrity.counts.narrativeChars >= 200);
+    assert.equal(audit.status, 'not_ready');
+    assert.equal(audit.processContract.checks.find((item) => item.id === 'required_contract_complete')?.pass, false);
+  });
+
+  it('rejects internal gap ids presented as citation-looking tokens', () => {
+    const audit = auditCitationIntegrity({
+      report: '# Report\n\n## Summary\nThe judgment is unresolved [gap-2].',
+      claims: [],
+      citationMap: new Map(),
+      sources: [],
+    });
+    assert.equal(audit.pass, false);
+    assert.deepEqual(audit.internalReferenceTokens, ['gap-2']);
+    assert.equal(audit.checks.find((item) => item.id === 'no_internal_reference_citations')?.pass, false);
   });
 });
 
