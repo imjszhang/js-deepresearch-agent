@@ -434,6 +434,8 @@ Commands:
     Search options (passed through to SearXNG; no language/engine routing is applied by this CLI): --search-language zh --search-engines google,brave --search-categories general
     Optional source assessment extra call in full/extract: --source-assessment true
     Focused: --focused-fetch-mode summary|disabled|full|extract --focused-fetch-backend auto|http|js-eyes --focused-max-urls 12 --focused-cluster-results true|false --focused-max-per-hostname 2
+    Evidence HTTP: --http2 true|false --http-cookie-retry true|false --http-max-response-bytes 10485760 --http-allowed-content-types text/html,application/pdf --http-host-headers '{"example.com":{"Referer":"https://search.example/"}}'
+      Host header overrides are exact-host (or *.example.com) browser-header tuning only; Cookie/Authorization/framing headers are rejected.
     Exploratory: --exploratory-max-steps 0 --exploratory-max-reads-per-step 4 --exploratory-min-llm-tokens 600000 --exploratory-max-llm-tokens 1000000 --exploratory-max-search-requests 0 --exploratory-max-source-reads 0 --max-repair-failures-per-gap 3 --max-consecutive-invalid-steps 6
     On --strategy exploratory, --max-search-requests / --max-source-reads write exploratory count caps (default 0 = unlimited) and do not inherit global budget counts.
     Press Ctrl+C once to cancel gracefully; press again to force exit.

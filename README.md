@@ -125,6 +125,23 @@ Runtime settings are stored in the local SQLite database under `data/`. Values f
 
 SearXNG is the default search adapter in the embeddable `js-deepresearch-engine` package. **JS Eyes and local directories are app-local providers** registered at startup from `src/search-providers/`—they are not bundled inside the npm package. DuckDuckGo, Tavily, and Brave Search are represented in the adapter metadata for later implementation.
 
+### Evidence HTTP Client
+
+Focused and exploratory HTTP reads use a browser-semantic evidence client. It sends navigation headers, negotiates HTTP/2 through Undici ALPN with HTTP/1.1 fallback, follows redirects, records `finalUrl`, and accepts brotli/gzip/deflate responses. The default response limit is 10 MiB and only text, HTML, PDF, and supported office/document MIME types are read.
+
+The cookie jar is in memory and isolated by exact response hostname and the current settings object, so cookies are not shared across research runs. A failed response is retried once only when it actually provides a valid `Set-Cookie` header and `http.cookieRetry` is enabled; ordinary 403 responses are not retried. Cookies are not written to run records. This client does not supply login state or bypass paywalls—authenticated platforms still require JS Eyes.
+
+Per-host browser headers can be tuned for a one-off run with JSON:
+
+```bash
+npm exec --package=. -- jdr research "public evidence" \
+  --http-host-headers '{"example.com":{"Referer":"https://search.example/","Accept-Language":"zh-CN,zh;q=0.9"}}' \
+  --http-max-response-bytes 5242880 \
+  --http-allowed-content-types text/html,text/plain,application/pdf
+```
+
+Persistent keys are `http.hostHeaders`, `http.http2`, `http.cookieRetry`, `http.maxResponseBytes`, and `http.allowedContentTypes`. Wildcard host keys such as `*.example.com` are supported; exact-host values take precedence. `Cookie`, `Authorization`, proxy authorization, and request-framing header overrides are rejected.
+
 ### Local Directory Search Provider (App-Local)
 
 `local` is a search source, not a new research strategy and not a persistent vector index. Each configured directory is an independent channel (search separately, fail separately, round-robin merge), matching the JS Eyes skill model. Hits enter the existing enrich path as normalized `file://` absolute URLs. `quick` keeps snippet-only evidence; `focused` / `exploratory` read file bodies. Files outside a configured corpus root (including `../` and outbound symlinks) are rejected.

@@ -1,5 +1,8 @@
 import crypto from 'node:crypto';
-import { createHttpFetch } from '../http/create-http-fetch.mjs';
+import {
+  createEvidenceHttpFetch,
+  DEFAULT_ALLOWED_CONTENT_TYPES,
+} from '../http/create-http-fetch.mjs';
 import { fetchUrlContent, truncateContent } from './content-fetcher.mjs';
 import { resolveFocusedSettings } from './focused-settings.mjs';
 import { isWafShellText } from './body-quality.mjs';
@@ -47,14 +50,18 @@ export function getContentFetchHandlers() {
 
 export function resolveContentFetchImpl(context = {}) {
   if (typeof context.fetchImpl === 'function') return context.fetchImpl;
-  return createHttpFetch(context.settings?.http?.proxy);
+  if (!context.settings?.http) return globalThis.fetch;
+  return createEvidenceHttpFetch(context.settings?.http || {});
 }
 
 function httpFetchOptions(context = {}) {
+  const http = context.settings?.http || {};
   const transport = context.settings?.research?.read?.transport || {};
   return {
     signal: context.signal,
     maxChars: context.maxChars,
+    maxResponseBytes: http.maxResponseBytes,
+    allowedContentTypes: http.allowedContentTypes || DEFAULT_ALLOWED_CONTENT_TYPES,
     fetchImpl: resolveContentFetchImpl(context),
     maxAttempts: transport.maxAttempts,
     responseHeadersTimeoutMs: transport.responseHeadersTimeoutMs,

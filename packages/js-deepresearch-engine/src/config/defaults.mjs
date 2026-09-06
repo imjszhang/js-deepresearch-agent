@@ -1,9 +1,24 @@
 import { normalizeSearchConfig } from '../search/normalize-search-config.mjs';
 import { migrateResearchSettings } from '../research/strategy-aliases.mjs';
+import {
+  DEFAULT_ALLOWED_CONTENT_TYPES,
+  DEFAULT_BROWSER_USER_AGENT,
+  DEFAULT_MAX_REDIRECTS,
+  DEFAULT_MAX_RESPONSE_BYTES,
+} from '../http/create-http-fetch.mjs';
 
 export const defaultSettings = Object.freeze({
   http: {
     proxy: '',
+    http2: true,
+    cookieRetry: true,
+    userAgent: DEFAULT_BROWSER_USER_AGENT,
+    acceptLanguage: 'en-US,en;q=0.9',
+    referer: '',
+    hostHeaders: {},
+    maxRedirects: DEFAULT_MAX_REDIRECTS,
+    maxResponseBytes: DEFAULT_MAX_RESPONSE_BYTES,
+    allowedContentTypes: DEFAULT_ALLOWED_CONTENT_TYPES,
   },
   llm: {
     provider: 'openai-compatible',
@@ -180,7 +195,21 @@ export function mergeSettings(overrides = {}) {
   const researchOverrides = migrateResearchSettings(overrides.research || {});
 
   const merged = {
-    http: { ...defaultSettings.http, ...(overrides.http || {}) },
+    http: {
+      ...defaultSettings.http,
+      ...(overrides.http || {}),
+      hostHeaders: {
+        ...defaultSettings.http.hostHeaders,
+        ...(overrides.http?.hostHeaders
+          && typeof overrides.http.hostHeaders === 'object'
+          && !Array.isArray(overrides.http.hostHeaders)
+          ? overrides.http.hostHeaders
+          : {}),
+      },
+      allowedContentTypes: Array.isArray(overrides.http?.allowedContentTypes)
+        ? [...overrides.http.allowedContentTypes]
+        : [...defaultSettings.http.allowedContentTypes],
+    },
     llm: { ...defaultSettings.llm, ...(overrides.llm || {}) },
     search: {
       ...defaultSettings.search,

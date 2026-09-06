@@ -192,9 +192,12 @@ describe('content resolver', () => {
     assert.match(result.error, /No js-eyes content handler matched URL/);
   });
 
-  it('keeps direct fetch when no proxy is configured', () => {
+  it('keeps legacy direct fetch without HTTP settings and enables evidence transport when configured', () => {
     assert.equal(resolveContentFetchImpl({ settings: {} }), globalThis.fetch);
-    assert.equal(resolveContentFetchImpl({ settings: { http: { proxy: '' } } }), globalThis.fetch);
+    const fetchImpl = resolveContentFetchImpl({ settings: { http: { proxy: '', http2: true } } });
+    assert.notEqual(fetchImpl, globalThis.fetch);
+    assert.equal(fetchImpl.transportOptions.http2, true);
+    assert.equal(fetchImpl.transportOptions.browserHeaders, true);
   });
 
   it('builds a proxied fetch when http.proxy is set', () => {
@@ -270,6 +273,31 @@ describe('source enricher', () => {
     assert.equal(finding.sources[0].fetchStatus, 'ok');
     assert.equal(finding.sources[0].contentOrigin, 'fetched');
     assert.match(finding.sources[0].content, /Detailed LLM wiki article body/);
+  });
+
+  it('anchors enriched sources to the final redirected URL', async () => {
+    registerContentFetchHandler(async () => ({
+      status: 'ok',
+      title: 'Canonical article',
+      content: 'Canonical source body.',
+      finalUrl: 'https://www.example.com/canonical',
+      backend: 'test',
+    }));
+    const [finding] = await enrichFindings([{
+      question: 'canonical source',
+      sources: [{ title: 'Article', url: 'https://example.com/redirect', snippet: 'short' }],
+    }], {
+      query: 'canonical source',
+      fetchMode: 'full',
+      maxUrlsPerIteration: 1,
+      maxUrlsTotal: 1,
+      maxContentChars: 8000,
+      enrichConcurrency: 1,
+      llm: null,
+    });
+    assert.equal(finding.sources[0].url, 'https://www.example.com/canonical');
+    assert.equal(finding.sources[0].finalUrl, 'https://www.example.com/canonical');
+    assert.equal(finding.sources[0].originalUrl, 'https://example.com/redirect');
   });
 
   it('falls back to failed fetchStatus without throwing', async () => {
@@ -729,6 +757,57 @@ describe('focused pipeline', () => {
 
     assert.ok(stages.includes('enriching_sources'));
     assert.ok(stages.includes('filtering_sources'));
+  });
+
+  it('preserves redirected final URLs through focused wave remapping', async () => {
+    registerContentFetchHandler(async () => ({
+      status: 'ok',
+      title: 'Canonical topic',
+      content: 'Topic canonical body with enough direct evidence.',
+      finalUrl: 'https://www.example.com/canonical-topic',
+    }));
+    const findings = await runFocusedPipeline({
+      query: 'topic',
+      iterations: 1,
+      questionCount: 1,
+      concurrency: 1,
+      settings: {
+        research: {
+          read: { relevance: { bodyValidation: false } },
+          focused: {
+            fetchMode: 'full',
+            maxUrlsPerIteration: 2,
+            maxUrlsTotal: 2,
+            iterationControl: { enabled: false },
+          },
+        },
+      },
+      search: {
+        async search() {
+          return [{
+            title: 'Topic redirect',
+            url: 'https://example.com/redirect-topic',
+            snippet: 'topic evidence',
+          }];
+        },
+      },
+      llm: {
+        async complete({ purpose, messages }) {
+          if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
+          if (purpose === 'research_profile') {
+            return JSON.stringify({
+              requiredAnswerSlots: [{ answerSlot: 'topic', question: 'topic' }],
+            });
+          }
+          return JSON.stringify(['topic']);
+        },
+      },
+      emit: () => {},
+    });
+    const redirected = findings.flatMap((finding) => finding.sources || [])
+      .find((source) => source.finalUrl === 'https://www.example.com/canonical-topic');
+    assert.equal(redirected.url, 'https://www.example.com/canonical-topic');
+    assert.equal(redirected.originalUrl, 'https://example.com/redirect-topic');
   });
 
   it('does not let snippet-only discovery pass the focused readiness gate', async () => {

@@ -76,7 +76,7 @@ async function maybeAssessSource(source, fetched, {
     query,
     question,
     title: source.title || fetched.title,
-    url: String(source.url || '').trim(),
+    url: String(fetched.finalUrl || source.url || '').trim(),
     content: fetched.content,
     entities: [...new Set([...(entities || []), ...(entityAliases || [])])],
     preferredHosts: relevanceGap?.preferredHosts || [],
@@ -158,6 +158,7 @@ async function enrichOneSource(source, {
   if (fetched.status !== 'ok') {
     return {
       ...withSourceProvenance(source, fetched),
+      ...(fetched.finalUrl ? { finalUrl: fetched.finalUrl } : {}),
       fetchStatus: fetched.status === 'skipped' ? 'skipped' : 'failed',
       fetchError: fetched.error || 'Fetch failed',
       fetchErrorType: fetched.errorType || null,
@@ -179,6 +180,9 @@ async function enrichOneSource(source, {
 
   const fetchedSource = {
     ...withSourceProvenance(source, fetched),
+    ...(fetched.finalUrl && fetched.finalUrl !== source.url ? { originalUrl: source.url } : {}),
+    url: fetched.finalUrl || source.url,
+    finalUrl: fetched.finalUrl || source.url,
     title: source.title || fetched.title,
     content: fetched.content,
     contentOrigin: 'fetched',

@@ -45,7 +45,17 @@ export {
   DEFAULT_EXPLORATORY_MIN_LLM_TOKENS,
   DEFAULT_EXPLORATORY_MAX_LLM_TOKENS,
 } from './research/exploratory-settings.mjs';
-export { createHttpFetch, resetHttpFetchCache } from './http/create-http-fetch.mjs';
+export {
+  buildBrowserRequestHeaders,
+  cancelResponseBody,
+  createEvidenceHttpFetch,
+  createHttpFetch,
+  DEFAULT_ALLOWED_CONTENT_TYPES,
+  DEFAULT_BROWSER_USER_AGENT,
+  DEFAULT_MAX_REDIRECTS,
+  DEFAULT_MAX_RESPONSE_BYTES,
+  resetHttpFetchCache,
+} from './http/create-http-fetch.mjs';
 export {
   createWorkSessionDir,
   formatSessionTimestamp,

@@ -145,6 +145,11 @@ npm exec --package=. -- jdr research "Explain the current state of local-first A
 | `--search-categories` | `search.options.categories` | 透传 SearXNG `categories` |
 | `--source-assessment` | `research.read.sourceAssessment.enabled` | 仅 `full`/`extract` 额外调用结构化来源评估（默认 false）。`summary` 模式本身已是一次 `source_assessment` |
 | `--http-proxy` | `http.proxy` | SOCKS5/HTTP 代理 URL；LLM / embedding / rerank / URL 正文抓取走代理，SearXNG 与 js-eyes 搜索仍直连 |
+| `--http2` | `http.http2` | HTTP 取证是否通过 Undici ALPN 协商 HTTP/2（默认 true，服务端不支持时回落 HTTP/1.1） |
+| `--http-cookie-retry` | `http.cookieRetry` | 失败响应实际带有效 `Set-Cookie` 时是否携带同 host cookie 重试一次（默认 true） |
+| `--http-host-headers` | `http.hostHeaders` | JSON 对象，按精确 host 或 `*.example.com` 覆盖浏览器请求头；禁止 Cookie/Auth/请求分帧头 |
+| `--http-max-response-bytes` | `http.maxResponseBytes` | HTTP 正文解压后的最大字节数（默认 10485760） |
+| `--http-allowed-content-types` | `http.allowedContentTypes` | 逗号分隔的 MIME 白名单，可用尾部 `*` |
 | `--max-rerank-requests` | `research.budget.maxRerankRequests` | 外部 rerank 请求上限，`0` 不限制 |
 | `--max-rerank-tokens` | `research.budget.maxRerankTokens` | provider 可观测 rerank token 上限，`0` 不限制 |
 | `--max-search-requests` | `research.budget.maxSearchRequests` | 专题/快速搜索次数上限（默认 18）。`--strategy exploratory` 时同时写入 `research.exploratory.maxSearchRequests` |
@@ -309,6 +314,14 @@ npm exec --package=. -- jdr config set research.iterations 3
 
 ```json
 {
+  "http": {
+    "proxy": "",
+    "http2": true,
+    "cookieRetry": true,
+    "hostHeaders": {},
+    "maxResponseBytes": 10485760,
+    "allowedContentTypes": ["text/*", "application/xhtml+xml", "application/pdf"]
+  },
   "llm": {
     "provider": "openai-compatible",
     "model": "gpt-4o-mini",
@@ -703,6 +716,14 @@ Schema v4 在 v3 产物之外写入 `report-plan.json`；`claims.json` 增加 `c
 探索式读取使用共享相关性闭环：`siteQueryMode` 默认 `confirmed`，Planner 仅可对 required host 或本 run SERP 已观察到的 host 生成 `site:`；preferred host 默认只参与排序加权。生成查询中的 `site:` 仍会在结果返回后按真实 hostname 强制校验；若结果 100% 被 site 过滤，该查询只记入 `exhaustedAngles`，不计入 `searchedQueries`，并由 Planner 的 `site_fallback` 模式重写，不得用规则删掉 `site:` 后重搜。新行为只能来自用户显式搜索配置、搜索提供方原始观测、或结构化 LLM 输出；不得新增规则造词、语言检测、静态引擎路由或内容分类域名表。Planner 查询可带可选 `searchOptions` 并原样透传。`summary` 读取改为一次 `source_assessment`（`readability`/`contentKind`/`publisherType`/`firstParty`/`evidenceTier`）。抓取状态、正文质量、来源评估、证据准入是四个独立字段：`fetchStatus` 只记传输事实，`bodyQuality` 记确定性正文判定，`assessmentStatus`（`ok` | `unavailable` | `skipped`）记评估是否跑通。评估返回无效 JSON 只标 `assessmentStatus=unavailable`，**不得**改写 `fetchStatus`、**不得**删除已抓正文，改由规则层（WAF 壳、二进制、过短、实体不匹配）判定是否可用；只有 LLM 真给出 `readability=unreadable` 才是内容判定，且同样只写 `bodyQuality`。评估不可用时 `criterion:first_party` 降级为硬 host 规则（用户显式 host 与 query 字面 host，不含 planner 的 preferred host）。成功搜索 trace 必须带 `queryOrigin`（`user_query` | `llm_planner`）。离线审计字段为 `queriesMissingProvenance`、`ruleGeneratedQueryCount`、`plannerRejectedQueries`、`plannerRetryCount`、`siteFallbackWithoutPlanner`；新 run 缺失 provenance、规则造词或非 Planner 的 site fallback 均判失败，旧 schema 产物标为 not-applicable。候选按目标 gap 分别保存 rerank 分数和准入决策；未执行 rerank 时分数保持 `null`，以 `rerank_not_evaluated` 准入。外部 rerank 分数是排序与诊断信号，低于阈值标记为 `rerank_below_threshold_soft` 并降低优先级，但不能单独禁止读取；`site:` 约束、实体不匹配与正文主体不相关仍是硬拒绝。混合读取批次只过滤不合格来源，不得连带拒绝同批合格来源。抓取正文仍须命中 ResearchBrief 实体，否则标为 `irrelevant`，不生成 summary/passage/finding、不增加 novelty。引用锚定允许 HTML entity 与 Unicode 标点的等价规范化，但不允许模糊改写；研究判断槽可由多条已锚定事实综合支持，不要求来源逐字写出分析结论。`quality.metrics.relevance` 保存 returned/site-rejected/admitted/rerank-accepted/rerank-rejected/body-irrelevant/read-accepted 漏斗；`quality.metrics.relevance` 另有 `assessmentUnavailable` / `admittedWithoutAssessment`。`quality.metrics.recovery` 保存 invalid/recovery/duplicate/site fallback/blocked gap 统计，以及独立于语义无效步的 `transportFailures` / `transportStreak` / `transportBlockedHosts`。`required_host_missing` 失败带 `hostDiagnostics`，区分 `not_retrieved`（没搜到）、`fetch_blocked`（站点拒绝）与 `body_rejected`（抓到但没通过证据检查）。HTTP endpoint 不返回 token usage 时 `budget.unknown.rerankTokens=true`。
 
 Issue #27 起还写入 `brief.json`：ResearchBrief schema v2 兼容 v1 与原字符串 query；gap schema v4 兼容旧 gap，并增加 `contractSlotId`、`preferredHosts`、`requiredHostMode`。每个 required slot 一对一物化，模糊问题去重与动态 gap 上限不能吞掉契约槽；required slot 也不能借用其他槽的正文。用户结构化输入优先，planner 只能补空；用户显式或 query 字面 slot host 可保持 required，Planner 非字面 host 降为 preferred hint。`budget_exhausted` 只表示真实有限 token/search/read cap 阻止继续，具体原因写入 `quality.stopDetail`；重复查询、plateau 与无新角度不再伪装成预算耗尽。有 explicit slots 时 root gap 只做 roll-up，不重复搜索、不独立阻断 readiness。focused 与 exploratory 共用确定性 readiness primitive，normal required slot 也不能被忽略；plateau 只能让 focused 停止追加 repair 或让 exploratory 换角度，不能越过 readiness failure 或 exploratory token floor。共享读取配置为 `research.read.*`，旧 `research.focused.*` 仍作为兼容 fallback；无效的 `plannerParallelism`、`enableCoding` 已移除。`intel import` / archive 会 round-trip `brief`。
+
+### HTTP 取证客户端
+
+`focused` / `exploratory` 的 HTTP 正文读取默认使用浏览器导航语义请求头，通过 Undici `allowH2` + ALPN 协商 HTTP/2，服务端不支持时自动回落 HTTP/1.1。该实现保持 SOCKS5/HTTP(S) proxy dispatcher 兼容，不使用 curl-impersonate、JA3/TLS 指纹伪装等对抗手段。重定向后的 `finalUrl` 写入 source，成功正文的 `source.url` 也切换到 final URL 供引用锚定。
+
+每个精确 response host 与本次 settings 对象使用独立的内存 cookie jar，不跨 research run 共享。只有失败响应实际返回可接受的 `Set-Cookie` 且 `http.cookieRetry !== false` 时，才携带该 host cookie 重试一次；普通 403 不重试。Cookie 不进入 source、trace、call record 或日志。`Cookie`、`Authorization`、`Proxy-Authorization`、`Host`、`Content-Length`、`Transfer-Encoding` 不能通过 host override 注入；登录态、付费墙仍使用 js-eyes，不得用本客户端绕过。
+
+默认响应体上限为 10 MiB，按解压后的字节流再次校验；仅接受 `http.allowedContentTypes` 白名单。Undici fetch 负责 brotli/gzip/deflate 解压。稳定 fixture 覆盖 HTTP/2 ALPN、HTTP/1.1 fallback、三种压缩、重定向、cookie 重试、体积和 MIME 拒绝，均不依赖外网。
 
 ### Focused 深度阅读（可选）
 
