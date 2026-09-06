@@ -160,6 +160,8 @@ export function settingsFromEnv(env = process.env) {
   const bodyRelevance = readEnv('JDR_BODY_RELEVANCE_ENABLED');
   const siteQueryMode = readEnv('JDR_SITE_QUERY_MODE');
   const sourceAssessment = readEnv('JDR_SOURCE_ASSESSMENT');
+  const cacheEnabled = readEnv('JDR_READ_CACHE_ENABLED');
+  const cacheDir = readEnv('JDR_CONTENT_CACHE_DIR');
   const maxRepairFailuresPerGap = readEnv('JDR_MAX_REPAIR_FAILURES_PER_GAP');
   const maxConsecutiveInvalidSteps = readEnv('JDR_MAX_CONSECUTIVE_INVALID_STEPS');
   if (rerankProvider || jinaApiKey || rerankModel || rerankBaseUrl || semanticTimeout
@@ -181,10 +183,24 @@ export function settingsFromEnv(env = process.env) {
       } } : {}),
     };
   }
-  if (relevanceEnabled !== undefined || relevanceMinScore !== undefined || bodyRelevance !== undefined || siteQueryMode !== undefined || sourceAssessment !== undefined) {
+  if (
+    relevanceEnabled !== undefined
+    || relevanceMinScore !== undefined
+    || bodyRelevance !== undefined
+    || siteQueryMode !== undefined
+    || sourceAssessment !== undefined
+    || cacheEnabled !== undefined
+    || cacheDir !== undefined
+  ) {
     research.read = {
       ...(sourceAssessment !== undefined ? {
         sourceAssessment: { enabled: String(sourceAssessment).toLowerCase() !== 'false' },
+      } : {}),
+      ...(cacheEnabled !== undefined || cacheDir !== undefined ? {
+        cache: {
+          ...(cacheEnabled !== undefined ? { enabled: String(cacheEnabled).toLowerCase() !== 'false' } : {}),
+          ...(cacheDir !== undefined ? { dir: cacheDir } : {}),
+        },
       } : {}),
       relevance: {
         ...(relevanceEnabled !== undefined ? { enabled: String(relevanceEnabled).toLowerCase() !== 'false' } : {}),

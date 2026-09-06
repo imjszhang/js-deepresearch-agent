@@ -99,6 +99,10 @@ export function hostnameOf(url) {
   return parts ? stripLeadingWww(parts.hostname) : '';
 }
 
+export function canonicalSourceHref(source = {}) {
+  return source.sourceUrl || source.url || source.id || '';
+}
+
 export function hostnamesMatch(urlHostname, policyHost) {
   const left = stripLeadingWww(urlHostname);
   const right = stripLeadingWww(policyHost);
@@ -117,7 +121,7 @@ export function siteHostsFromQuery(query = '') {
 export function sourceMatchesSiteQuery(source = {}, query = '') {
   const hosts = siteHostsFromQuery(query);
   if (!hosts.length) return true;
-  const hostname = hostnameOf(source.url || source.id);
+  const hostname = hostnameOf(canonicalSourceHref(source));
   return hosts.some((host) => hostnamesMatch(hostname, host));
 }
 
@@ -270,7 +274,7 @@ export function classifySourceTier(source = {}, gap = {}) {
   ) {
     return 'reprint';
   }
-  const host = hostnameOf(source.url || source.id);
+  const host = hostnameOf(canonicalSourceHref(source));
   if (!host) return 'unknown';
   const required = gap.requiredHosts || [];
   if (required.some((item) => hostnamesMatch(host, item))) return 'required_primary';
@@ -293,12 +297,12 @@ export function sourceTierRank(tier) {
 }
 
 export function isRequiredHostSource(source, gap = {}) {
-  const host = hostnameOf(source?.url || source?.id);
+  const host = hostnameOf(canonicalSourceHref(source));
   return (gap.requiredHosts || []).some((item) => hostnamesMatch(host, item));
 }
 
 export function isBlockedHostSource(source, gap = {}) {
-  const host = hostnameOf(source?.url || source?.id);
+  const host = hostnameOf(canonicalSourceHref(source));
   return (gap.blockedHosts || []).some((item) => hostnamesMatch(host, item));
 }
 

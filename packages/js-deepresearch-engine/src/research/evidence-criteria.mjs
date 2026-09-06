@@ -111,7 +111,7 @@ function sourceIdentity(source = {}) {
 }
 
 function sourceUrl(source = {}) {
-  const raw = source.url || source.sourceId || source.id || '';
+  const raw = source.sourceUrl || source.url || source.sourceId || source.id || '';
   const text = String(raw);
   return text.startsWith('body:') ? text.slice(5) : text;
 }

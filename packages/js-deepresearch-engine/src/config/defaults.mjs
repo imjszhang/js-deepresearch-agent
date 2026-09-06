@@ -121,6 +121,16 @@ export const defaultSettings = Object.freeze({
         minRerankScore: 0.01,
         siteQueryMode: 'confirmed',
       },
+      cache: {
+        enabled: true,
+        dir: 'data/content-cache',
+        ttlMs: {
+          html: 604800000,
+          default: 604800000,
+        },
+        negativeTtlMs: 1800000,
+        forceRefreshRequiredHosts: true,
+      },
     },
     focused: {
       fetchMode: 'summary',

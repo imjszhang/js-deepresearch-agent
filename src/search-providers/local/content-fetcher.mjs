@@ -3,6 +3,8 @@ import path from 'node:path';
 import {
   convertDocumentToMarkdown,
   detectDocumentFormat,
+  parseSourceUrlFrontMatter,
+  readManualImportSidecar,
 } from 'js-deepresearch-engine';
 import { TEXT_SEARCH_EXTENSIONS } from './defaults.mjs';
 import { normalizeLocalSearchConfig } from './normalize-config.mjs';
@@ -60,8 +62,12 @@ export function createLocalFileContentFetchHandler(options = {}) {
       const titleFallback = path.basename(safe.path);
 
       if (TEXT_SEARCH_EXTENSIONS.includes(ext)) {
+        const decoded = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+        const front = parseSourceUrlFrontMatter(decoded);
+        const sidecar = readManualImportSidecar(safe.path, fsImpl);
+        const sourceUrl = sidecar.sourceUrl || front.sourceUrl;
         const content = truncateContent(
-          new TextDecoder('utf-8', { fatal: false }).decode(bytes).trim(),
+          String(front.body || '').trim(),
           Number(maxChars) || DEFAULT_TEXT_MAX_CHARS,
         );
         if (!content) {
@@ -72,6 +78,12 @@ export function createLocalFileContentFetchHandler(options = {}) {
           title: titleFallback,
           content,
           backend: 'local-file',
+          ...(sourceUrl ? {
+            retrievedVia: 'manual_import',
+            sourceUrl,
+            finalUrl: sourceUrl,
+            manualImportPath: safe.path,
+          } : {}),
         };
       }
 
@@ -93,11 +105,18 @@ export function createLocalFileContentFetchHandler(options = {}) {
       if (!content.trim()) {
         return { status: 'failed', error: 'Empty local document' };
       }
+      const sidecar = readManualImportSidecar(safe.path, fsImpl);
       return {
         status: 'ok',
         title: extractMarkdownTitle(content) || titleFallback,
         content,
         backend: 'local-file',
+        ...(sidecar.sourceUrl ? {
+          retrievedVia: 'manual_import',
+          sourceUrl: sidecar.sourceUrl,
+          finalUrl: sidecar.sourceUrl,
+          manualImportPath: safe.path,
+        } : {}),
       };
     } catch (error) {
       if (isAbortError(error)) throw error;

@@ -4,6 +4,8 @@ export const DEFAULT_LOCAL_EXTENSIONS = Object.freeze([
   'md',
   'txt',
   'markdown',
+  'html',
+  'htm',
   'pdf',
   'docx',
   'doc',
@@ -11,7 +13,7 @@ export const DEFAULT_LOCAL_EXTENSIONS = Object.freeze([
   'pptx',
 ]);
 
-export const TEXT_SEARCH_EXTENSIONS = Object.freeze(['md', 'txt', 'markdown']);
+export const TEXT_SEARCH_EXTENSIONS = Object.freeze(['md', 'txt', 'markdown', 'html', 'htm']);
 
 export const LOCAL_SEARCH_PREVIEW_CHARS = 8000;
 export const LOCAL_SEARCH_SNIPPET_CHARS = 240;

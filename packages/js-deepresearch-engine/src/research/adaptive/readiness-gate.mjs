@@ -33,7 +33,10 @@ function findingsForGap(gap = {}, findings = []) {
 function hostAttemptDiagnostics(hosts = [], findings = [], gapId = null) {
   const attempts = findings.flatMap((finding) => finding.sources || []);
   return hosts.map((host) => {
-    const forHost = attempts.filter((source) => hostnamesMatch(hostnameOf(source?.url || source?.id), host));
+    const forHost = attempts.filter((source) => hostnamesMatch(
+      hostnameOf(source?.sourceUrl || source?.url || source?.id),
+      host,
+    ));
     if (!forHost.length) return { host, gapId, reason: 'not_retrieved' };
     if (forHost.some((source) => source.fetchStatus === 'ok')) {
       const rejected = forHost.find((source) => source.fetchStatus === 'ok');

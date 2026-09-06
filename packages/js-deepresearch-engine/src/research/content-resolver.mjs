@@ -14,6 +14,14 @@ import {
   resolveReadBackends,
   shouldEscalateBackend,
 } from './headless-backend.mjs';
+import {
+  buildCacheKey,
+  lookupContentCache,
+  resolveContentCacheSettings,
+  storeContentCache,
+} from './content-cache.mjs';
+import { lookupManualImport, manualImportResult } from './manual-import.mjs';
+import { resolveReadSettings } from './read-settings.mjs';
 
 /** @type {Array<{handler: Function, backendId: string|Function|null}>} */
 const handlers = [];
@@ -284,13 +292,71 @@ function mergeRecovered(direct, recovered) {
   };
 }
 
+function cacheExtras(url, context, backends) {
+  const read = resolveReadSettings(context.settings);
+  return {
+    backends,
+    fetchMode: read.fetchMode,
+    maxChars: context.maxChars || read.maxFetchChars,
+    requiredHosts: context.requiredHosts
+      || context.relevanceGap?.requiredHosts
+      || context.source?.requiredHosts
+      || [],
+    fs: context.fs,
+  };
+}
+
+function applyCachedResult(entry) {
+  if (!entry) return null;
+  return {
+    ...entry,
+    status: entry.fetchStatus === 'ok' && !entry.negative ? 'ok' : (entry.status || 'failed'),
+    cacheHit: true,
+    cacheSource: entry.cacheSource || 'disk',
+  };
+}
+
 export async function resolveUrlContent(url, context = {}) {
   const { fetchBackend } = resolveFocusedSettings(context.settings);
   const backends = resolveReadBackends(context.settings, fetchBackend);
+  const extras = cacheExtras(url, context, backends);
+  const cache = resolveContentCacheSettings(context.settings);
+  const cacheKey = buildCacheKey(url, extras);
+
+  if (!context.skipManualImport) {
+    const imported = lookupManualImport(url, context);
+    if (imported) {
+      return {
+        ...manualImportResult(imported),
+        cacheHit: false,
+      };
+    }
+  }
+
+  if (!context.skipContentCache) {
+    const cached = lookupContentCache(url, context.settings, {
+      ...extras,
+      cache,
+      key: cacheKey,
+    });
+    if (cached) return applyCachedResult(cached);
+  }
+
   let result = await resolveDirectUrlContent(url, context);
 
+  const remember = (value) => {
+    if (!context.skipContentCache) {
+      storeContentCache(url, value, context.settings, {
+        ...extras,
+        cache,
+        key: cacheKey,
+      });
+    }
+    return value;
+  };
+
   if (context.skipAlternateEvidence || (context.retrievalPath && context.retrievalPath !== 'direct')) {
-    return result;
+    return remember(result);
   }
 
   if (
@@ -330,5 +396,5 @@ export async function resolveUrlContent(url, context = {}) {
     if (eyes) result = eyes;
   }
 
-  return result;
+  return remember(result);
 }

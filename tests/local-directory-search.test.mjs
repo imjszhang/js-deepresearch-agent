@@ -255,6 +255,27 @@ describe('local file content fetch handler', () => {
     assert.match(result.content, /监管处罚 details/);
   });
 
+  it('marks front-matter sourceUrl files as manual_import', async () => {
+    const root = makeTempDir();
+    const file = writeFile(root, 'policy.md', [
+      '---',
+      'sourceUrl: https://openai.com/policy',
+      '---',
+      '',
+      'Imported official policy body.',
+      '',
+    ].join('\n'));
+    const handler = createLocalFileContentFetchHandler();
+    const result = await handler(pathToFileURL(file).href, {
+      settings: { search: { local: { dirs: [root] } } },
+    });
+    assert.equal(result.status, 'ok');
+    assert.equal(result.retrievedVia, 'manual_import');
+    assert.equal(result.sourceUrl, 'https://openai.com/policy');
+    assert.match(result.content, /Imported official policy body/);
+    assert.doesNotMatch(result.content, /sourceUrl:/);
+  });
+
   it('converts a PDF fixture through document-converter', async () => {
     const root = makeTempDir();
     const file = path.join(root, 'filing.pdf');

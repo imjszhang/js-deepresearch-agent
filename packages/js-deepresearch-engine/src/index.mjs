@@ -240,6 +240,7 @@ export {
   isExternalRerankProvider,
   evidenceIndependenceKey,
   hostnameOf,
+  canonicalSourceHref,
   independentEvidenceKeysFromSources,
   inferEvidenceScope,
   registrableDomainFromUrl,
@@ -332,3 +333,18 @@ export {
   resolveContentFetchImpl,
   getContentFetchHandlers,
 } from './research/content-resolver.mjs';
+export {
+  buildCacheKey,
+  contentSha256,
+  lookupContentCache,
+  normalizeCacheUrl,
+  resolveContentCacheSettings,
+  storeContentCache,
+} from './research/content-cache.mjs';
+export {
+  collectManualImportHints,
+  indexManualImports,
+  lookupManualImport,
+  parseSourceUrlFrontMatter,
+  readManualImportSidecar,
+} from './research/manual-import.mjs';
