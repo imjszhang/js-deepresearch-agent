@@ -4,7 +4,7 @@ import { fetchUrlContent, truncateContent } from './content-fetcher.mjs';
 import { resolveFocusedSettings } from './focused-settings.mjs';
 import { isWafShellText } from './body-quality.mjs';
 
-/** @type {Array<{handler: Function, backendId: string|null}>} */
+/** @type {Array<{handler: Function, backendId: string|Function|null}>} */
 const handlers = [];
 
 /**
@@ -71,6 +71,13 @@ function truncateResult(result, maxChars) {
     ...result,
     content: truncateContent(result.content, maxChars),
   };
+}
+
+function handlerBackendId(descriptor, url, context) {
+  const configured = typeof descriptor.backendId === 'function'
+    ? descriptor.backendId(url, context)
+    : descriptor.backendId;
+  return String(configured || `handler:${descriptor.handler.name || 'anonymous'}`);
 }
 
 function memoryOutcome(result = {}) {
@@ -201,14 +208,13 @@ export async function resolveUrlContent(url, context = {}) {
   for (const descriptor of handlers) {
     const { handler } = descriptor;
     if (typeof handler.supports === 'function' && !handler.supports(url, context)) continue;
-    const backend = descriptor.backendId || `handler:${handler.name || 'anonymous'}`;
+    const backend = handlerBackendId(descriptor, url, context);
     const result = await runRememberedAttempt(url, context, {
       backend,
       retrievalPath,
       run: () => handler(url, context),
     });
     if (result?.status && result.status !== 'unsupported') {
-      if (result.backend) descriptor.backendId = result.backend;
       return truncateResult(result, maxChars);
     }
   }

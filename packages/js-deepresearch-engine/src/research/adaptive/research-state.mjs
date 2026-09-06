@@ -183,6 +183,8 @@ export class ResearchState {
       transportFailures: 0,
       transportStreak: 0,
       transportBlockedHosts: {},
+      transportSkips: 0,
+      transportSkipReasons: {},
     };
     this.rerankCache = new Map();
     this.cycle = {
@@ -522,6 +524,13 @@ export class ResearchState {
     const entry = blocked[host] || { count: 0, lastReason: null };
     blocked[host] = { count: entry.count + 1, lastReason: reason };
     this.recovery.transportBlockedHosts = blocked;
+  }
+
+  recordTransportSkip(reason = 'transport_memory_skip') {
+    this.recovery.transportSkips = (Number(this.recovery.transportSkips) || 0) + 1;
+    const reasons = this.recovery.transportSkipReasons || {};
+    reasons[reason] = (Number(reasons[reason]) || 0) + 1;
+    this.recovery.transportSkipReasons = reasons;
   }
 
   clearTransportStreak() {

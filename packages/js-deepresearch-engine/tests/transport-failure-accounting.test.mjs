@@ -158,6 +158,89 @@ describe('transport failure accounting', () => {
     assert.equal(recovery.transportBlockedHosts['slow.test'].lastReason, 'timeout');
   });
 
+  it('accounts circuit and URL-memory skips without spending invalid-step safety', async () => {
+    let fetches = 0;
+    const handler = async (url) => {
+      fetches += 1;
+      if (String(url).includes('readable-host.test')) {
+        return {
+          status: 'ok',
+          backend: 'http',
+          content: 'A complete readable body about the skip topic from an independent host.'.repeat(2),
+        };
+      }
+      return {
+        status: 'failed',
+        backend: 'http',
+        error: 'HTTP 403',
+        errorType: 'http_4xx',
+        httpStatus: 403,
+        retryable: false,
+        fetchAttempts: 1,
+      };
+    };
+    handler.backendId = 'http';
+    handler.supports = () => true;
+    registerContentFetchHandler(handler);
+
+    const decisions = [
+      { action: 'search', query: 'skip topic', gapId: 'gap-1', reasonCode: 'search' },
+      { action: 'read', sourceIds: ['https://skip-host.test/one'], gapId: 'gap-1', reasonCode: 'first_refusal' },
+      { action: 'read', sourceIds: ['https://skip-host.test/two'], gapId: 'gap-1', reasonCode: 'circuit_skip' },
+      { action: 'read', sourceIds: ['https://readable-host.test/three'], gapId: 'gap-1', reasonCode: 'read_after_skip' },
+      { action: 'answer', reasonCode: 'nothing_readable' },
+    ];
+    const result = await new ResearchRunner().run({
+      query: 'skip topic',
+      settings: {
+        llm: {},
+        search: {},
+        research: {
+          strategy: 'exploratory',
+          read: {
+            transport: { hostCircuitThreshold: 1 },
+          },
+          exploratory: {
+            minLlmTokens: 500000,
+            maxLlmTokens: 800000,
+            maxSteps: 6,
+            maxEvaluationRetries: 0,
+            autoReadTopK: 0,
+            maxConsecutiveInvalidSteps: 1,
+          },
+          focused: { fetchMode: 'full', fetchBackend: 'auto' },
+        },
+      },
+      search: {
+        async search() {
+          return [
+            { title: 'One', url: 'https://skip-host.test/one', snippet: 'skip topic source one' },
+            { title: 'Two', url: 'https://skip-host.test/two', snippet: 'skip topic source two' },
+            { title: 'Three', url: 'https://readable-host.test/three', snippet: 'skip topic readable evidence' },
+          ];
+        },
+      },
+      llm: llmFor(decisions),
+    });
+
+    const recovery = result.quality.metrics.recovery;
+    assert.equal(fetches, 2);
+    assert.equal(recovery.transportFailures, 1);
+    assert.equal(recovery.transportSkips, 1);
+    assert.equal(recovery.transportSkipReasons.host_circuit_open, 1);
+    assert.notEqual(result.quality.stopDetail, 'consecutive_invalid_steps');
+    assert.ok(result.trace.some((entry) => (
+      entry.reasonCode === 'transport_attempt_skipped'
+      && entry.reason === 'host_circuit_open'
+    )));
+    assert.ok(result.trace.some((entry) => entry.reasonCode === 'transport_skipped_read'));
+    assert.ok(result.trace.some((entry) => (
+      entry.action === 'read'
+      && entry.reasonCode === 'read_after_skip'
+      && entry.successfulBodies === 1
+    )));
+  });
+
   it('keeps exploratory fetch status successful when assessment rejects the body', async () => {
     registerContentFetchHandler(async () => ({
       status: 'ok',

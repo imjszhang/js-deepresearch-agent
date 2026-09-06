@@ -62,6 +62,11 @@ function safeAttemptResult(result = {}) {
   };
 }
 
+function refusalAttemptCount(record = {}) {
+  const parsed = Number(record.fetchAttempts);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 1;
+}
+
 export function resolveTransportMemorySettings(settings = {}) {
   const raw = settings?.research?.read?.transport || {};
   return {
@@ -73,9 +78,10 @@ export function resolveTransportMemorySettings(settings = {}) {
 }
 
 /**
- * Run-scoped memory for URL/backend/path attempts and HTTP host refusal
- * circuits. It deliberately does not choose another backend or retrieval
- * path; those orchestration decisions belong to later retrieval/planner work.
+ * Run-scoped memory for failed URL/backend/path routes and HTTP host refusal
+ * circuits. Successful results are not cached. It deliberately does not
+ * choose another backend or retrieval path; those orchestration decisions
+ * belong to later retrieval/planner work.
  */
 export class TransportMemory {
   constructor(options = {}) {
@@ -188,8 +194,8 @@ export class TransportMemory {
       completedAt,
       ...safeAttemptResult(result),
     };
-    this.attempts.set(reservation.key, record);
     this.updateHostCircuit(record);
+    if (record.status !== 'ok') this.attempts.set(reservation.key, record);
     this.emit('transport_attempt_completed', record);
     return record;
   }
@@ -205,9 +211,10 @@ export class TransportMemory {
     };
     if (previous.open) return;
     const reason = refusalReason(record);
+    const refusalAttempts = reason ? refusalAttemptCount(record) : 0;
     const next = {
       ...previous,
-      consecutiveRefusals: reason ? previous.consecutiveRefusals + 1 : 0,
+      consecutiveRefusals: reason ? previous.consecutiveRefusals + refusalAttempts : 0,
       lastReason: reason,
       lastAttemptedAt: record.completedAt,
     };

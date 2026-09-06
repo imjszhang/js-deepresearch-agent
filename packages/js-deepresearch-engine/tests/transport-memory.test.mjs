@@ -66,6 +66,28 @@ describe('run-scoped transport memory', () => {
     assert.equal(memory.snapshot().attempts.length, 1);
   });
 
+  it('does not turn a successful read into a later failure-memory skip', async () => {
+    const memory = new TransportMemory();
+    let fetches = 0;
+    const context = {
+      settings: httpSettings(),
+      transportMemory: memory,
+      fetchImpl: async () => {
+        fetches += 1;
+        return response(200, `<html><body>Successful immutable body ${fetches} with enough useful text.</body></html>`);
+      },
+    };
+
+    const first = await resolveUrlContent('https://success.test/page', context);
+    const second = await resolveUrlContent('https://success.test/page', context);
+
+    assert.equal(first.status, 'ok');
+    assert.equal(second.status, 'ok');
+    assert.match(second.content, /Successful immutable body 2/);
+    assert.equal(fetches, 2);
+    assert.equal(memory.snapshot().attempts.length, 0);
+  });
+
   it('allows the same URL through a different backend', async () => {
     const memory = new TransportMemory({ hostCircuitThreshold: 3 });
     let httpFetches = 0;
@@ -101,8 +123,8 @@ describe('run-scoped transport memory', () => {
     assert.equal(httpFetches, 1);
     assert.equal(browserReads, 1);
     assert.deepEqual(
-      memory.snapshot().attempts.map((attempt) => attempt.backend).sort(),
-      ['browser:test', 'http'],
+      memory.snapshot().attempts.map((attempt) => attempt.backend),
+      ['http'],
     );
   });
 
@@ -166,6 +188,33 @@ describe('run-scoped transport memory', () => {
     )));
   });
 
+  it('counts every internal 429 attempt toward the refusal threshold', async () => {
+    const memory = new TransportMemory({ hostCircuitThreshold: 3 });
+    let fetches = 0;
+    const result = await resolveUrlContent('https://limited.test/one', {
+      settings: httpSettings(3),
+      transportMemory: memory,
+      fetchImpl: async () => {
+        fetches += 1;
+        return {
+          ...response(429),
+          headers: {
+            get(name) {
+              if (name === 'content-type') return 'text/html';
+              if (name === 'retry-after') return '0';
+              return null;
+            },
+          },
+        };
+      },
+    });
+
+    assert.equal(result.fetchAttempts, 3);
+    assert.equal(fetches, 3);
+    assert.equal(memory.snapshot().hosts['limited.test'].consecutiveRefusals, 3);
+    assert.equal(memory.snapshot().hosts['limited.test'].open, true);
+  });
+
   it('does not permanently reject a host after timeout or network failure', () => {
     const memory = new TransportMemory({ hostCircuitThreshold: 2 });
     for (const [index, errorType] of ['timeout', 'network'].entries()) {
@@ -190,6 +239,63 @@ describe('run-scoped transport memory', () => {
 
     assert.equal(memory.snapshot().hosts['challenge.test'].open, true);
     assert.equal(memory.snapshot().hosts['challenge.test'].lastReason, 'challenge');
+  });
+
+  it('does not treat long technical prose mentioning challenge keywords as a shell', async () => {
+    const memory = new TransportMemory({ hostCircuitThreshold: 1 });
+    let fetches = 0;
+    const technicalBody = [
+      'This security engineering guide explains why a forbidden response may be emitted.',
+      'It compares Cloudflare controls with CAPTCHA accessibility and incident response.',
+      'The remainder is ordinary technical documentation with examples and mitigations. ',
+    ].join(' ').repeat(20);
+    const context = {
+      settings: httpSettings(1),
+      transportMemory: memory,
+      fetchImpl: async () => {
+        fetches += 1;
+        return response(200, `<html><body>${technicalBody}</body></html>`);
+      },
+    };
+
+    assert.equal((await resolveUrlContent('https://docs.test/one', context)).status, 'ok');
+    assert.equal((await resolveUrlContent('https://docs.test/two', context)).status, 'ok');
+    assert.equal(fetches, 2);
+    assert.equal(memory.snapshot().hosts['docs.test'].open, false);
+  });
+
+  it('does not persist a dynamic handler backend across resolve calls', async () => {
+    const memory = new TransportMemory();
+    let reads = 0;
+    const dynamicHandler = async () => {
+      reads += 1;
+      if (reads === 1) {
+        return {
+          status: 'failed',
+          backend: 'dynamic:first',
+          error: 'first backend failed',
+        };
+      }
+      return {
+        status: 'ok',
+        backend: 'dynamic:second',
+        content: 'The second backend returned a complete usable body.',
+      };
+    };
+    dynamicHandler.supports = () => true;
+    dynamicHandler.backendId = () => (reads === 0 ? 'dynamic:first' : 'dynamic:second');
+    registerContentFetchHandler(dynamicHandler);
+
+    const context = {
+      settings: { research: { focused: { fetchBackend: 'auto' } } },
+      transportMemory: memory,
+    };
+    assert.equal((await resolveUrlContent('https://dynamic.test/page', context)).status, 'failed');
+    const recovered = await resolveUrlContent('https://dynamic.test/page', context);
+
+    assert.equal(recovered.status, 'ok');
+    assert.equal(recovered.backend, 'dynamic:second');
+    assert.equal(reads, 2);
   });
 
   it('round-trips URL attempts and open circuits through a checkpoint', () => {

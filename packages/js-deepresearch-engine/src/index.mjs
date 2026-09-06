@@ -175,6 +175,7 @@ export {
 export {
   isWafOrErrorBody,
   isSuccessfulBody,
+  isTransportReadSkip,
   isRawBinaryDocumentText,
   classifyFetchedBody,
   sanitizeUnusableSourceBody,

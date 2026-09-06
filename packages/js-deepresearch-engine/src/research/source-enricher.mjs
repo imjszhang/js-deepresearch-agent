@@ -131,7 +131,7 @@ async function enrichOneSource(source, {
       const skipped = transportMemory.skippedResult(decision);
       return {
         ...source,
-        fetchStatus: 'failed',
+        fetchStatus: 'skipped',
         fetchError: skipped.error,
         fetchErrorType: skipped.errorType,
         fetchAttempts: 0,
@@ -158,7 +158,7 @@ async function enrichOneSource(source, {
   if (fetched.status !== 'ok') {
     return {
       ...withSourceProvenance(source, fetched),
-      fetchStatus: 'failed',
+      fetchStatus: fetched.status === 'skipped' ? 'skipped' : 'failed',
       fetchError: fetched.error || 'Fetch failed',
       fetchErrorType: fetched.errorType || null,
       httpStatus: fetched.httpStatus ?? null,
