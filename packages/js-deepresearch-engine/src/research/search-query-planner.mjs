@@ -161,6 +161,7 @@ export async function planSearchQueries({
   hints = [],
   recentSearchOutcomes = [],
   providerCapabilities = null,
+  transportFacts = null,
 } = {}) {
   const resolvedMode = SEARCH_QUERY_MODES.includes(mode) ? mode : 'initial';
   const resolvedLimit = Number(limit);
@@ -230,6 +231,7 @@ export async function planSearchQueries({
     hints,
     recentSearchOutcomes,
     providerCapabilities,
+    transportFacts,
   };
 
   const result = await completeStructuredJson({

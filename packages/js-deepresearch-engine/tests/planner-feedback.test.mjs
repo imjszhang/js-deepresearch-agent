@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { ResearchState } from '../src/research/adaptive/research-state.mjs';
 import { buildPlannerFeedback, plannerFeedbackFromState } from '../src/research/planner-feedback.mjs';
+import { TransportMemory } from '../src/research/transport-memory.mjs';
 import { planSearchQueries } from '../src/research/search-query-planner.mjs';
 
 describe('planner feedback', () => {
@@ -97,5 +98,33 @@ describe('planner feedback', () => {
     assert.match(plannerUser, /recentSearchOutcomes/);
     const payload = JSON.parse(plannerUser);
     assert.ok(payload.recentSearchOutcomes.some((item) => item.query === 'site:example.test 智谱'));
+  });
+
+  it('exposes blocked hosts as planner facts without rewriting queries', async () => {
+    const memory = new TransportMemory({ hostCircuitThreshold: 1 });
+    const reservation = memory.begin('https://openai.com/a', { backend: 'http', retrievalPath: 'direct' });
+    memory.finish(reservation, { status: 'failed', httpStatus: 403, errorType: 'http_403', fetchAttempts: 1 });
+    const state = new ResearchState({ query: 'openai' });
+    state.transportMemory = memory;
+    const feedback = plannerFeedbackFromState(state);
+    assert.equal(feedback.transportFacts.blockedHosts[0].hostname, 'openai.com');
+    assert.equal(feedback.transportFacts.blockedHosts[0].reason, 'http_403');
+
+    let plannerUser = '';
+    await planSearchQueries({
+      llm: {
+        async complete({ messages }) {
+          plannerUser = messages.find((item) => item.role === 'user')?.content || '';
+          return JSON.stringify({ queries: [{ query: 'OpenAI system card PDF' }] });
+        },
+      },
+      query: 'openai',
+      gap: { id: 'gap-1', question: 'OpenAI system card' },
+      limit: 1,
+      ...feedback,
+    });
+    const payload = JSON.parse(plannerUser);
+    assert.equal(payload.transportFacts.blockedHosts[0].hostname, 'openai.com');
+    assert.match(plannerUser, /blockedHosts/);
   });
 });

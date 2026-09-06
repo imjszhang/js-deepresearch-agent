@@ -1992,6 +1992,7 @@ export async function runExploratoryLoop(context) {
       trace,
       searchOutcomes: state.searchOutcomes,
       agentSnapshotChars: state.lastAgentSnapshotChars,
+      transportMemory: state.transportMemory,
     }),
     ...notes,
   });

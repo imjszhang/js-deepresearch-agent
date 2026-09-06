@@ -6,6 +6,7 @@ import {
   resolveUrlContent,
 } from '../src/research/content-resolver.mjs';
 import { TransportMemory } from '../src/research/transport-memory.mjs';
+import { enrichFindingSources } from '../src/research/source-enricher.mjs';
 
 function response(status, body = '') {
   return {
@@ -153,6 +154,40 @@ describe('run-scoped transport memory', () => {
     );
   });
 
+  it('skips a blocked host before auto enrich starts a fetch', async () => {
+    const memory = new TransportMemory({ hostCircuitThreshold: 1 });
+    const reservation = memory.begin('https://auto-skip.test/one', { backend: 'http' });
+    memory.finish(reservation, {
+      status: 'failed',
+      errorType: 'http_4xx',
+      httpStatus: 403,
+      fetchAttempts: 1,
+    });
+    let fetches = 0;
+    const finding = await enrichFindingSources({
+      question: 'skip topic',
+      sources: [{ url: 'https://auto-skip.test/two', title: 'two' }],
+    }, {
+      fetchMode: 'full',
+      enrichConcurrency: 1,
+      maxUrlsPerIteration: 2,
+      maxUrlsTotal: 2,
+      fetchImpl: async () => {
+        fetches += 1;
+        return response(200, 'should not run');
+      },
+      transportMemory: memory,
+      settings: {
+        research: {
+          focused: { fetchBackend: 'auto', fetchMode: 'full' },
+        },
+      },
+    });
+    assert.equal(fetches, 0);
+    assert.equal(finding.sources[0].fetchStatus, 'skipped');
+    assert.equal(finding.sources[0].transportMemorySkipped, true);
+  });
+
   it('opens a host circuit after consecutive refusals and emits no later HTTP call', async () => {
     const memory = new TransportMemory({ hostCircuitThreshold: 2 });
     const events = [];
@@ -189,7 +224,7 @@ describe('run-scoped transport memory', () => {
     )));
   });
 
-  it('counts every internal 429 attempt toward the refusal threshold', async () => {
+  it('counts an internal 429 retry series as one circuit refusal', async () => {
     const memory = new TransportMemory({ hostCircuitThreshold: 3 });
     let fetches = 0;
     const result = await resolveUrlContent('https://limited.test/one', {
@@ -212,8 +247,8 @@ describe('run-scoped transport memory', () => {
 
     assert.equal(result.fetchAttempts, 3);
     assert.equal(fetches, 3);
-    assert.equal(memory.snapshot().hosts['limited.test'].consecutiveRefusals, 3);
-    assert.equal(memory.snapshot().hosts['limited.test'].open, true);
+    assert.equal(memory.snapshot().hosts['limited.test'].consecutiveRefusals, 1);
+    assert.equal(memory.snapshot().hosts['limited.test'].open, false);
   });
 
   it('does not permanently reject a host after timeout or network failure', () => {

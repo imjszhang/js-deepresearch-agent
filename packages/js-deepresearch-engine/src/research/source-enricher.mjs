@@ -131,11 +131,26 @@ async function enrichOneSource(source, {
   const requestedBackend = settings?.research?.read?.fetchBackend
     || settings?.research?.focused?.fetchBackend
     || 'auto';
-  if (transportMemory && requestedBackend === 'http') {
-    const decision = transportMemory.check(url, {
-      backend: 'http',
-      retrievalPath: 'direct',
-    });
+  if (transportMemory) {
+    const backend = requestedBackend === 'js-eyes'
+      ? 'js-eyes'
+      : (requestedBackend === 'headless' ? 'headless' : 'http');
+    const hostBlocked = backend !== 'js-eyes' && transportMemory.isHostBlocked(url);
+    const decision = hostBlocked
+      ? {
+        allowed: false,
+        reason: 'host_circuit_open',
+        url,
+        hostname: (() => {
+          try { return new URL(url).hostname.toLowerCase(); } catch { return ''; }
+        })(),
+        backend,
+        retrievalPath: 'direct',
+      }
+      : transportMemory.check(url, {
+        backend,
+        retrievalPath: 'direct',
+      });
     if (!decision.allowed) {
       transportMemory.emit('transport_attempt_skipped', {
         reason: decision.reason,

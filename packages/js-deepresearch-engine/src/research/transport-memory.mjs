@@ -62,9 +62,31 @@ function safeAttemptResult(result = {}) {
   };
 }
 
-function refusalAttemptCount(record = {}) {
-  const parsed = Number(record.fetchAttempts);
-  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 1;
+export function plannerFactsFromSnapshot(snap = {}) {
+  const blockedHosts = Object.entries(snap.hosts || {})
+    .filter(([, state]) => state.open)
+    .map(([hostname, state]) => ({
+      hostname,
+      reason: state.lastReason || 'host_circuit_open',
+    }));
+  const attemptedUrls = (snap.attempts || []).map((entry) => ({
+    url: entry.url,
+    backend: entry.backend,
+    retrievalPath: entry.retrievalPath,
+    status: entry.status,
+    errorType: entry.errorType || null,
+    httpStatus: entry.httpStatus ?? null,
+  }));
+  const exhaustedRetrievalPaths = [...new Set(
+    attemptedUrls
+      .filter((entry) => entry.status && entry.status !== 'ok')
+      .map((entry) => `${hostnameOf(entry.url)}:${entry.retrievalPath}`),
+  )];
+  return {
+    blockedHosts,
+    attemptedUrls: attemptedUrls.slice(-24),
+    exhaustedRetrievalPaths,
+  };
 }
 
 export function resolveTransportMemorySettings(settings = {}) {
@@ -211,10 +233,9 @@ export class TransportMemory {
     };
     if (previous.open) return;
     const reason = refusalReason(record);
-    const refusalAttempts = reason ? refusalAttemptCount(record) : 0;
     const next = {
       ...previous,
-      consecutiveRefusals: reason ? previous.consecutiveRefusals + refusalAttempts : 0,
+      consecutiveRefusals: reason ? previous.consecutiveRefusals + 1 : 0,
       lastReason: reason,
       lastAttemptedAt: record.completedAt,
     };
@@ -252,6 +273,15 @@ export class TransportMemory {
       transportMemorySkipped: true,
       circuit: decision.circuit || null,
     };
+  }
+
+  plannerFacts() {
+    return plannerFactsFromSnapshot(this.snapshot());
+  }
+
+  isHostBlocked(url) {
+    const hostname = hostnameOf(url);
+    return Boolean(hostname && this.hosts.get(hostname)?.open);
   }
 
   snapshot() {

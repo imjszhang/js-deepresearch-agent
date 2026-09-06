@@ -59,6 +59,9 @@ export function buildResearchLimitations({
   snippetOnlyKeys = [],
   contractUnavailable = false,
   secondaryOnly = false,
+  reprintOnly = false,
+  blockedHosts = [],
+  unmetRequiredHosts = [],
   degraded = false,
   extra = [],
 } = {}) {
@@ -121,8 +124,20 @@ export function buildResearchLimitations({
   if (stopDetail === 'query_planner_exhausted') {
     addItem(items, 'query_planner_exhausted', 'process', 'The search query planner could not produce a valid query; remaining gaps were skipped or blocked.');
   }
-  if (secondaryOnly) {
+  if (secondaryOnly || reprintOnly) {
     addItem(items, 'secondary_only', 'process', 'Some conclusions rest only on secondary or reprint sources and cannot be treated as primary-source verified.');
+  }
+  for (const host of blockedHosts || []) {
+    const hostname = host.hostname || host;
+    const reason = host.reason || 'host_circuit_open';
+    if (!hostname) continue;
+    addItem(items, `circuit:${hostname}`, 'transport', `Circuit is open for ${hostname} (${reason}); later HTTP reads were skipped.`);
+  }
+  for (const item of unmetRequiredHosts || []) {
+    const host = item.host || item.hostname || item;
+    const reason = item.reason || 'not_retrieved';
+    if (!host || reason === 'body_rejected') continue;
+    addItem(items, `required_host:${host}:${reason}`, 'transport', `Required host ${host} was not retrieved (${reason}).`);
   }
   if (readiness && !readiness.pass && (readiness.failures || []).length) {
     addItem(

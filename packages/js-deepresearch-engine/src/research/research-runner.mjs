@@ -14,6 +14,7 @@ import { applyAsOfGate, resolveCompletionStatus } from './as-of.mjs';
 import { applySlotStatusToClaims } from './report-evidence.mjs';
 import { archiveDisclosureText } from './alternate-evidence.mjs';
 import { closeHeadlessPool } from './headless-backend.mjs';
+import { plannerFactsFromSnapshot } from './transport-memory.mjs';
 import { buildResearchLimitations } from './limitations.mjs';
 import { resolveFocusedSettings } from './focused-settings.mjs';
 import { createResearchProviders } from './research-providers.mjs';
@@ -250,6 +251,16 @@ export class ResearchRunner {
       snippetOnlyKeys,
       contractUnavailable,
       secondaryOnly: Boolean(exploratoryLoop?.secondaryOnlyClaims?.length),
+      reprintOnly: findings.flatMap((finding) => finding.sources || []).some((source) => (
+        source.evidenceTier === 'reprint'
+        || source.retrievedVia === 'archive'
+        || source.retrievedVia === 'google_cache'
+        || source.tier === 'reprint'
+      )),
+      blockedHosts: plannerFactsFromSnapshot(exploratoryLoop?.transportMemory || focusedControl?.transportMemory || {}).blockedHosts,
+      unmetRequiredHosts: (readiness?.failures || [])
+        .filter((failure) => failure.code === 'required_host_missing')
+        .flatMap((failure) => failure.hostDiagnostics || []),
       degraded: findings.some((finding) => finding?.degraded),
       extra: [
         exploratoryLoop?.blockedHosts?.length

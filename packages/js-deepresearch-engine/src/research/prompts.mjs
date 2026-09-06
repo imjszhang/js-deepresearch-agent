@@ -24,6 +24,7 @@ export function searchQueryPlannerPrompt({
   rejectionReasons = [],
   recentSearchOutcomes = [],
   providerCapabilities = null,
+  transportFacts = null,
 } = {}) {
   const schema = '{"queries":[{"query":"...","targetGapId":"gap-1","intent":"...","expectedEvidence":"...","sourceType":"web|news|filing|local","searchOptions":{"engines":"...","categories":"...","language":"...","pageno":1}}]}';
   return [
@@ -42,6 +43,7 @@ export function searchQueryPlannerPrompt({
         'site: is optional. Use it only for hosts listed in allowedSiteHosts. preferredHosts are ranking hints, not site: targets unless they appear in allowedSiteHosts.',
         'searchOptions are optional request parameters passed through to the search provider. Use them only when they appear in providerCapabilities.supportedSearchOptions. A fixedEngine provider will ignore unsupported engines.',
         'Read recentSearchOutcomes as facts. Do not repeat a failed angle unchanged.',
+        'transportFacts are structured fetch realities only. Do not invent queries from them. Do not target blockedHosts.',
         evidenceScope === 'local' ? 'Local corpus search is active. Never emit site: operators.' : '',
         siteQueryMode === 'never' ? 'Do not emit site: operators in this mode.' : '',
         mode === 'site_fallback' ? 'The previous site: query returned only off-host results. Rewrite it without any site: operator.' : '',
@@ -64,6 +66,7 @@ export function searchQueryPlannerPrompt({
         rejectedQueries,
         exhaustedAngles,
         recentSearchOutcomes,
+        transportFacts,
         providerCapabilities,
         observedHosts,
         allowedSiteHosts,
