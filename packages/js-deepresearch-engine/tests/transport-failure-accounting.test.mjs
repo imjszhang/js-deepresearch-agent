@@ -15,7 +15,7 @@ function report() {
   return '# Research Report\n\n## Summary\n\nThe official pages refused every read attempt, so this run reports what could not be retrieved rather than inventing coverage. [1.1]\n\n## Key Findings\n\nNo first-party body was retrieved because the publisher returned HTTP 403 for every candidate URL. [1.1]';
 }
 
-function llmFor(decisions) {
+function llmFor(decisions, { onSourceAssessment = null } = {}) {
   return {
     async complete({ purpose, messages }) {
       if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
@@ -30,6 +30,7 @@ function llmFor(decisions) {
       }
       if (purpose === 'gap_decomposition') return 'no json here';
       if (purpose === 'gap_support') return JSON.stringify({ judgments: [] });
+      if (purpose === 'source_assessment' && onSourceAssessment) return onSourceAssessment();
       return report();
     },
   };
@@ -151,6 +152,59 @@ describe('transport failure accounting', () => {
     assert.equal(recovery.transientFailures, 0);
     assert.equal(recovery.transportBlockedHosts['slow.test'].lastReason, 'timeout');
   });
+
+  it('keeps exploratory fetch status successful when assessment rejects the body', async () => {
+    registerContentFetchHandler(async () => ({
+      status: 'ok',
+      content: 'Official topic content that was delivered successfully but is intentionally judged unreadable.'.repeat(2),
+      accessStatus: 'ok',
+    }));
+    const decisions = [
+      { action: 'search', query: 'opaque topic', gapId: 'gap-1', reasonCode: 'search' },
+      { action: 'read', sourceIds: ['https://opaque.test/page'], gapId: 'gap-1', reasonCode: 'read' },
+      { action: 'answer', reasonCode: 'cannot_use_body' },
+    ];
+    const result = await new ResearchRunner().run({
+      query: 'opaque topic',
+      settings: {
+        llm: {},
+        search: {},
+        research: {
+          strategy: 'exploratory',
+          exploratory: {
+            minLlmTokens: 0,
+            maxLlmTokens: 0,
+            maxSteps: 8,
+            maxEvaluationRetries: 0,
+            autoReadTopK: 0,
+          },
+          focused: { fetchMode: 'summary', fetchBackend: 'auto' },
+        },
+      },
+      search: {
+        async search() {
+          return [{ title: 'Opaque', url: 'https://opaque.test/page', snippet: 'opaque topic' }];
+        },
+      },
+      llm: llmFor(decisions, {
+        onSourceAssessment: () => JSON.stringify({
+          summary: '',
+          readability: 'unreadable',
+          contentKind: 'obfuscated',
+          publisherType: 'unknown',
+          firstParty: false,
+          evidenceTier: 'unknown',
+          reason: 'obfuscated body',
+        }),
+      }),
+    });
+    const source = result.findings.flatMap((finding) => finding.sources || [])
+      .find((item) => item.url === 'https://opaque.test/page' && item.bodyQuality === 'waf');
+    assert.ok(source);
+    assert.equal(source.fetchStatus, 'ok');
+    assert.equal(source.accessStatus, 'ok');
+    assert.equal(source.bodyQualityReason, 'assessment_unreadable');
+  });
 });
 
 describe('readiness diagnostics for unreadable required hosts', () => {
@@ -182,6 +236,7 @@ describe('readiness diagnostics for unreadable required hosts', () => {
     assert.match(failure.message, /refused the request/);
     assert.deepEqual(failure.hostDiagnostics, [{
       host: 'vendor.test',
+      gapId: 'gap-1',
       reason: 'fetch_blocked',
       detail: 'http_4xx',
       httpStatus: 403,
@@ -211,6 +266,42 @@ describe('readiness diagnostics for unreadable required hosts', () => {
     }).failures.find((item) => item.code === 'required_host_missing');
     assert.ok(failure);
     assert.equal(failure.hostDiagnostics[0].reason, 'not_retrieved');
+  });
+
+  it('does not borrow an attempt from another gap that requires the same host', () => {
+    const sharedHost = 'vendor.test';
+    const gate = evaluateReadinessGate({
+      profile: { flags: {}, minIndependentSources: 1 },
+      gaps: [
+        { ...gap, id: 'gap-a', requiredHosts: [sharedHost] },
+        { ...gap, id: 'gap-b', requiredHosts: [sharedHost] },
+      ],
+      findings: [
+        {
+          gapId: 'gap-a',
+          sources: [{
+            url: `https://${sharedHost}/a`,
+            fetchStatus: 'ok',
+            bodyQuality: 'waf',
+            content: '',
+          }],
+        },
+        {
+          gapId: 'gap-b',
+          sources: [{ url: 'https://elsewhere.test/b', fetchStatus: 'ok', content: 'unrelated body' }],
+        },
+      ],
+    });
+    const failure = gate.failures.find((item) => item.code === 'required_host_missing');
+    assert.ok(failure);
+    assert.equal(
+      failure.hostDiagnostics.find((item) => item.gapId === 'gap-a')?.reason,
+      'body_rejected',
+    );
+    assert.equal(
+      failure.hostDiagnostics.find((item) => item.gapId === 'gap-b')?.reason,
+      'not_retrieved',
+    );
   });
 });
 

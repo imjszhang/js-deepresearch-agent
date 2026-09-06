@@ -147,8 +147,10 @@ describe('body quality helper', () => {
     assert.equal(cleaned.content, '');
     assert.equal(cleaned.summary, '');
     assert.equal(cleaned.snippet, 'HKEX filing snippet');
-    assert.equal(cleaned.fetchStatus, 'waf');
-    assert.equal(cleaned.accessNotes, 'waf_or_shell');
+    assert.equal(cleaned.fetchStatus, 'ok');
+    assert.equal(cleaned.bodyQuality, 'waf');
+    assert.equal(cleaned.bodyQualityReason, 'waf_or_shell');
+    assert.equal(cleaned.accessStatus, undefined);
   });
 
   it('treats failed and WAF fetches as retryable, but not successful or irrelevant bodies', () => {

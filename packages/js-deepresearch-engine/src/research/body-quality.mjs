@@ -161,11 +161,6 @@ export function classifyFetchedBody(source = {}) {
   return { status: 'read', successful: true, reason: 'body_ok' };
 }
 
-/** True when the body was rejected by an LLM verdict rather than by transport. */
-function isLlmContentVerdict(quality = {}) {
-  return quality.reason === 'assessment_unreadable';
-}
-
 export function sanitizeUnusableSourceBody(source = {}, quality = {}) {
   const failed = quality.successful === false
     || ['waf', 'failed', 'irrelevant'].includes(quality.status || source.bodyQuality || source.fetchStatus);
@@ -175,12 +170,7 @@ export function sanitizeUnusableSourceBody(source = {}, quality = {}) {
     content: '',
     summary: '',
     snippet: source.snippet || '',
-    fetchStatus: isLlmContentVerdict(quality)
-      ? (source.fetchStatus || 'ok')
-      : (quality.status === 'waf' ? 'waf' : (source.fetchStatus === 'ok' ? 'failed' : (source.fetchStatus || quality.status))),
     bodyQuality: quality.status || source.bodyQuality,
-    accessStatus: quality.status || source.accessStatus || null,
-    accessNotes: quality.reason || source.accessNotes || null,
-    fetchError: source.fetchError || quality.reason || null,
+    bodyQualityReason: quality.reason || source.bodyQualityReason || null,
   };
 }

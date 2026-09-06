@@ -35,8 +35,9 @@ describe('source enricher relevance gate', () => {
       budget: { claim() {}, canClaim() { return true; } },
     });
     assert.equal(summaryCalls, 0);
-    assert.equal(finding.sources[0].fetchStatus, 'irrelevant');
+    assert.equal(finding.sources[0].fetchStatus, 'ok');
     assert.equal(finding.sources[0].bodyQuality, 'irrelevant');
+    assert.equal(finding.sources[0].bodyQualityReason, 'entity_mismatch');
     assert.equal(finding.sources[0].relevanceDecision.reasonCode, 'entity_mismatch');
   });
 

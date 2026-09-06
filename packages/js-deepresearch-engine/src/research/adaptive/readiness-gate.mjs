@@ -22,15 +22,24 @@ function successfulSources(findings = []) {
  * Why a required host has no usable body. "Fetched but rejected" and "never
  * retrieved" call for different repairs, so they must not share one message.
  */
-function hostAttemptDiagnostics(hosts = [], findings = []) {
+function findingsForGap(gap = {}, findings = []) {
+  return findings.filter((finding) => (
+    finding.gapId === gap.id
+    || (gap.contractSlotId && finding.contractSlotId === gap.contractSlotId)
+    || (!finding.gapId && !finding.contractSlotId && gap.answerSlot && finding.answerSlot === gap.answerSlot)
+  ));
+}
+
+function hostAttemptDiagnostics(hosts = [], findings = [], gapId = null) {
   const attempts = findings.flatMap((finding) => finding.sources || []);
   return hosts.map((host) => {
     const forHost = attempts.filter((source) => hostnamesMatch(hostnameOf(source?.url || source?.id), host));
-    if (!forHost.length) return { host, reason: 'not_retrieved' };
+    if (!forHost.length) return { host, gapId, reason: 'not_retrieved' };
     if (forHost.some((source) => source.fetchStatus === 'ok')) {
       const rejected = forHost.find((source) => source.fetchStatus === 'ok');
       return {
         host,
+        gapId,
         reason: 'body_rejected',
         bodyQuality: rejected.bodyQuality || null,
         assessmentStatus: rejected.assessmentStatus || null,
@@ -40,6 +49,7 @@ function hostAttemptDiagnostics(hosts = [], findings = []) {
     const blocked = forHost[0];
     return {
       host,
+      gapId,
       reason: 'fetch_blocked',
       detail: blocked.fetchErrorType || blocked.fetchError || null,
       httpStatus: blocked.httpStatus ?? null,
@@ -217,21 +227,26 @@ export function evaluateReadinessGate({
     const coverage = requiredEvidenceRead(gap, resolvedFindings, extras);
     if (coverage.missing.length && !coverage.satisfied) {
       const { missing } = coverage;
-      missingRequired.push({ gapId: gap.id, hosts: missing });
+      missingRequired.push({
+        gapId: gap.id,
+        hosts: missing,
+        findings: findingsForGap(gap, resolvedFindings),
+      });
     }
   }
   if ((resolvedProfile.requiredHosts || []).length) {
     const globalCoverage = requiredHostCoverage(bodies, resolvedProfile);
     if (!globalCoverage.satisfied) {
-      missingRequired.push({ gapId: 'profile', hosts: globalCoverage.missing });
+      missingRequired.push({ gapId: 'profile', hosts: globalCoverage.missing, findings: resolvedFindings });
     }
   }
   if (missingRequired.length) {
     const hosts = missingRequired.flatMap((item) => item.hosts);
-    const hostDiagnostics = hostAttemptDiagnostics(
-      hosts.filter((host) => !String(host).startsWith('criterion:') && host !== 'primary_filing'),
-      resolvedFindings,
-    );
+    const hostDiagnostics = missingRequired.flatMap((item) => hostAttemptDiagnostics(
+      item.hosts.filter((host) => !String(host).startsWith('criterion:') && host !== 'primary_filing'),
+      item.findings,
+      item.gapId,
+    ));
     failures.push({
       code: 'required_host_missing',
       message: hostFailureMessage(hostDiagnostics),

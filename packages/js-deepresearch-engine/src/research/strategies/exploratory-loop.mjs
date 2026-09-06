@@ -679,7 +679,7 @@ export async function runExploratoryLoop(context) {
         ...source,
         id,
         bodyQuality: quality.status,
-        fetchStatus: quality.status === 'waf' ? 'waf' : source.fetchStatus,
+        bodyQualityReason: quality.reason,
         tier: classifySourceTier(source, targetGap),
         assessment: source.assessment || null,
         relevanceDecision: bodyRelevance,

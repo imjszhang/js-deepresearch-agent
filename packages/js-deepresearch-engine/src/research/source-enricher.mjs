@@ -171,6 +171,7 @@ async function enrichOneSource(source, {
     title: source.title || fetched.title,
     content: fetched.content,
     contentOrigin: 'fetched',
+    fetchStatus: 'ok',
   };
   if (relevance && relevance.bodyValidation !== false) {
     const relevanceDecision = evaluateSourceRelevance(fetchedSource, {
@@ -186,8 +187,8 @@ async function enrichOneSource(source, {
     if (!relevanceDecision.accepted) {
       return {
         ...fetchedSource,
-        fetchStatus: 'irrelevant',
         bodyQuality: 'irrelevant',
+        bodyQualityReason: relevanceDecision.reasonCode,
         relevanceDecision,
         skipReason: relevanceDecision.reasonCode,
       };
