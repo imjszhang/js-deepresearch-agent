@@ -15,7 +15,7 @@ const PROXY_BODY_TIMEOUT_MS = 900_000;
 export const DEFAULT_MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
 export const DEFAULT_MAX_REDIRECTS = 10;
 
-export const DEFAULT_BROWSER_USER_AGENT = 'js-deepresearch-agent/1.0 (+https://github.com/imjszhang/js-deepresearch-agent)';
+export const DEFAULT_BROWSER_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
 export const DEFAULT_ALLOWED_CONTENT_TYPES = Object.freeze([
   'text/*',
@@ -223,9 +223,17 @@ export function buildBrowserRequestHeaders(url, {
     ].join(','),
     'accept-language': acceptLanguage,
     'accept-encoding': 'gzip, deflate, br',
+    'upgrade-insecure-requests': '1',
+    'sec-fetch-dest': 'document',
+    'sec-fetch-mode': 'navigate',
+    'sec-fetch-site': referer || matchedOverrides.referer ? 'cross-site' : 'none',
+    'sec-fetch-user': '?1',
     ...matchedOverrides,
   });
   if (referer && !result.has('referer')) result.set('referer', referer);
+  if (result.has('referer') && result.get('sec-fetch-site') === 'none') {
+    result.set('sec-fetch-site', 'cross-site');
+  }
   if (headers) {
     new Headers(headers).forEach((value, name) => result.set(name, value));
   }

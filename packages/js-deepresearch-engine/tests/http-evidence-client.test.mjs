@@ -31,7 +31,20 @@ function waitForResponseClose(pathname) {
 }
 
 async function closeServer(instance) {
-  await new Promise((resolve, reject) => instance.close((error) => (error ? reject(error) : resolve())));
+  if (!instance) return;
+  resetHttpFetchCache();
+  instance.closeAllConnections?.();
+  instance.closeIdleConnections?.();
+  try {
+    await withTimeout(
+      new Promise((resolve, reject) => {
+        instance.close((error) => (error ? reject(error) : resolve()));
+      }),
+      'HTTP fixture server close hung',
+    );
+  } catch {
+    instance.unref?.();
+  }
 }
 
 async function withTimeout(promise, message) {
@@ -221,11 +234,7 @@ before(async () => {
 });
 
 after(async () => {
-  resetHttpFetchCache();
-  server.closeAllConnections?.();
-  await withTimeout(closeServer(server), 'HTTP fixture server close hung').catch(() => {
-    server.close();
-  });
+  await closeServer(server);
 });
 
 afterEach(() => {
@@ -234,7 +243,7 @@ afterEach(() => {
 });
 
 describe('HTTP evidence client', () => {
-  it('assembles stable document headers without browser-only context claims', () => {
+  it('assembles browser-like document headers including Sec-Fetch metadata', () => {
     const headers = buildBrowserRequestHeaders(`${baseUrl}/headers`, {
       hostHeaders: {
         '127.0.0.1': {
@@ -243,14 +252,17 @@ describe('HTTP evidence client', () => {
         },
       },
     });
-    assert.match(headers.get('user-agent'), /^js-deepresearch-agent\/1\.0/);
+    assert.match(headers.get('user-agent'), /Chrome\/\d+/);
     assert.match(headers.get('accept'), /text\/html/);
     assert.equal(headers.get('accept-language'), 'en-US,en;q=0.9');
     assert.equal(headers.get('accept-encoding'), 'gzip, deflate, br');
     assert.equal(headers.get('referer'), 'https://search.example/results');
     assert.equal(headers.get('cache-control'), 'no-cache');
-    assert.equal([...headers.keys()].some((name) => name.startsWith('sec-')), false);
-    assert.equal(headers.has('upgrade-insecure-requests'), false);
+    assert.equal(headers.get('upgrade-insecure-requests'), '1');
+    assert.equal(headers.get('sec-fetch-dest'), 'document');
+    assert.equal(headers.get('sec-fetch-mode'), 'navigate');
+    assert.equal(headers.get('sec-fetch-site'), 'cross-site');
+    assert.equal(headers.get('sec-fetch-user'), '?1');
   });
 
   it('rejects sensitive per-host header overrides', () => {
@@ -445,7 +457,6 @@ describe('HTTP evidence client', () => {
       assert.match(result.content, /Local fixture body/);
       assert.deepEqual(seen, [`CONNECT ${new URL(baseUrl).host}`]);
     } finally {
-      resetHttpFetchCache();
       await closeServer(proxy);
     }
   });
@@ -489,7 +500,7 @@ describe('HTTP evidence client', () => {
       assert.equal(secure.status, 'ok');
       assert.equal(secureChallengeHits, 2);
     } finally {
-      await new Promise((resolve, reject) => h2Server.close((error) => (error ? reject(error) : resolve())));
+      await closeServer(h2Server);
     }
   });
 
@@ -589,7 +600,6 @@ describe('HTTP evidence client', () => {
       assert.equal(result.httpStatus, 403);
       await withTimeout(closed, 'h2 stream was not cancelled');
     } finally {
-      resetHttpFetchCache();
       await closeServer(h2Server);
     }
   });
