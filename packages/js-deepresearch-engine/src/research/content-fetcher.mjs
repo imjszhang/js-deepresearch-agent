@@ -1,5 +1,11 @@
 import { isRawBinaryDocumentText } from './body-quality.mjs';
 import {
+  buildBrowserRequestHeaders,
+  DEFAULT_ALLOWED_CONTENT_TYPES,
+  DEFAULT_MAX_RESPONSE_BYTES,
+  getEvidenceResponseMetadata,
+} from '../http/create-http-fetch.mjs';
+import {
   convertDocumentToMarkdown,
   detectDocumentFormat,
   extractMarkdownTitle,
@@ -81,6 +87,9 @@ export function classifyFetchFailure({
 } = {}) {
   if (aborted) return { errorType: 'aborted', retryable: false, httpStatus };
   if (timedOut) return { errorType: 'timeout', retryable: true, httpStatus };
+  if (error?.code === 'RESPONSE_TOO_LARGE' || error?.cause?.code === 'UND_ERR_RES_EXCEEDED') {
+    return { errorType: 'response_too_large', retryable: false, httpStatus };
+  }
   if (httpStatus === 429) return { errorType: 'http_429', retryable: true, httpStatus };
   if (httpStatus >= 500 && httpStatus <= 599) return { errorType: 'http_5xx', retryable: true, httpStatus };
   if (httpStatus >= 400) return { errorType: 'http_4xx', retryable: false, httpStatus };
@@ -98,6 +107,8 @@ function failedFetchResult({
   accessedAt,
   accessStatus,
   accessNotes,
+  finalUrl,
+  contentType,
 } = {}) {
   return {
     status: 'failed',
@@ -110,6 +121,8 @@ function failedFetchResult({
     accessedAt,
     accessStatus: accessStatus || (httpStatus ? `http_${httpStatus}` : 'failed'),
     accessNotes: accessNotes || error,
+    ...(finalUrl ? { finalUrl } : {}),
+    ...(contentType ? { contentType } : {}),
   };
 }
 
@@ -154,21 +167,83 @@ export function truncateContent(content, maxChars) {
   return windows.join('');
 }
 
-async function readResponseBytes(response) {
+function responseLimitError(maxResponseBytes) {
+  const error = new Error(`Response body exceeds ${maxResponseBytes} bytes`);
+  error.code = 'RESPONSE_TOO_LARGE';
+  return error;
+}
+
+async function readResponseBytes(response, maxResponseBytes) {
+  const limit = Math.max(1, Number(maxResponseBytes) || DEFAULT_MAX_RESPONSE_BYTES);
+  const declaredLength = Number(response.headers?.get?.('content-length'));
+  if (Number.isFinite(declaredLength) && declaredLength > limit) {
+    throw responseLimitError(limit);
+  }
+  if (typeof response.body?.getReader === 'function') {
+    const reader = response.body.getReader();
+    const chunks = [];
+    let total = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = value instanceof Uint8Array ? value : new Uint8Array(value);
+        total += chunk.byteLength;
+        if (total > limit) {
+          await reader.cancel();
+          throw responseLimitError(limit);
+        }
+        chunks.push(chunk);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return bytes;
+  }
   if (typeof response.arrayBuffer === 'function') {
-    return new Uint8Array(await response.arrayBuffer());
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.byteLength > limit) throw responseLimitError(limit);
+    return bytes;
   }
   const raw = await response.text();
-  return new TextEncoder().encode(raw);
+  const bytes = new TextEncoder().encode(raw);
+  if (bytes.byteLength > limit) throw responseLimitError(limit);
+  return bytes;
 }
 
 function decodeText(bytes) {
   return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
 }
 
+function normalizedContentType(contentType) {
+  return String(contentType || '').split(';', 1)[0].trim().toLowerCase();
+}
+
+export function isAllowedContentType(contentType, allowedContentTypes = DEFAULT_ALLOWED_CONTENT_TYPES) {
+  const normalized = normalizedContentType(contentType);
+  if (!normalized) return false;
+  const patterns = Array.isArray(allowedContentTypes)
+    ? allowedContentTypes
+    : DEFAULT_ALLOWED_CONTENT_TYPES;
+  return patterns.some((rawPattern) => {
+    const pattern = String(rawPattern || '').trim().toLowerCase();
+    if (!pattern) return false;
+    if (pattern.endsWith('*')) return normalized.startsWith(pattern.slice(0, -1));
+    return normalized === pattern;
+  });
+}
+
 async function fetchUrlContentOnce(url, {
   signal,
   maxChars = 8000,
+  maxResponseBytes = DEFAULT_MAX_RESPONSE_BYTES,
+  allowedContentTypes = DEFAULT_ALLOWED_CONTENT_TYPES,
   timeoutMs = 15000,
   convertDocument,
   fetchImpl = globalThis.fetch,
@@ -188,33 +263,42 @@ async function fetchUrlContentOnce(url, {
     const accessedAt = new Date().toISOString();
     const response = await fetchImpl(url, {
       signal: controller.signal,
-      headers: {
-        'user-agent': 'js-deepresearch-agent/1.0 (+research)',
-        accept: [
-          'text/html',
-          'application/xhtml+xml',
-          'application/pdf;q=0.9',
-          'application/vnd.openxmlformats-officedocument.wordprocessingml.document;q=0.8',
-          'text/plain;q=0.7',
-          '*/*;q=0.5',
-        ].join(','),
-      },
+      ...(!fetchImpl.transportOptions?.browserHeaders
+        ? { headers: buildBrowserRequestHeaders(url) }
+        : {}),
       redirect: 'follow',
     });
+    const finalUrl = response.url || url;
+    const responseMetadata = getEvidenceResponseMetadata(response);
+    const requestAttempts = responseMetadata.requestAttempts || 1;
 
     if (!response.ok) {
       const failure = classifyFetchFailure({ httpStatus: response.status });
       return failedFetchResult({
         error: `HTTP ${response.status}`,
         ...failure,
+        attempts: requestAttempts,
         retryAfterMs: parseRetryAfterMs(response),
         accessedAt,
+        finalUrl,
       });
     }
 
     const contentType = response.headers.get('content-type') || '';
-    const bytes = await readResponseBytes(response);
-    const format = detectDocumentFormat({ bytes, contentType, url });
+    if (!isAllowedContentType(contentType, allowedContentTypes)) {
+      return failedFetchResult({
+        error: `Unsupported content type: ${contentType || '(missing)'}`,
+        errorType: 'unsupported_content_type',
+        attempts: requestAttempts,
+        retryable: false,
+        accessedAt,
+        accessStatus: 'unsupported_content_type',
+        finalUrl,
+        contentType,
+      });
+    }
+    const bytes = await readResponseBytes(response, maxResponseBytes);
+    const format = detectDocumentFormat({ bytes, contentType, url: finalUrl });
 
     if (format) {
       const converted = await convertDocumentToMarkdown(bytes, {
@@ -241,13 +325,16 @@ async function fetchUrlContentOnce(url, {
       );
       return {
         status: 'ok',
-        title: extractMarkdownTitle(content) || filenameFromUrl(url) || url,
+        title: extractMarkdownTitle(content) || filenameFromUrl(finalUrl) || finalUrl,
         content,
         links: [],
         converter: 'anydoc',
         documentFormat: format,
+        finalUrl,
+        contentType,
         accessedAt,
         accessStatus: 'ok',
+        requestAttempts,
       };
     }
 
@@ -258,8 +345,8 @@ async function fetchUrlContentOnce(url, {
         error: 'Binary document decoded as text',
       };
     }
-    const title = extractTitle(raw) || url;
-    const links = contentType.includes('html') ? extractLinks(raw, url) : [];
+    const title = extractTitle(raw) || finalUrl;
+    const links = contentType.includes('html') ? extractLinks(raw, finalUrl) : [];
     let content = contentType.includes('html') ? stripHtml(raw) : raw.trim();
     content = truncateContent(content, maxChars);
 
@@ -281,8 +368,11 @@ async function fetchUrlContentOnce(url, {
       updatedAt: extractMeta(raw, ['article:modified_time', 'dateModified', 'last-modified'])
         || response.headers.get('last-modified')
         || undefined,
+      finalUrl,
+      contentType,
       accessedAt,
       accessStatus: 'ok',
+      requestAttempts,
     };
   } catch (error) {
     if (signal?.aborted) throw error;
@@ -304,6 +394,8 @@ async function fetchUrlContentOnce(url, {
 export async function fetchUrlContent(url, {
   signal,
   maxChars = 8000,
+  maxResponseBytes = DEFAULT_MAX_RESPONSE_BYTES,
+  allowedContentTypes = DEFAULT_ALLOWED_CONTENT_TYPES,
   timeoutMs = 15000,
   convertDocument,
   maxAttempts = DEFAULT_MAX_ATTEMPTS,
@@ -311,19 +403,25 @@ export async function fetchUrlContent(url, {
 } = {}) {
   const attempts = Math.max(1, Number(maxAttempts) || DEFAULT_MAX_ATTEMPTS);
   let lastFailure = null;
+  let requestAttempts = 0;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     if (signal?.aborted) throw abortError();
     const result = await fetchUrlContentOnce(url, {
       signal,
       maxChars,
+      maxResponseBytes,
+      allowedContentTypes,
       timeoutMs,
       convertDocument,
       fetchImpl,
     });
+    requestAttempts += result.requestAttempts || result.fetchAttempts || 1;
     if (result.status === 'ok') {
-      return { ...result, fetchAttempts: attempt };
+      const rest = { ...result };
+      delete rest.requestAttempts;
+      return { ...rest, fetchAttempts: requestAttempts };
     }
-    lastFailure = { ...result, fetchAttempts: attempt };
+    lastFailure = { ...result, fetchAttempts: requestAttempts };
     const canRetry = result.retryable === true && attempt < attempts;
     if (!canRetry) return lastFailure;
     const delay = result.retryAfterMs ?? (250 * attempt);

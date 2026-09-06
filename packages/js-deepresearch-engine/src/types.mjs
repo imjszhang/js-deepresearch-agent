@@ -50,7 +50,21 @@
  */
 
 /**
+ * @typedef {Object} HttpSettings
+ * @property {string} [proxy]
+ * @property {boolean} [http2]
+ * @property {boolean} [cookieRetry]
+ * @property {string} [userAgent]
+ * @property {string} [acceptLanguage]
+ * @property {string} [referer]
+ * @property {Record<string, Record<string, string>>} [hostHeaders]
+ * @property {number} [maxResponseBytes]
+ * @property {string[]} [allowedContentTypes]
+ */
+
+/**
  * @typedef {Object} Settings
+ * @property {HttpSettings} [http]
  * @property {LlmSettings} llm
  * @property {SearchSettings} search
  * @property {ResearchSettings} research
@@ -75,6 +89,8 @@
  * @property {string} [bodyQualityReason]
  * @property {'ok'|'unavailable'|'skipped'} [assessmentStatus]
  * @property {Object|null} [assessment]
+ * @property {string} [finalUrl]
+ * @property {string} [originalUrl]
  * @property {number} [relevanceScore]
  * @property {boolean} [relevanceKeep]
  * @property {string} [relevanceReason]

@@ -297,6 +297,38 @@ describe('CLI utilities', () => {
     assert.equal(settings.http.proxy, 'socks5://127.0.0.1:1080');
   });
 
+  it('maps HTTP evidence policy and per-host header JSON flags', () => {
+    const settings = applyResearchFlags({}, {
+      http2: 'false',
+      'http-cookie-retry': 'false',
+      'http-max-response-bytes': '2048',
+      'http-allowed-content-types': 'text/html, application/pdf',
+      'http-host-headers': JSON.stringify({
+        'example.com': {
+          Referer: 'https://search.example/',
+          'Accept-Language': 'zh-CN,zh;q=0.9',
+        },
+      }),
+    });
+    assert.equal(settings.http.http2, false);
+    assert.equal(settings.http.cookieRetry, false);
+    assert.equal(settings.http.maxResponseBytes, 2048);
+    assert.deepEqual(settings.http.allowedContentTypes, ['text/html', 'application/pdf']);
+    assert.deepEqual(settings.http.hostHeaders, {
+      'example.com': {
+        Referer: 'https://search.example/',
+        'Accept-Language': 'zh-CN,zh;q=0.9',
+      },
+    });
+  });
+
+  it('rejects a non-object HTTP host header flag', () => {
+    assert.throws(
+      () => applyResearchFlags({}, { 'http-host-headers': 'example.com' }),
+      /requires a JSON object/,
+    );
+  });
+
   it('maps --corpus-dirs into search.local.dirs and enables the local engine', () => {
     const settings = applyResearchFlags({ search: { engine: 'searxng' } }, {
       'corpus-dirs': '/tmp/notes,/tmp/reports,/tmp/notes',

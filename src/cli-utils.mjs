@@ -38,7 +38,14 @@ export function setDeepValue(object, dottedKey, rawValue) {
     cursor[part] ||= {};
     cursor = cursor[part];
   }
-  cursor[parts.at(-1)] = coerceValue(rawValue);
+  const value = coerceValue(rawValue);
+  if (
+    dottedKey === 'http.hostHeaders'
+    && (!value || typeof value !== 'object' || Array.isArray(value))
+  ) {
+    throw new Error('http.hostHeaders requires a JSON object keyed by hostname.');
+  }
+  cursor[parts.at(-1)] = value;
   return object;
 }
 
@@ -161,6 +168,10 @@ export function applyResearchFlags(settings, flags) {
     'embedding-base-url': 'research.providers.embedding.baseUrl',
     'embedding-api-key': 'research.providers.embedding.apiKey',
     'http-proxy': 'http.proxy',
+    'http2': 'http.http2',
+    'http-cookie-retry': 'http.cookieRetry',
+    'http-max-response-bytes': 'http.maxResponseBytes',
+    'http-host-headers': 'http.hostHeaders',
     'exploratory-max-steps': 'research.exploratory.maxSteps',
     'exploratory-max-reads-per-step': 'research.exploratory.maxReadsPerStep',
     'exploratory-min-llm-tokens': 'research.exploratory.minLlmTokens',
@@ -192,6 +203,23 @@ export function applyResearchFlags(settings, flags) {
     if (flags[flag] !== undefined) {
       setDeepValue(settings, key, flags[flag]);
     }
+  }
+  if (flags['http-host-headers'] !== undefined) {
+    const hostHeaders = settings.http?.hostHeaders;
+    if (!hostHeaders || typeof hostHeaders !== 'object' || Array.isArray(hostHeaders)) {
+      throw new Error('Flag --http-host-headers requires a JSON object keyed by hostname.');
+    }
+  }
+  if (flags['http-allowed-content-types'] !== undefined) {
+    const contentTypes = String(flags['http-allowed-content-types'])
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean);
+    if (!contentTypes.length) {
+      throw new Error('Flag --http-allowed-content-types requires a comma-separated list.');
+    }
+    settings.http ||= {};
+    settings.http.allowedContentTypes = contentTypes;
   }
   const strategy = String(flags.strategy || settings.research?.strategy || '');
   if (strategy === 'exploratory') {
@@ -246,5 +274,13 @@ function coerceValue(value) {
   if (value === 'true') return true;
   if (value === 'false') return false;
   if (value !== '' && !Number.isNaN(Number(value))) return Number(value);
+  const first = typeof value === 'string' ? value.trim()[0] : '';
+  if (first === '{' || first === '[') {
+    try {
+      return JSON.parse(value);
+    } catch {
+      // Keep ordinary strings unchanged; flag-specific validation provides context.
+    }
+  }
   return value;
 }

@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
-import { createHttpFetch, resetHttpFetchCache } from '../src/http/create-http-fetch.mjs';
+import {
+  createEvidenceHttpFetch,
+  createHttpFetch,
+  resetHttpFetchCache,
+} from '../src/http/create-http-fetch.mjs';
 
 afterEach(() => {
   resetHttpFetchCache();
@@ -21,6 +25,8 @@ describe('createHttpFetch', () => {
     const fetchFn = createHttpFetch('socks5://127.0.0.1:1080');
     assert.deepEqual(fetchFn.transportOptions, {
       proxy: true,
+      http2: false,
+      maxResponseBytes: null,
       headersTimeoutMs: 900_000,
       bodyTimeoutMs: 900_000,
     });
@@ -46,5 +52,22 @@ describe('createHttpFetch', () => {
     const second = createHttpFetch('socks5://127.0.0.1:1080');
     assert.notEqual(first, globalThis.fetch);
     assert.equal(first, second);
+  });
+
+  it('uses an Undici dispatcher when HTTP/2 negotiation is enabled', () => {
+    const fetchFn = createHttpFetch('', { http2: true, maxResponseBytes: 4096 });
+    assert.notEqual(fetchFn, globalThis.fetch);
+    assert.equal(fetchFn.transportOptions.http2, true);
+    assert.equal(fetchFn.transportOptions.maxResponseBytes, 4096);
+  });
+
+  it('keeps SOCKS proxy routing on the browser-semantic evidence client', () => {
+    const fetchFn = createEvidenceHttpFetch({
+      proxy: 'socks5://127.0.0.1:1080',
+      http2: true,
+    });
+    assert.equal(fetchFn.transportOptions.proxy, true);
+    assert.equal(fetchFn.transportOptions.http2, true);
+    assert.equal(fetchFn.transportOptions.browserHeaders, true);
   });
 });

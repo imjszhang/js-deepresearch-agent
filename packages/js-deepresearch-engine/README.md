@@ -151,6 +151,8 @@ const settings = mergeSettings({
 
 The engine does not read `.env` files or persist settings. Callers are responsible for loading configuration and passing a merged `settings` object.
 
+HTTP evidence reads use `settings.http`: `http2` and `cookieRetry` default to `true`, `maxResponseBytes` defaults to 10 MiB, and `allowedContentTypes` limits accepted document MIME types. `hostHeaders` accepts exact hosts or `*.example.com` wildcard keys for browser-header overrides; sensitive authentication/cookie and request-framing headers are rejected. The Undici transport negotiates HTTP/2 through ALPN with HTTP/1.1 fallback and remains compatible with `http.proxy`.
+
 ## Built-in Strategies
 
 - `quick` — snippet-only scan. One iteration is original query plus a few follow-ups; more than one iteration uses the shared iterative loop. It does not enrich URL bodies.

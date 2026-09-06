@@ -116,7 +116,13 @@ async function enrichWave(findings, context, focused, readPolicy, state) {
       observedHosts: [...(state?.observedHosts || [])],
       recorder: context.recorder,
     });
-  const enrichedByUrl = new Map((enriched[0]?.sources || []).map((source) => [canonicalUrl(source), source]));
+  const enrichedByUrl = new Map();
+  for (const source of enriched[0]?.sources || []) {
+    const finalKey = canonicalUrl(source);
+    const originalKey = normalizeSourceUrl(source.originalUrl) || source.originalUrl;
+    if (finalKey) enrichedByUrl.set(finalKey, source);
+    if (originalKey) enrichedByUrl.set(originalKey, source);
+  }
   return applyBodyClassification(findings.map((finding) => ({
     ...finding,
     sources: (finding.sources || []).map((source) => enrichedByUrl.get(canonicalUrl(source)) || source),
