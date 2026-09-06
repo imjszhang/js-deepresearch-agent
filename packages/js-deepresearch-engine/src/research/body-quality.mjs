@@ -1,15 +1,16 @@
 import { assessmentBlocksSuccessfulBody } from './source-assessment.mjs';
 
-const WAF_OR_ERROR_NEEDLES = [
+const MAX_CHALLENGE_SHELL_CHARS = 2000;
+const STRONG_CHALLENGE_SHELL_NEEDLES = [
   /just a moment/i,
   /attention required/i,
   /access denied/i,
-  /cloudflare/i,
-  /enable javascript/i,
   /checking your browser/i,
+  /enable javascript(?:\s+and\s+wait)?/i,
   /please wait while we verify/i,
-  /captcha/i,
-  /forbidden/i,
+  /cloudflare\s+ray\s+id/i,
+  /captcha\s+(?:verification|required|challenge)/i,
+  /request\s+(?:was\s+)?(?:blocked|forbidden)/i,
 ];
 
 export const MIN_FETCHED_BODY_CHARS = 80;
@@ -23,11 +24,22 @@ export function isRetryableReadFailure(quality = {}) {
 
 const TRANSPORT_ERROR_TYPES = new Set([
   'http_4xx',
+  'http_408',
   'http_429',
   'http_5xx',
   'timeout',
   'network',
 ]);
+const TRANSPORT_SKIP_TYPES = new Set([
+  'host_circuit_open',
+  'url_backend_already_attempted',
+  'url_backend_in_flight',
+]);
+
+export function isTransportReadSkip(source = {}) {
+  return source?.transportMemorySkipped === true
+    && TRANSPORT_SKIP_TYPES.has(String(source.fetchErrorType || ''));
+}
 
 /**
  * True when a read failed because the target refused or never delivered the
@@ -54,7 +66,9 @@ export function transportFailureReason(source = {}, quality = {}) {
 }
 
 export function isWafShellText(text = '') {
-  return WAF_OR_ERROR_NEEDLES.some((pattern) => pattern.test(String(text || '')));
+  const content = String(text || '').trim();
+  if (!content || content.length > MAX_CHALLENGE_SHELL_CHARS) return false;
+  return STRONG_CHALLENGE_SHELL_NEEDLES.some((pattern) => pattern.test(content));
 }
 
 export function isRawBinaryDocumentText(text = '') {

@@ -115,6 +115,7 @@ async function enrichWave(findings, context, focused, readPolicy, state) {
       entityAliases: context.brief?.entityAliases || [],
       observedHosts: [...(state?.observedHosts || [])],
       recorder: context.recorder,
+      transportMemory: state?.transportMemory,
     });
   const enrichedByUrl = new Map((enriched[0]?.sources || []).map((source) => [canonicalUrl(source), source]));
   return applyBodyClassification(findings.map((finding) => ({
@@ -247,6 +248,13 @@ export async function runFocusedPipeline(context) {
     contractFailure: contract.contractFailure,
   });
   const state = new ResearchState({ query, profile, brief, settings, budget });
+  state.transportMemory.setEventSink((event) => {
+    addTrace(trace, 'transport_memory', {
+      ...event,
+      reasonCode: event.type,
+    });
+    recorder?.event?.('transport_memory', event);
+  });
   if (contract.contractUnavailable) {
     const gate = evaluateReadinessGate({
       query,
@@ -631,6 +639,7 @@ export async function runFocusedPipeline(context) {
     marginal: latestMarginal,
     queryProvenance,
     recovery: queryProvenance,
+    transportMemory: state.transportMemory.snapshot(),
     searchOutcomes: state.searchOutcomes,
     observability: collectObservabilityMetrics({
       findings,

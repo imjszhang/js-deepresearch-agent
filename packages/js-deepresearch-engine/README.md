@@ -72,6 +72,10 @@ Executed search queries come only from the original user query or the shared LLM
 
 Summary-mode reads use one structured `source_assessment` call. `readability=unreadable` or invalid JSON fail-closes and cannot become a successful body. Extra assessment in `full`/`extract` is opt-in via `research.read.sourceAssessment.enabled`. Do not add rule-generated queries or hardcoded content-classification tables when extending this package.
 
+Focused and exploratory runs also own `TransportMemory`. It remembers failed `(URL, backend, retrievalPath)` routes while leaving successful reads eligible for a later fresh fetch, and opens the HTTP-direct host circuit after `research.read.transport.hostCircuitThreshold` consecutive `403`, `429`, or deterministic challenge attempts (default `3`; `0` disables the circuit). Internal `429` attempts count individually through `fetchAttempts`. Switching backend or retrieval path remains eligible. The fetcher retries only `408`/`429`, timeout, `5xx`, and network failures, consumes bounded `Retry-After`, and never retries `AbortError`. Memory snapshots support serialization/round-trip in strategy checkpoints; the package does not currently expose end-to-end research-run resume from those snapshots.
+
+`research.read.transport.responseHeadersTimeoutMs` (default `10000`) bounds the fetch API's response-header promise; this is the observable boundary and is not claimed to be a separately measured first body byte. `htmlTotalTimeoutMs` (default `15000`) and `documentTotalTimeoutMs` (default `60000`) independently bound the full request/body/conversion operation. URLs or responses identified as documents, plus responses above `largeFileThresholdBytes` (default 5 MiB), use the document total timeout. Results record `timeoutStage` and `timeoutPolicy` for audit. `maxAttempts` and `largeFileThresholdBytes` are programmatic settings only, without dedicated CLI flags or environment variables.
+
 ## Injecting Mock Adapters
 
 For tests or custom integrations, pass `llm` and `search` directly:

@@ -13,6 +13,7 @@ import {
   classifyFetchedBody,
   isRetryableReadFailure,
   isTransportReadFailure,
+  isTransportReadSkip,
   MAX_RETRYABLE_READ_ATTEMPTS,
   sanitizeUnusableSourceBody,
   transportFailureReason,
@@ -541,6 +542,13 @@ export async function runExploratoryLoop(context) {
     evidenceScope,
     brief: profile.brief,
   });
+  state.transportMemory.setEventSink((event) => {
+    addTrace(trace, state, 'transport_memory', {
+      ...event,
+      reasonCode: event.type,
+    }, budget);
+    recorder?.event?.('transport_memory', event);
+  });
   const maxReads = Math.max(1, Number(exploratory.maxReadsPerStep) || 3);
   const maxRetries = Math.max(0, Number(exploratory.maxEvaluationRetries) || 0);
   const maxOpenGaps = Number(exploratory.maxOpenGaps) || 8;
@@ -639,10 +647,12 @@ export async function runExploratoryLoop(context) {
       entityAliases: state.brief?.entityAliases || state.profile?.brief?.entityAliases || [],
       observedHosts: [...(state.observedHosts || [])],
       recorder,
+      transportMemory: state.transportMemory,
     }))[0];
     const classifiedSources = [];
     let successful = 0;
     let transportFailures = 0;
+    let transportSkips = 0;
     let attempted = 0;
     for (const source of finding.sources || []) {
       const id = source.id || source.url;
@@ -692,7 +702,12 @@ export async function runExploratoryLoop(context) {
       const existing = state.candidates.get(id) || {};
       const existingMatch = existing.gapMatches?.[targetGap?.id] || {};
       const readAttempts = Number(existing.readAttempts || 0) + 1;
-      const retryable = isRetryableReadFailure(quality);
+      // TransportMemory owns retry boundaries. The fetcher has already
+      // consumed allowed transient retries, so re-queuing this candidate
+      // would only produce a memory skip for the same backend/path.
+      const retryable = isRetryableReadFailure(quality)
+        && !source.backend
+        && !source.transportMemorySkipped;
       const consumeRead = !retryable || readAttempts >= MAX_RETRYABLE_READ_ATTEMPTS;
       state.candidates.set(id, {
         ...existing,
@@ -722,7 +737,10 @@ export async function runExploratoryLoop(context) {
         state.relevance.assessmentUnavailable += 1;
         if (quality.successful) state.relevance.admittedWithoutAssessment += 1;
       }
-      if (isTransportReadFailure(source, quality)) {
+      if (isTransportReadSkip(source)) {
+        transportSkips += 1;
+        state.recordTransportSkip(source.fetchErrorType);
+      } else if (isTransportReadFailure(source, quality)) {
         transportFailures += 1;
         state.recordTransportFailure({
           hostname: source.hostname,
@@ -856,10 +874,16 @@ export async function runExploratoryLoop(context) {
     return {
       successful,
       transportFailures,
+      transportSkips,
       attempted,
       // Every attempted read failed, and every failure was the target refusing
       // or never delivering the bytes.
-      transportOnly: successful === 0 && attempted > 0 && transportFailures === attempted,
+      transportOnly: successful === 0
+        && attempted > 0
+        && transportFailures + transportSkips === attempted,
+      transportSkipOnly: successful === 0
+        && attempted > 0
+        && transportSkips === attempted,
     };
   }
 
@@ -911,6 +935,7 @@ export async function runExploratoryLoop(context) {
       marginal: state.snapshot().marginal,
       relevance: state.snapshot().relevance,
       recovery: state.snapshot().recovery,
+      transportMemory: state.transportMemory.snapshot(),
       ...state.unresolvedReportNotes(),
     });
   }
@@ -1662,6 +1687,17 @@ export async function runExploratoryLoop(context) {
           const readGap = state.getGap(action.gapId);
           if (readGap && !readGap.rollup) readGap.repairFailures = 0;
           state.clearPlannerFailure({ gapId: action.gapId });
+        } else if (readOutcome.transportSkipOnly) {
+          // No network request happened, so this cannot count as an invalid
+          // planner step or as a new transport failure at any token level.
+          addTrace(trace, state, 'recovery', {
+            reasonCode: 'transport_skipped_read',
+            recoveryState: 'transport_skipped',
+            targetGapIds: [targetGapId].filter(Boolean),
+            transportFailures: 0,
+            transportSkips: readOutcome.transportSkips,
+            blockedHosts: Object.keys(state.recovery.transportBlockedHosts || {}),
+          }, budget, 'retry');
         } else if (readOutcome.transportOnly && belowMin) {
           // The targets refused or never delivered the bytes. That is not the
           // loop failing to find valid actions, and it must not burn the
@@ -1671,6 +1707,7 @@ export async function runExploratoryLoop(context) {
             recoveryState: 'transport_blocked',
             targetGapIds: [targetGapId].filter(Boolean),
             transportFailures: readOutcome.transportFailures,
+            transportSkips: readOutcome.transportSkips,
             blockedHosts: Object.keys(state.recovery.transportBlockedHosts || {}),
           }, budget, 'retry');
         } else if (!(belowMin && gate?.pass)) {
@@ -1948,6 +1985,7 @@ export async function runExploratoryLoop(context) {
     marginal: state.snapshot().marginal,
     relevance: state.snapshot().relevance,
     recovery: state.snapshot().recovery,
+    transportMemory: state.transportMemory.snapshot(),
     searchOutcomes: state.searchOutcomes,
     observability: collectObservabilityMetrics({
       findings: state.findings,

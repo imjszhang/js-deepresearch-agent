@@ -70,7 +70,7 @@ export function parseZhihuReadPayload(payload = {}) {
 export function createZhihuContentFetchHandler(options = {}) {
   const spawnImpl = options.spawn || spawn;
 
-  return async function zhihuContentFetchHandler(url, context = {}) {
+  async function zhihuContentFetchHandler(url, context = {}) {
     const { source, settings, signal } = context;
 
     if (!isZhihuSource(source, url)) {
@@ -107,9 +107,15 @@ export function createZhihuContentFetchHandler(options = {}) {
       return {
         status: 'failed',
         error: error.message,
+        backend: 'js-eyes:zhihu',
       };
     }
-  };
+  }
+  zhihuContentFetchHandler.backendId = 'js-eyes:zhihu';
+  zhihuContentFetchHandler.supports = (url, context = {}) => (
+    isZhihuSource(context.source, url) && Boolean(classifyZhihuUrl(url))
+  );
+  return zhihuContentFetchHandler;
 }
 
 export async function fetchZhihuContent(url, settings = {}, { signal, spawnImpl } = {}) {

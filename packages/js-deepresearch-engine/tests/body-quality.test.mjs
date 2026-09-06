@@ -22,6 +22,19 @@ describe('body quality helper', () => {
     assert.equal(isWafOrErrorBody('Ollama is a local model runner used in tests.', { fetchClaimedOk: false }), false);
   });
 
+  it('does not classify long technical documentation by isolated challenge keywords', () => {
+    const body = [
+      'This document discusses forbidden responses, Cloudflare routing, and CAPTCHA design.',
+      'It is a normal technical guide containing detailed architecture and mitigation advice. ',
+    ].join(' ').repeat(20);
+    assert.equal(isWafOrErrorBody(body, { fetchClaimedOk: true }), false);
+    assert.equal(classifyFetchedBody({
+      fetchStatus: 'ok',
+      contentOrigin: 'fetched',
+      content: body,
+    }).status, 'read');
+  });
+
   it('does not count WAF or empty pages as a successful body', () => {
     assert.equal(isSuccessfulBody({
       fetchStatus: 'ok',
