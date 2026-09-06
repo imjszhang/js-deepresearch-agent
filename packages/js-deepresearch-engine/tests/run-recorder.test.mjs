@@ -15,6 +15,7 @@ import {
   resetContentFetchHandlers,
   replayRecordedLlmCall,
   sanitizeRecordedValue,
+  validateReportOutput,
 } from '../src/index.mjs';
 import { OpenAICompatibleProvider } from '../src/llm/providers/openai-compatible.mjs';
 import { wrapProvidersWithBudget } from '../src/research/budget-manager.mjs';
@@ -102,29 +103,47 @@ describe('durable run recorder', () => {
       strategy: 'quick',
       query: 'diagnostic query',
     });
-    const failedChecks = [{
-      check: 'report_empty_summary',
-      expected: { minimumSignificantCharacters: 12 },
-      actual: { significantCharacters: 0 },
-    }];
+    const secret = 'DO-NOT-PERSIST secret customer sentence without terminal punctuation';
+    const validation = validateReportOutput(`# Diagnostic report
+
+## Summary
+${'A valid summary establishes enough context before the deliberately truncated final line. '.repeat(3)}
+${secret}
+`, { minChars: 100, mode: 'narrative' });
+    const failedChecks = validation.failedChecks;
+    const truncated = failedChecks.find((item) => item.check === 'report_truncated');
+    assert.equal(truncated.actual.lastContentLine, undefined);
+    assert.equal(truncated.actual.lastContentLength, secret.length);
+    assert.match(truncated.actual.lastContentSha256, /^[a-f0-9]{64}$/);
+    const error = new ReportGenerationError({
+      attempts: 2,
+      minChars: 100,
+      outputChars: validation.outputChars,
+      flags: validation.flags,
+      failedChecks,
+      phase: 'semantic-contract',
+      attemptCounts: { provider: 0, parse: 0, semanticContract: 2, render: 0 },
+    });
+    assert.doesNotMatch(error.message, new RegExp(secret));
     recorder.finalize('failed', {
-      error: new ReportGenerationError({
-        attempts: 2,
-        minChars: 200,
-        outputChars: 2623,
-        flags: ['report_empty_summary'],
-        failedChecks,
-        phase: 'semantic-contract',
-        attemptCounts: { provider: 0, parse: 0, semanticContract: 2, render: 0 },
-      }),
+      error,
     });
 
     const failure = JSON.parse(fs.readFileSync(path.join(sessionDir, 'failure.json'), 'utf8'));
     assert.equal(failure.phase, 'semantic-contract');
-    assert.deepEqual(failure.failedChecks, failedChecks);
+    assert.ok(failure.failedChecks.every((item) => item.phase === 'semantic-contract'));
     assert.equal(failure.error.phase, 'semantic-contract');
-    assert.deepEqual(failure.error.failedChecks, failedChecks);
+    assert.deepEqual(failure.error.failedChecks, failure.failedChecks);
     assert.equal(failure.error.attemptCounts.semanticContract, 2);
+    const run = JSON.parse(fs.readFileSync(path.join(sessionDir, 'run.json'), 'utf8'));
+    assert.deepEqual(run.failedChecks, failure.failedChecks);
+    assert.equal(run.phase, 'semantic-contract');
+    const allArtifacts = fs.readdirSync(sessionDir, { recursive: true })
+      .map((name) => path.join(sessionDir, name))
+      .filter((file) => fs.statSync(file).isFile())
+      .map((file) => fs.readFileSync(file, 'utf8'))
+      .join('\n');
+    assert.doesNotMatch(allArtifacts, new RegExp(secret));
   });
 
   it('records the provider-normalized LLM request before dispatch and omits reasoning text', async () => {

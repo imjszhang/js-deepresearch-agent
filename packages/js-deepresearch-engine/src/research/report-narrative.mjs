@@ -2,16 +2,20 @@ import { classifyClaimSection } from './claim-quality.mjs';
 import { parseCitations, stripInternalReferenceTokens } from './citations.mjs';
 
 export const SOURCE_DUMP_LINE = /\[[0-9]+(?:\.[0-9]+)?\][^\n]*\((?:source body|snippet only|source summary)\)\s*:/i;
-const THINK_BLOCK = /<think\b[^>]*>[\s\S]*?<\/think\s*>/gi;
-const THINK_TAG = /<\/?think\b[^>]*>/gi;
+const LEADING_THINK_BLOCK = /^\s*<think\b[^>]*>[\s\S]*?<\/think\s*>\s*/i;
+const LEADING_THINK_CLOSE = /^\s*<\/think\s*>\s*/i;
 const EMPTY_LIST_ITEM = /^\s*(?:[-*]|\d+[.)])\s*$/;
 
 export function sanitizeNarrativeText(text = '') {
-  return stripInternalReferenceTokens(
-    String(text || '')
-      .replace(THINK_BLOCK, '')
-      .replace(THINK_TAG, ''),
-  );
+  let sanitized = String(text || '');
+  let previous;
+  do {
+    previous = sanitized;
+    sanitized = sanitized
+      .replace(LEADING_THINK_BLOCK, '')
+      .replace(LEADING_THINK_CLOSE, '');
+  } while (sanitized !== previous);
+  return stripInternalReferenceTokens(sanitized);
 }
 
 export function sanitizeNarrativeResponse(text = '') {
@@ -75,11 +79,11 @@ function normalizeKeyFindings(value) {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item) => {
     if (typeof item === 'string') {
-      const text = item.trim();
+      const text = sanitizeNarrativeText(item).trim();
       return text ? [{ heading: '', claims: [text] }] : [];
     }
     if (!item || typeof item !== 'object') return [];
-    const heading = String(item.heading || item.title || '').trim();
+    const heading = sanitizeNarrativeText(item.heading || item.title || '').trim();
     const claims = asStringList(item.claims || item.items);
     return claims.length ? [{ heading, claims }] : [];
   });
@@ -93,7 +97,7 @@ export function validateNarrativeObject(value, { requireCitedKeyFindings = false
   if (value.evidence != null || value.sources != null || value.Evidence != null || value.Sources != null) {
     flags.push('narrative_has_generated_sections');
   }
-  const title = String(value.title || '').trim();
+  const title = sanitizeNarrativeText(value.title || '').trim();
   if (!title) flags.push('narrative_missing_title');
   const summary = asStringList(value.summary);
   if (!summary.length || summary.every((item) => isWeakText(item))) flags.push('narrative_empty_summary');

@@ -1,6 +1,10 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import {
+  REPORT_FAILURE_PHASES,
+  sanitizeReportFailedChecks,
+} from './report-builder.mjs';
 
 export const RUN_RECORD_SCHEMA_VERSION = 1;
 
@@ -158,12 +162,13 @@ function safeName(value, fallback = 'record') {
 function errorRecord(error) {
   if (!error) return null;
   const normalized = error instanceof Error ? error : new Error(String(error));
+  const phase = REPORT_FAILURE_PHASES.includes(normalized.phase) ? normalized.phase : null;
   return sanitizeRecordedValue({
     name: normalized.name || 'Error',
     message: normalized.message || String(normalized),
     code: normalized.code || null,
-    phase: normalized.phase || null,
-    failedChecks: Array.isArray(normalized.failedChecks) ? normalized.failedChecks : [],
+    phase,
+    failedChecks: sanitizeReportFailedChecks(normalized.failedChecks, { phase }),
     attemptCounts: normalized.attemptCounts || null,
     cause: normalized.cause ? {
       name: normalized.cause.name || 'Error',
@@ -365,10 +370,11 @@ export class FileRunRecorder {
       ? status
       : 'failed';
     const completedAt = new Date().toISOString();
+    const recordedError = errorRecord(error);
+    const safeMetadata = sanitizeRecordedValue(metadata);
     if (error) {
-      const recordedError = errorRecord(error);
       atomicWrite(path.join(this.sessionDir, 'failure.json'), {
-        ...sanitizeRecordedValue(metadata),
+        ...safeMetadata,
         schemaVersion: RUN_RECORD_SCHEMA_VERSION,
         status: normalized,
         phase: recordedError?.phase || null,
@@ -378,15 +384,19 @@ export class FileRunRecorder {
       }, { sanitized: true });
     }
     this.event('session_finished', {
+      ...safeMetadata,
       status: normalized,
-      error: errorRecord(error),
-      ...sanitizeRecordedValue(metadata),
+      phase: recordedError?.phase || null,
+      failedChecks: recordedError?.failedChecks || [],
+      error: recordedError,
     });
     this.run = {
       ...this.run,
-      ...sanitizeRecordedValue(metadata),
+      ...safeMetadata,
       status: normalized,
-      error: errorRecord(error),
+      phase: recordedError?.phase || null,
+      failedChecks: recordedError?.failedChecks || [],
+      error: recordedError,
       completedAt,
       updatedAt: completedAt,
     };

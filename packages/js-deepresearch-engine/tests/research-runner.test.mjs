@@ -273,7 +273,7 @@ describe('ResearchRunner', () => {
       search: { async search() { return [{ title: 'S', url: 'https://example.test', snippet: 'evidence' }]; } },
       llm: { async complete({ purpose }) {
         if (purpose === 'search_query_planning') return JSON.stringify({ queries: [] });
-        return `${validReport('cleanable [gap-2] report </think>')}\n\n-   \n`;
+        return `</think>\n${validReport('cleanable [gap-2] report')}\n\n-   \n`;
       } },
     });
 
@@ -301,7 +301,7 @@ describe('ResearchRunner', () => {
       llm: { async complete({ purpose }) {
         if (purpose === 'search_query_planning') return JSON.stringify({ queries: [] });
         reportAttempts += 1;
-        if (reportAttempts === 1) return '{"title":"malformed"';
+        if (reportAttempts === 1) return 'prefix: {"title":"malformed","summary":[';
         if (reportAttempts === 2) return semanticallyInvalid;
         return validReport('parse retry recovery');
       } },
@@ -367,7 +367,9 @@ describe('ResearchRunner', () => {
         settings: { llm: {}, search: {}, research: { strategy: 'quick', iterations: 1, questionsPerIteration: 0 } },
         search: { async search() { return [{ title: 'S', url: 'https://example.test', snippet: 'evidence' }]; } },
         llm: { async complete({ purpose }) {
-          return purpose === 'search_query_planning' ? JSON.stringify({ queries: [] }) : '{"title":"malformed"';
+          return purpose === 'search_query_planning'
+            ? JSON.stringify({ queries: [] })
+            : 'prefix: {"title":"malformed","keyFindings":[';
         } },
       }),
       (error) => (
@@ -377,6 +379,48 @@ describe('ResearchRunner', () => {
         && error.failedChecks.some((item) => item.check === 'narrative_not_json')
       ),
     );
+  });
+
+  it('classifies a malformed fenced narrative after leading explanation as parse without semantic debit', async () => {
+    let reportAttempts = 0;
+    const result = await new ResearchRunner().run({
+      query: 'fenced parse retry topic',
+      settings: { llm: {}, search: {}, research: { strategy: 'quick', iterations: 1, questionsPerIteration: 0 } },
+      search: { async search() { return [{ title: 'S', url: 'https://example.test', snippet: 'evidence' }]; } },
+      llm: { async complete({ purpose }) {
+        if (purpose === 'search_query_planning') return JSON.stringify({ queries: [] });
+        reportAttempts += 1;
+        if (reportAttempts === 1) {
+          return 'Here is the requested object:\n```json\n{"title":"broken","summary":[';
+        }
+        return validReport('fenced parse recovery');
+      } },
+    });
+
+    const parseRetry = result.trace.find((entry) => (
+      entry.action === 'report_retry_requested' && entry.phase === 'parse'
+    ));
+    assert.equal(reportAttempts, 2);
+    assert.equal(parseRetry?.attemptCounts?.parse, 1);
+    assert.equal(parseRetry?.attemptCounts?.semanticContract, 0);
+  });
+
+  it('does not classify ordinary Markdown braces as structured narrative', async () => {
+    let reportAttempts = 0;
+    const result = await new ResearchRunner().run({
+      query: 'markdown braces topic',
+      settings: { llm: {}, search: {}, research: { strategy: 'quick', iterations: 1, questionsPerIteration: 0 } },
+      search: { async search() { return [{ title: 'S', url: 'https://example.test', snippet: 'evidence' }]; } },
+      llm: { async complete({ purpose }) {
+        if (purpose === 'search_query_planning') return JSON.stringify({ queries: [] });
+        reportAttempts += 1;
+        return validReport('Markdown with an ordinary {example: value} object');
+      } },
+    });
+
+    assert.equal(reportAttempts, 1);
+    assert.match(result.report, /\{example: value\}/);
+    assert.equal(result.trace.some((entry) => entry.phase === 'parse'), false);
   });
 
   it('rejects a persistently empty report instead of completing', async () => {
@@ -476,6 +520,91 @@ describe('ResearchRunner', () => {
     assert.ok((result.reportPlan?.keyFindings || []).some((group) => (group.claims || []).length));
     assert.doesNotMatch(reportPromptText, /only as Confirmed Background Facts while the judgment slot remains open/);
     assert.doesNotMatch(result.report.split('## Evidence')[0], /still unresolved|仍未关闭/);
+  });
+
+  it('cannot let one answered slot and an unrelated Key Finding satisfy a two-slot contract', async () => {
+    const answerA = 'Alpha remains enabled for production deployments.';
+    const answerB = 'Beta requires an explicit compatibility flag for production deployments.';
+    const result = await new ResearchRunner().run({
+      query: 'Compare Alpha and Beta production deployment requirements',
+      settings: {
+        llm: {},
+        search: {},
+        research: {
+          strategy: 'focused',
+          iterations: 1,
+          questionsPerIteration: 0,
+          quality: { entailment: 'rules' },
+          focused: {
+            fetchMode: 'disabled',
+            iterationControl: { enabled: false },
+            evidencePassages: { enabled: true, claimAlignment: true },
+          },
+        },
+      },
+      search: {
+        async search(question) {
+          const beta = /Beta/i.test(question);
+          const answer = beta ? answerB : answerA;
+          return [{
+            title: beta ? 'Beta production guide' : 'Alpha production guide',
+            url: beta ? 'https://docs.example.com/beta' : 'https://docs.example.com/alpha',
+            content: `${question}. ${answer} ${'Official deployment documentation supplies directly anchored evidence. '.repeat(4)}`,
+            fetchStatus: 'ok',
+            contentOrigin: 'fetched',
+            assessment: { firstParty: true, publisherType: 'official', contentKind: 'documentation' },
+          }];
+        },
+      },
+      llm: {
+        async complete({ purpose, messages }) {
+          if (purpose === 'search_query_planning') return defaultSearchQueryPlan(messages);
+          if (purpose === 'research_profile') {
+            return JSON.stringify({
+              queryShape: 'comparison',
+              requiredAnswerSlots: [
+                { answerSlot: 'alpha-slot', question: 'Alpha production requirements' },
+                { answerSlot: 'beta-slot', question: 'Beta production requirements' },
+              ],
+            });
+          }
+          if (purpose === 'gap_support') {
+            return JSON.stringify({
+              judgments: [
+                { answerSlot: 'alpha-slot', verdict: 'supported', quote: answerA },
+                { answerSlot: 'beta-slot', verdict: 'supported', quote: answerB },
+              ],
+            });
+          }
+          if (purpose === 'question_generation') return '[]';
+          if (purpose === 'report') {
+            return JSON.stringify({
+              title: 'Alpha and Beta production requirements',
+              summary: [`Alpha has a documented production path, while every required comparison slot remains independently contract-bound. ${answerA} [1.1]`],
+              keyFindings: [{
+                heading: 'Partial LLM answer',
+                claims: [
+                  `${answerA} [1.1]`,
+                  'An unrelated deployment observation cannot answer the missing Beta slot. [1.1]',
+                ],
+              }],
+              caveats: [],
+            });
+          }
+          return '{}';
+        },
+      },
+    });
+
+    assert.equal(result.reportContract.verifiedSlotIds.length, 2);
+    assert.equal(result.quality.reportContractSatisfied, true);
+    assert.match(result.report.split('## Evidence')[0], new RegExp(answerB.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    const boundSlotIds = new Set(
+      result.reportPlan.keyFindings
+        .flatMap((group) => group.claims || [])
+        .flatMap((claim) => claim.boundSlotIds || []),
+    );
+    assert.deepEqual([...boundSlotIds].sort(), [...result.reportContract.verifiedSlotIds].sort());
   });
 
   it('records focused critical gaps and evidence limitations', async () => {

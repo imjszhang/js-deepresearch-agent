@@ -12,6 +12,8 @@ import {
   normalizeCaveatKey,
   parseNarrativeResponse,
   reviseUnsupportedKeyClaims,
+  sanitizeNarrativeResponse,
+  sanitizeNarrativeText,
   shouldMoveWeakKeyClaim,
   validateNarrativeObject,
   validateReportOutput,
@@ -74,6 +76,66 @@ ${'A sufficiently detailed summary remains semantically valid after deterministi
     assert.ok(check.flags.includes('report_reasoning_token'));
     assert.ok(check.flags.includes('report_empty_bullets'));
     assert.equal(classifyReportFailurePhase(check), 'render');
+  });
+
+  it('only strips numeric gap ids and preserves ordinary bracket text and citations', () => {
+    assert.equal(
+      sanitizeNarrativeText('Keep [source-code], [slot-machine], and [1.1], but remove [gap-2].'),
+      'Keep [source-code], [slot-machine], and [1.1], but remove.',
+    );
+    const bracketFindings = [{
+      question: 'bracket syntax',
+      sources: [{
+        title: 'The [source-code] guide for [slot-machine]',
+        url: 'https://example.test/brackets',
+        content: 'Body preserves [source-code], [slot-machine], and citation-like [1.1] text.',
+        fetchStatus: 'ok',
+        contentOrigin: 'fetched',
+      }],
+    }];
+    const report = assembleReport({
+      narrative: `# Bracket report
+
+## Summary
+The [source-code] guide documents [slot-machine] syntax without treating either phrase as an internal identifier. [1.1]
+
+## Key Findings
+- Ordinary bracket text remains part of the source-backed narrative and the numeric citation remains valid. [1.1]
+`,
+      findings: bracketFindings,
+      query: 'bracket syntax',
+    });
+    assert.match(report, /\[source-code\].*\[slot-machine\]/);
+    assert.equal(validateReportOutput(report, {
+      minChars: 120,
+      mode: 'full',
+      findings: bracketFindings,
+    }).ok, true);
+  });
+
+  it('removes only leading thinking prefixes and preserves embedded tagged source text', () => {
+    const cleaned = sanitizeNarrativeResponse(`<think>SECRET PREFIX REASONING</think>
+# Research Report
+
+## Summary
+A complete report begins after the reasoning prefix.`);
+    assert.doesNotMatch(cleaned, /SECRET PREFIX REASONING|<\/?think>/);
+    assert.match(cleaned, /^# Research Report/);
+    assert.equal(
+      sanitizeNarrativeText('<think>field reasoning</think>Supported field text.'),
+      'Supported field text.',
+    );
+    const embedded = 'A source literally contains <think>documented tag</think> in its example.';
+    assert.equal(sanitizeNarrativeText(embedded), embedded);
+    const check = validateReportOutput(`# Tagged source
+
+## Summary
+${embedded} ${'This surrounding narrative remains long enough for validation. '.repeat(4)}
+
+## Key Findings
+- The embedded tag is retained rather than silently converting its contents into an ordinary fact. [1.1]
+`, { minChars: 200, mode: 'narrative', findings });
+    assert.ok(check.flags.includes('report_reasoning_token'));
   });
 
   it('rejects a narrative that dumps source bodies into Key Findings', () => {

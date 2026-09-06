@@ -104,8 +104,9 @@
 /**
  * @typedef {Object} ReportFailedCheck
  * @property {string} check
- * @property {unknown} expected
- * @property {unknown} actual
+ * @property {ReportFailurePhase} [phase]
+ * @property {Record<string, boolean|number|string|object|null>} expected Safe structured diagnostics only.
+ * @property {Record<string, boolean|number|string|object|null>} actual Safe structured diagnostics only; free text is represented by length/hash.
  */
 
 /**

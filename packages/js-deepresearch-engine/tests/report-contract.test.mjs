@@ -6,7 +6,9 @@ import {
   buildReportContract,
   buildReportPlan,
   extractQualityClaims,
+  flattenPlanClaims,
   formatContractPromptBlock,
+  mergeNarrativeIntoPlan,
   mergeCanonicalClaims,
   parseMarkdownNarrative,
   stripEmptyNarrativeSections,
@@ -85,12 +87,7 @@ ${narrative.summary[0]}
       gaps,
       citationMap: new Map([['1.1', { citationKey: '1.1', sourceId: 'src-official' }]]),
     });
-    const merged = {
-      ...plan,
-      summary: narrative.summary,
-      backgroundFacts: narrative.backgroundFacts,
-      keyFindings: narrative.keyFindings,
-    };
+    const merged = mergeNarrativeIntoPlan(plan, narrative);
     const check = validateReportPlan(merged, contract);
     assert.equal(check.ok, true, check.flags.join(','));
     const emptyPlan = { ...plan, keyFindings: [], slotClaims: [] };
@@ -118,5 +115,128 @@ ${narrative.summary[0]}
     assert.doesNotMatch(text, /only as Confirmed Background Facts while the judgment slot remains open/);
     assert.doesNotMatch(text, /required judgment remains unresolved/i);
     assert.match(text, /Closed judgment slots must appear in keyFindings/);
+  });
+
+  it('binds every required slot when the LLM answers only one or emits an unrelated Key Finding', () => {
+    const slotFixtures = [
+      {
+        id: 'gap-2',
+        requiredSlot: true,
+        status: 'verified',
+        evidenceStatus: 'verified',
+        question: 'Required slot A',
+        slotSupport: {
+          verdict: 'supported',
+          quoteAnchored: true,
+          quote: 'Anchored answer for slot A.',
+          supportingPassageIds: ['p-a'],
+        },
+      },
+      {
+        id: 'gap-3',
+        requiredSlot: true,
+        status: 'verified',
+        evidenceStatus: 'verified',
+        question: 'Required slot B',
+        slotSupport: {
+          verdict: 'supported',
+          quoteAnchored: true,
+          quote: 'Anchored answer for slot B.',
+          supportingPassageIds: ['p-b'],
+        },
+      },
+    ];
+    const twoSlotContract = buildReportContract({
+      gaps: slotFixtures,
+      brief: { queryShape: 'comparison' },
+      strategy: 'focused',
+    });
+    const twoSlotPlan = buildReportPlan({
+      contract: twoSlotContract,
+      gaps: slotFixtures,
+      passages: [
+        { id: 'p-a', sourceId: 'src-a', text: 'Anchored answer for slot A.' },
+        { id: 'p-b', sourceId: 'src-b', text: 'Anchored answer for slot B.' },
+      ],
+      citationMap: new Map([
+        ['1.1', { citationKey: '1.1', sourceId: 'src-a' }],
+        ['2.1', { citationKey: '2.1', sourceId: 'src-b' }],
+      ]),
+    });
+    assert.equal(twoSlotPlan.slotClaims.length, 2);
+
+    for (const claims of [
+      ['Anchored answer for slot A.'],
+      ['An unrelated observation cannot stand in for either required slot. [1.1]'],
+    ]) {
+      const merged = mergeNarrativeIntoPlan(twoSlotPlan, {
+        title: 'Two-slot report',
+        summary: ['Both required slots must remain contract-bound in the final report.'],
+        keyFindings: [{ heading: 'LLM output', claims }],
+        caveats: [],
+      });
+      const check = validateReportPlan(merged, twoSlotContract);
+      assert.equal(check.ok, true, check.flags.join(','));
+      const bound = flattenPlanClaims(merged)
+        .flatMap((claim) => claim.boundSlotIds || []);
+      assert.ok(bound.includes('gap-2'));
+      assert.ok(bound.includes('gap-3'));
+    }
+  });
+
+  it('fails the semantic contract for a verified required slot without an anchored cited answer', () => {
+    const unsupportedSlots = [
+      {
+        id: 'gap-2',
+        requiredSlot: true,
+        status: 'verified',
+        evidenceStatus: 'verified',
+        question: 'Supported slot',
+        slotSupport: {
+          verdict: 'supported',
+          quoteAnchored: true,
+          quote: 'Anchored supported answer.',
+          supportingPassageIds: ['p-a'],
+        },
+      },
+      {
+        id: 'gap-3',
+        requiredSlot: true,
+        status: 'verified',
+        evidenceStatus: 'verified',
+        question: 'Unsupported frozen slot',
+        slotSupport: {
+          verdict: 'unverifiable',
+          quoteAnchored: false,
+          quote: '',
+          supportingPassageIds: [],
+        },
+      },
+    ];
+    const frozenContract = buildReportContract({
+      gaps: unsupportedSlots,
+      brief: { queryShape: 'comparison' },
+      strategy: 'focused',
+    });
+    const plan = buildReportPlan({
+      contract: frozenContract,
+      gaps: unsupportedSlots,
+      passages: [{ id: 'p-a', sourceId: 'src-a', text: 'Anchored supported answer.' }],
+      citationMap: new Map([['1.1', { citationKey: '1.1', sourceId: 'src-a' }]]),
+    });
+    const merged = mergeNarrativeIntoPlan(plan, {
+      title: 'Unsupported slot report',
+      summary: ['An unrelated long summary cannot make the missing required slot successful.'],
+      keyFindings: [{ heading: '', claims: ['An unrelated Key Finding. [1.1]'] }],
+      caveats: [],
+    });
+    const check = validateReportPlan(merged, frozenContract);
+    assert.equal(check.ok, false);
+    assert.ok(check.failedChecks.some((item) => (
+      item.check === 'report_missing_required_slot_claim'
+      && item.actual.slotIndex === 1
+      && item.actual.boundClaims === 0
+    )));
+    assert.ok(merged.requiredLimitations.some((item) => item.includes('gap-3')));
   });
 });

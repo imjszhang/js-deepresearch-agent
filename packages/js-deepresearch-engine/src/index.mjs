@@ -167,6 +167,8 @@ export {
   emptyBulletLines,
   extractLabeledNarrativeText,
   classifyReportFailurePhase,
+  sanitizeReportFailedChecks,
+  looksLikeStructuredNarrative,
   REPORT_FAILURE_PHASES,
 } from './research/report-builder.mjs';
 export {

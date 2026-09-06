@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { reportPrompt, reportRetryPrompt, reportRevisionRetryPrompt } from './prompts.mjs';
 import { parseCitations, parseInternalReferenceTokens } from './citations.mjs';
 import { classifyClaimSection } from './claim-quality.mjs';
@@ -23,6 +24,89 @@ export const REPORT_FAILURE_PHASES = Object.freeze([
   'semantic-contract',
   'render',
 ]);
+
+const SAFE_DIAGNOSTIC_KEYS = new Set([
+  'passed',
+  'nonEmpty',
+  'characters',
+  'minimumCharacters',
+  'markdownHeadings',
+  'minimumMarkdownHeadings',
+  'truncated',
+  'lastContentLength',
+  'lastContentSha256',
+  'endingCategory',
+  'sourceDumpDetected',
+  'significantCharacters',
+  'minimumSignificantCharacters',
+  'sectionPresent',
+  'unresolvedCitationCount',
+  'unresolvedCitationSetSha256',
+  'internalReferenceTokenCount',
+  'internalReferenceKind',
+  'reasoningTokenCount',
+  'emptyBulletLines',
+  'validStructuredNarrative',
+  'minimumKeyClaims',
+  'keyClaims',
+  'minimumRequiredSlotClaimsInKeyFindings',
+  'requiredSlotClaims',
+  'requiredSlotClaimsInKeyFindings',
+  'minimumBoundClaims',
+  'boundClaims',
+  'slotIndex',
+  'slotIdSha256',
+  'supportable',
+  'quoteAnchored',
+  'citationCount',
+]);
+const SAFE_DIAGNOSTIC_ENUMS = new Set([
+  'gap',
+  'empty',
+  'citation',
+  'terminal_punctuation',
+  'long_unpunctuated',
+  'short_unpunctuated',
+]);
+
+function diagnosticHash(value = '') {
+  return createHash('sha256').update(String(value)).digest('hex');
+}
+
+function sanitizeDiagnosticValue(value, key = '') {
+  if (value == null || typeof value === 'boolean' || typeof value === 'number') return value;
+  if (typeof value === 'string') {
+    if (key.endsWith('Sha256') && /^[a-f0-9]{64}$/i.test(value)) return value.toLowerCase();
+    if ((key === 'endingCategory' || key === 'internalReferenceKind') && SAFE_DIAGNOSTIC_ENUMS.has(value)) {
+      return value;
+    }
+    return { characters: value.length, sha256: diagnosticHash(value) };
+  }
+  if (Array.isArray(value)) {
+    return { count: value.length, sha256: diagnosticHash(JSON.stringify(value)) };
+  }
+  if (typeof value !== 'object') return null;
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([childKey]) => SAFE_DIAGNOSTIC_KEYS.has(childKey))
+      .map(([childKey, childValue]) => [
+        childKey,
+        sanitizeDiagnosticValue(childValue, childKey),
+      ]),
+  );
+}
+
+export function sanitizeReportFailedChecks(failedChecks = [], { phase = null } = {}) {
+  const safePhase = REPORT_FAILURE_PHASES.includes(phase) ? phase : null;
+  return (Array.isArray(failedChecks) ? failedChecks : []).map((item) => ({
+    check: /^[a-z0-9_:-]{1,96}$/i.test(String(item?.check || ''))
+      ? String(item.check)
+      : 'unknown_report_check',
+    ...(safePhase ? { phase: safePhase } : {}),
+    expected: sanitizeDiagnosticValue(item?.expected),
+    actual: sanitizeDiagnosticValue(item?.actual),
+  }));
+}
 
 function formatCheckValue(value) {
   if (typeof value === 'string') return value;
@@ -96,10 +180,12 @@ export class ReportGenerationError extends Error {
     const reasoningHint = diagnostic?.hasReasoningContent && !diagnostic?.hasContent
       ? ' The provider returned reasoning metadata but no final content.'
       : '';
-    const normalizedChecks = failedChecks.length
+    const unsafeChecks = failedChecks.length
       ? failedChecks
       : fallbackFailedChecks(flags, { minChars, outputChars });
-    const phaseLabel = phase || 'unknown';
+    const safePhase = REPORT_FAILURE_PHASES.includes(phase) ? phase : null;
+    const phaseLabel = safePhase || 'unknown';
+    const normalizedChecks = sanitizeReportFailedChecks(unsafeChecks, { phase: safePhase });
     super(`Report generation failed after ${attempts} report attempts during ${phaseLabel}. Failing checks: ${formatFailedChecks(normalizedChecks)}.${reasoningHint}`);
     this.name = 'ReportGenerationError';
     this.code = 'REPORT_OUTPUT_INVALID';
@@ -109,7 +195,7 @@ export class ReportGenerationError extends Error {
     this.diagnostic = diagnostic;
     this.flags = flags;
     this.failedChecks = normalizedChecks;
-    this.phase = phase;
+    this.phase = safePhase;
     this.contract = contract;
     this.attemptCounts = attemptCounts || null;
   }
@@ -152,6 +238,14 @@ export function looksTruncated(report) {
   if (/[.!?。！？]"?$/.test(last)) return false;
   if (/[.!?。！？]\s*\[[0-9.]+\]$/.test(last)) return false;
   return last.length > 24;
+}
+
+function endingCategory(line = '') {
+  const last = String(line || '').replace(/^\s*(?:[-*]|\d+[.)])\s+/, '');
+  if (!last) return 'empty';
+  if (/\[\d+\.\d+(?:\s*[-,，]\s*\d+\.\d+)*\]$/.test(last)) return 'citation';
+  if (/[.!?。！？]"?$/.test(last)) return 'terminal_punctuation';
+  return last.length > 24 ? 'long_unpunctuated' : 'short_unpunctuated';
 }
 
 function textBeforeGeneratedSections(report = '') {
@@ -232,7 +326,13 @@ export function validateReportOutput(report, {
     fail('report_missing_heading', { minimumMarkdownHeadings: 1 }, { markdownHeadings: 0 });
   }
   if (text && mode === 'narrative' && looksTruncated(text)) {
-    fail('report_truncated', { truncated: false }, { truncated: true, lastContentLine: lastContentLine(text) });
+    const last = lastContentLine(text);
+    fail('report_truncated', { truncated: false }, {
+      truncated: true,
+      lastContentLength: last.length,
+      lastContentSha256: diagnosticHash(last),
+      endingCategory: endingCategory(last),
+    });
   }
   const narrativeText = mode === 'full' ? textBeforeGeneratedSections(text) : text;
   const labeled = extractLabeledNarrativeText(narrativeText);
@@ -264,15 +364,23 @@ export function validateReportOutput(report, {
   }
   const dangling = unresolvedCitations(text, findings);
   if (dangling.length) {
-    fail('report_unresolved_citations', { unresolvedCitations: [] }, { unresolvedCitations: dangling });
+    fail('report_unresolved_citations', { unresolvedCitationCount: 0 }, {
+      unresolvedCitationCount: dangling.length,
+      unresolvedCitationSetSha256: diagnosticHash([...dangling].sort().join(',')),
+    });
   }
   const internalTokens = parseInternalReferenceTokens(text);
   if (internalTokens.length) {
-    fail('report_internal_reference_token', { internalReferenceTokens: [] }, { internalReferenceTokens: internalTokens });
+    fail('report_internal_reference_token', { internalReferenceTokenCount: 0 }, {
+      internalReferenceTokenCount: internalTokens.length,
+      internalReferenceKind: 'gap',
+    });
   }
   const reasoningTokens = [...new Set(text.match(REASONING_TOKEN) || [])];
   if (reasoningTokens.length) {
-    fail('report_reasoning_token', { reasoningTokens: [] }, { reasoningTokens });
+    fail('report_reasoning_token', { reasoningTokenCount: 0 }, {
+      reasoningTokenCount: reasoningTokens.length,
+    });
   }
   const emptyBullets = emptyBulletLines(text);
   if (emptyBullets.length) {
@@ -332,9 +440,23 @@ export function classifyReportFailurePhase(validation) {
     : 'semantic-contract';
 }
 
-function looksLikeStructuredNarrative(text = '') {
+export function looksLikeStructuredNarrative(text = '') {
   const value = String(text || '').trim();
-  return value.startsWith('{') || /^```json\b/i.test(value);
+  if (/```json\b[\s\S]*?\{/i.test(value)) return true;
+  const objectStart = value.indexOf('{');
+  if (objectStart < 0) return false;
+  const objectCandidate = value.slice(objectStart);
+  const fields = new Set(
+    [...objectCandidate.matchAll(/"(title|summary|backgroundFacts|confirmedBackgroundFacts|keyFindings|caveats)"\s*:/g)]
+      .map((match) => match[1]),
+  );
+  return fields.has('title') && (
+    fields.has('summary')
+    || fields.has('keyFindings')
+    || fields.has('backgroundFacts')
+    || fields.has('confirmedBackgroundFacts')
+    || fields.has('caveats')
+  );
 }
 
 export async function buildReport({
