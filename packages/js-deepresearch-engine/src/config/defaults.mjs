@@ -98,6 +98,13 @@ export const defaultSettings = Object.freeze({
       alternateEvidence: {
         enabled: true,
       },
+      backends: ['http', 'alternate', 'headless', 'js-eyes'],
+      headless: {
+        enabled: false,
+        waitUntil: 'domcontentloaded',
+        timeoutMs: 15000,
+        maxConcurrency: 2,
+      },
       transport: {
         maxAttempts: 3,
         hostCircuitThreshold: 3,
@@ -271,6 +278,10 @@ export function mergeSettings(overrides = {}) {
         alternateEvidence: {
           ...defaultSettings.research.read.alternateEvidence,
           ...(researchOverrides.read?.alternateEvidence || {}),
+        },
+        headless: {
+          ...defaultSettings.research.read.headless,
+          ...(researchOverrides.read?.headless || {}),
         },
         transport: {
           ...defaultSettings.research.read.transport,

@@ -117,6 +117,7 @@ async function enrichOneSource(source, {
   recorder,
   transportMemory,
   fetchImpl,
+  headlessFetch,
 }) {
   const url = String(source.url || '').trim();
   if (!url) {
@@ -168,9 +169,37 @@ async function enrichOneSource(source, {
     signal,
     maxChars: maxFetchChars || maxContentChars,
     fetchImpl,
+    headlessFetch,
     transportMemory,
     recorder,
   });
+  if (
+    fetched.accessStatus === 'blocked'
+    || fetched.bodyQuality === 'waf'
+    || fetched.status === 'blocked'
+  ) {
+    return {
+      ...withSourceProvenance(source, fetched),
+      ...(fetched.finalUrl ? { finalUrl: fetched.finalUrl } : {}),
+      ...(fetched.title ? { title: fetched.title } : {}),
+      retrievedVia: fetched.retrievedVia || 'headless',
+      retrievedAt: fetched.retrievedAt || null,
+      fetchStatus: 'failed',
+      content: '',
+      summary: '',
+      contentOrigin: source.contentOrigin,
+      fetchError: fetched.error || 'Challenge or access-denied page',
+      fetchErrorType: fetched.errorType || 'challenge',
+      httpStatus: fetched.httpStatus ?? null,
+      fetchAttempts: fetched.fetchAttempts ?? 1,
+      retryable: false,
+      backend: fetched.backend || requestedBackend,
+      retrievalPath: fetched.retrievalPath || fetched.retrievedVia || 'headless',
+      accessStatus: 'blocked',
+      accessNotes: fetched.accessNotes || fetched.error || 'blocked',
+      bodyQuality: 'waf',
+    };
+  }
   if (fetched.status !== 'ok' || fetched.evidenceRole === 'metadata') {
     return {
       ...withSourceProvenance(source, fetched),
@@ -360,6 +389,7 @@ export async function enrichFindingSources(finding, options = {}) {
     recorder,
     transportMemory,
     fetchImpl,
+    headlessFetch,
     seenUrls = new Set(),
     enrichedCount = { value: 0 },
   } = options;
@@ -424,6 +454,7 @@ export async function enrichFindingSources(finding, options = {}) {
           recorder,
           transportMemory,
           fetchImpl,
+          headlessFetch,
         });
         enrichedByUrl.set(source.url, enriched);
         if (enriched.fetchStatus === 'ok') {
