@@ -15,7 +15,7 @@
     "server": "node src/server.mjs",
     "build": "vite build",
     "preview": "node src/server.mjs",
-    "test": "npm run test -w js-deepresearch-engine && npm run test -w js-wiki-engine && node --test tests/*.test.mjs",
+    "test": "npm run test -w js-deepresearch-engine && npm run test -w js-wiki-engine && node --test --test-force-exit --test-timeout=60000 tests/*.test.mjs",
     "test:watch": "node --test --watch tests/*.test.mjs",
     "benchmark": "node scripts/benchmark-research.mjs",
     "benchmark:strategies": "node scripts/benchmark-strategies.mjs",
