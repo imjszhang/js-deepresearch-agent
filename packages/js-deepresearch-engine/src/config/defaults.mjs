@@ -95,6 +95,9 @@ export const defaultSettings = Object.freeze({
       sourceAssessment: {
         enabled: false,
       },
+      alternateEvidence: {
+        enabled: true,
+      },
       transport: {
         maxAttempts: 3,
         hostCircuitThreshold: 3,
@@ -264,6 +267,10 @@ export function mergeSettings(overrides = {}) {
         sourceAssessment: {
           ...defaultSettings.research.read.sourceAssessment,
           ...(researchOverrides.read?.sourceAssessment || {}),
+        },
+        alternateEvidence: {
+          ...defaultSettings.research.read.alternateEvidence,
+          ...(researchOverrides.read?.alternateEvidence || {}),
         },
         transport: {
           ...defaultSettings.research.read.transport,

@@ -122,6 +122,7 @@ export function getSourceEvidence(source = {}) {
 export function sourceHasFetchedBody(source = {}) {
   if (source.fetchStatus === 'irrelevant' || source.bodyQuality === 'irrelevant') return false;
   if (source.fetchStatus === 'waf' || source.bodyQuality === 'waf') return false;
+  if (source.evidenceRole === 'metadata' || source.contentOrigin === 'metadata') return false;
   return Boolean(String(source.content || '').trim())
     && (source.fetchStatus === 'ok' || source.contentOrigin === 'fetched');
 }

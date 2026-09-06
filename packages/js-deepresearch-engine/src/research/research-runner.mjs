@@ -12,6 +12,7 @@ import { alignReportClaims, buildPassageArtifactsAsync, listSnippetOnlyCitationK
 import { evaluatePreReport } from './quality-gates.mjs';
 import { applyAsOfGate, resolveCompletionStatus } from './as-of.mjs';
 import { applySlotStatusToClaims } from './report-evidence.mjs';
+import { archiveDisclosureText } from './alternate-evidence.mjs';
 import { buildResearchLimitations } from './limitations.mjs';
 import { resolveFocusedSettings } from './focused-settings.mjs';
 import { createResearchProviders } from './research-providers.mjs';
@@ -260,6 +261,9 @@ export class ResearchRunner {
             `${gap.gapId}${gap.answerSlot ? ` (${gap.answerSlot})` : ''}: ${gap.blockedReason}`
           )).join('; ')}.`
           : null,
+        ...findings.flatMap((finding) => [finding, ...(finding.sources || [])])
+          .map((entry) => archiveDisclosureText(entry))
+          .filter(Boolean),
       ].filter(Boolean),
     };
     let canonical = buildResearchLimitations(limitationBase);

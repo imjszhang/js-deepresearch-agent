@@ -43,7 +43,7 @@
  * @property {number} [questionsPerIteration]
  * @property {number} [concurrency]
  * @property {string} [workDir]
- * @property {{ fetchMode?: string, maxContentChars?: number, enrichConcurrency?: number, sourceAssessment?: { enabled?: boolean }, transport?: { maxAttempts?: number, hostCircuitThreshold?: number, responseHeadersTimeoutMs?: number, htmlTotalTimeoutMs?: number, documentTotalTimeoutMs?: number, largeFileThresholdBytes?: number } }} [read]
+ * @property {{ fetchMode?: string, maxContentChars?: number, enrichConcurrency?: number, sourceAssessment?: { enabled?: boolean }, alternateEvidence?: { enabled?: boolean }, transport?: { maxAttempts?: number, hostCircuitThreshold?: number, responseHeadersTimeoutMs?: number, htmlTotalTimeoutMs?: number, documentTotalTimeoutMs?: number, largeFileThresholdBytes?: number } }} [read]
  * @property {FocusedSettings} [focused]
  * @property {Record<string, number>} [budget]
  * @property {Record<string, unknown>} [exploratory]
