@@ -195,7 +195,7 @@ function externalizeLargeStrings(value, writeTextBlob) {
 }
 
 export class FileRunRecorder {
-  constructor({ sessionDir, runId, strategy, query, metadata = {} } = {}) {
+  constructor({ sessionDir, runId, strategy, query, metadata = {}, reopen = false } = {}) {
     if (!sessionDir) throw new Error('sessionDir is required for FileRunRecorder.');
     this.sessionDir = path.resolve(sessionDir);
     this.eventsPath = path.join(this.sessionDir, 'journal', 'events.jsonl');
@@ -205,6 +205,13 @@ export class FileRunRecorder {
     this.blobsDir = path.join(this.sessionDir, 'blobs');
     this.sequence = 0;
     this.checkpointSequence = 0;
+    for (const dir of [this.sessionDir, path.dirname(this.eventsPath), this.callsDir, this.checkpointsDir, this.blobsDir]) {
+      ensurePrivateDirectory(dir);
+    }
+    if (reopen) {
+      this.#reopenExisting();
+      return;
+    }
     this.run = {
       ...sanitizeRecordedValue(metadata),
       schemaVersion: RUN_RECORD_SCHEMA_VERSION,
@@ -221,13 +228,37 @@ export class FileRunRecorder {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    for (const dir of [this.sessionDir, path.dirname(this.eventsPath), this.callsDir, this.checkpointsDir, this.blobsDir]) {
-      ensurePrivateDirectory(dir);
-    }
     atomicWrite(this.runPath, this.run, { sanitized: true });
     this.event('session_started', {
       runId: this.run.runId,
       strategy: this.run.strategy,
+    });
+  }
+
+  static reopen(sessionDir) {
+    return new FileRunRecorder({ sessionDir, reopen: true });
+  }
+
+  #reopenExisting() {
+    if (!fs.existsSync(this.runPath)) {
+      throw new Error(`Cannot reopen session without run.json: ${this.sessionDir}`);
+    }
+    const existing = JSON.parse(fs.readFileSync(this.runPath, 'utf8'));
+    this.sequence = lastJournalSequence(this.eventsPath);
+    this.checkpointSequence = lastCheckpointSequence(this.checkpointsDir);
+    this.run = {
+      ...existing,
+      status: 'running',
+      error: null,
+      phase: null,
+      failedChecks: [],
+      updatedAt: new Date().toISOString(),
+    };
+    atomicWrite(this.runPath, this.run, { sanitized: true });
+    this.event('session_resumed', {
+      runId: this.run.runId,
+      strategy: this.run.strategy,
+      fromCheckpoint: existing.latestCheckpoint || null,
     });
   }
 
@@ -372,8 +403,9 @@ export class FileRunRecorder {
     const completedAt = new Date().toISOString();
     const recordedError = errorRecord(error);
     const safeMetadata = sanitizeRecordedValue(metadata);
+    const failurePath = path.join(this.sessionDir, 'failure.json');
     if (error) {
-      atomicWrite(path.join(this.sessionDir, 'failure.json'), {
+      atomicWrite(failurePath, {
         ...safeMetadata,
         schemaVersion: RUN_RECORD_SCHEMA_VERSION,
         status: normalized,
@@ -382,6 +414,8 @@ export class FileRunRecorder {
         error: recordedError,
         completedAt,
       }, { sanitized: true });
+    } else {
+      try { fs.unlinkSync(failurePath); } catch { /* no stale failure file */ }
     }
     this.event('session_finished', {
       ...safeMetadata,
@@ -459,10 +493,9 @@ function materializeBlobReferences(value, sessionDir) {
   );
 }
 
-export function loadLatestCheckpoint(sessionDir) {
+function loadCheckpointRecord(sessionDir, relativePath) {
   const run = JSON.parse(fs.readFileSync(path.join(path.resolve(sessionDir), 'run.json'), 'utf8'));
-  if (!run.latestCheckpoint) return null;
-  const checkpointPath = resolveInsideSession(sessionDir, run.latestCheckpoint);
+  const checkpointPath = resolveInsideSession(sessionDir, relativePath);
   const checkpoint = JSON.parse(fs.readFileSync(checkpointPath, 'utf8'));
   const statePath = resolveInsideSession(sessionDir, checkpoint.state?.path || '');
   const externalizedState = JSON.parse(fs.readFileSync(statePath, 'utf8'));
@@ -477,6 +510,61 @@ export function loadLatestCheckpoint(sessionDir) {
     checkpoint,
     state: materializeBlobReferences(externalizedState, sessionDir),
   };
+}
+
+export function loadLatestCheckpoint(sessionDir) {
+  const run = JSON.parse(fs.readFileSync(path.join(path.resolve(sessionDir), 'run.json'), 'utf8'));
+  if (!run.latestCheckpoint) return null;
+  return loadCheckpointRecord(sessionDir, run.latestCheckpoint);
+}
+
+export function loadNamedCheckpoint(sessionDir, boundary) {
+  const resolved = path.resolve(sessionDir);
+  const dir = path.join(resolved, 'checkpoints');
+  if (!fs.existsSync(dir)) return null;
+  const suffix = `-${safeName(boundary, 'checkpoint')}.json`;
+  const files = fs.readdirSync(dir)
+    .filter((name) => /^\d{6}-/.test(name) && name.endsWith(suffix))
+    .sort();
+  if (!files.length) return null;
+  return loadCheckpointRecord(resolved, path.join('checkpoints', files[files.length - 1]));
+}
+
+export function maxRecordedCallSequence(sessionDir, kind = 'llm') {
+  const dir = path.join(path.resolve(sessionDir), 'calls');
+  if (!fs.existsSync(dir)) return 0;
+  const pattern = new RegExp(`^${kind}-(\\d+)\\.(?:request|response|error)\\.json$`);
+  let max = 0;
+  for (const name of fs.readdirSync(dir)) {
+    const match = name.match(pattern);
+    if (match) max = Math.max(max, Number(match[1]));
+  }
+  return max;
+}
+
+function lastJournalSequence(eventsPath) {
+  if (!fs.existsSync(eventsPath)) return 0;
+  let max = 0;
+  for (const line of fs.readFileSync(eventsPath, 'utf8').split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const seq = Number(JSON.parse(line).seq);
+      if (Number.isFinite(seq)) max = Math.max(max, seq);
+    } catch {
+      /* ignore a crashed trailing line */
+    }
+  }
+  return max;
+}
+
+function lastCheckpointSequence(checkpointsDir) {
+  if (!fs.existsSync(checkpointsDir)) return 0;
+  let max = 0;
+  for (const name of fs.readdirSync(checkpointsDir)) {
+    const match = name.match(/^(\d{6})-/);
+    if (match) max = Math.max(max, Number(match[1]));
+  }
+  return max;
 }
 
 export function readEventJournal(sessionDir, { materializeBlobs = false } = {}) {

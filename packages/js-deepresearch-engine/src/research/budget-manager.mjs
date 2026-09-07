@@ -275,17 +275,19 @@ export function wrapProvidersWithBudget({
   budget,
   onLlmEvent = () => {},
   recorder: providedRecorder,
+  llmCallSequence = 0,
+  searchCallSequence = 0,
 }) {
   const recorder = recorderOrNoop(providedRecorder);
-  let llmCallSequence = 0;
-  let searchCallSequence = 0;
+  let llmSeq = Number(llmCallSequence) || 0;
+  let searchSeq = Number(searchCallSequence) || 0;
   let lastLlmCall = null;
   return {
     llm: {
       ...llm,
       getLastCallMetadata() { return lastLlmCall ? { ...lastLlmCall } : null; },
       async complete(args) {
-        const callId = `llm-${++llmCallSequence}`;
+        const callId = `llm-${++llmSeq}`;
         const purpose = args?.purpose || 'unspecified';
         const startedAt = Date.now();
         onLlmEvent({ status: 'started', callId, purpose });
@@ -400,7 +402,7 @@ export function wrapProvidersWithBudget({
       capabilities: search.capabilities,
       async search(query, options) {
         budget.claim('searchRequests');
-        const callId = `search-${++searchCallSequence}`;
+        const callId = `search-${++searchSeq}`;
         const startedAt = Date.now();
         recorder.callStarted({
           callId,

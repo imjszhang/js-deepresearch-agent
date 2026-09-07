@@ -309,6 +309,38 @@ function applyLocalCorpusOverrides(settings, flags) {
   };
 }
 
+export function parseResumeExploreFlags(flags = {}) {
+  const continueExplore = Boolean(flags['continue-explore']);
+  const extraSteps = flags['resume-extra-steps'] === undefined
+    ? 0
+    : Number(flags['resume-extra-steps']);
+  const extraSearches = flags['resume-extra-searches'] === undefined
+    ? 0
+    : Number(flags['resume-extra-searches']);
+  const extraReads = flags['resume-extra-reads'] === undefined
+    ? 0
+    : Number(flags['resume-extra-reads']);
+  if (continueExplore && (!Number.isFinite(extraSteps) || extraSteps < 1)) {
+    throw new Error('Flag --continue-explore requires --resume-extra-steps <n> with n >= 1.');
+  }
+  if (!continueExplore && flags['resume-extra-steps'] !== undefined) {
+    throw new Error('Flag --resume-extra-steps requires --continue-explore.');
+  }
+  if (!continueExplore && (
+    flags['resume-extra-searches'] !== undefined
+    || flags['resume-extra-reads'] !== undefined
+  )) {
+    throw new Error('Flag --resume-extra-searches / --resume-extra-reads requires --continue-explore.');
+  }
+  if (flags['resume-extra-searches'] !== undefined && (!Number.isFinite(extraSearches) || extraSearches < 0)) {
+    throw new Error('Flag --resume-extra-searches requires a non-negative number.');
+  }
+  if (flags['resume-extra-reads'] !== undefined && (!Number.isFinite(extraReads) || extraReads < 0)) {
+    throw new Error('Flag --resume-extra-reads requires a non-negative number.');
+  }
+  return { continueExplore, extraSteps, extraSearches, extraReads };
+}
+
 function coerceValue(value) {
   if (value === 'true') return true;
   if (value === 'false') return false;

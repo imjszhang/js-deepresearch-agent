@@ -180,6 +180,42 @@ describe('search query planner', () => {
     assert.deepEqual(result.queries, []);
   });
 
+  it('requires site: on a recovery host in required_host_recovery', async () => {
+    const recovered = await planSearchQueries({
+      llm: llmJson({ queries: [{ query: 'site:qwenlm.github.io Qwen hardware requirements' }] }),
+      mode: 'required_host_recovery',
+      query: 'Qwen official docs on qwenlm.github.io',
+      gap: {
+        id: 'gap-qwen',
+        question: 'What are the official Qwen hardware requirements?',
+        requiredHosts: ['qwenlm.github.io', 'github.com'],
+      },
+      recoveryHosts: ['qwenlm.github.io'],
+      observedHosts: ['github.com'],
+      limit: 1,
+    });
+    assert.equal(recovered.ok, true);
+    assert.match(recovered.queries[0], /site:qwenlm\.github\.io/i);
+    assert.equal(recovered.planned[0].plannerMode, 'required_host_recovery');
+
+    assert.equal(validatePlannedQuery('Qwen hardware requirements', {
+      mode: 'required_host_recovery',
+      recoveryHosts: ['qwenlm.github.io'],
+      gap: { requiredHosts: ['qwenlm.github.io'] },
+    }).reason, 'site_mode_violation');
+    assert.equal(validatePlannedQuery('site:github.com Qwen hardware', {
+      mode: 'required_host_recovery',
+      recoveryHosts: ['qwenlm.github.io'],
+      gap: { requiredHosts: ['qwenlm.github.io', 'github.com'] },
+    }).reason, 'site_mode_violation');
+    assert.equal(validatePlannedQuery('site:unobserved.example Qwen', {
+      mode: 'repair',
+      siteQueryMode: 'confirmed',
+      observedHosts: [],
+      gap: { requiredHosts: [], preferredHosts: ['unobserved.example'] },
+    }).reason, 'site_mode_violation');
+  });
+
   it('rewrites site fallback without site:', async () => {
     const result = await planSearchQueries({
           llm: llmJson({ queries: [{ query: '智谱AI 监管合规 备案' }] }),

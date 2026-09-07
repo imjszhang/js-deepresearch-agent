@@ -3,7 +3,7 @@ import { hostnameOf } from './research-state.mjs';
 import { isOrthogonalGap } from './exploratory-sufficiency.mjs';
 import { nextSlotRepairAction } from './slot-repair-scheduler.mjs';
 
-const ACTION_SCHEMA = '{"action":"search|read|reflect|draft|finalize","reasonCode":"short_code","gapId":"gap-1","plannerMode":"initial|repair|challenge|angle_change|recovery|site_fallback","sourceIds":["..."],"gapQuestion":"..."}';
+const ACTION_SCHEMA = '{"action":"search|read|reflect|draft|finalize","reasonCode":"short_code","gapId":"gap-1","plannerMode":"initial|repair|challenge|angle_change|recovery|site_fallback|required_host_recovery","sourceIds":["..."],"gapQuestion":"..."}';
 
 function extractJson(text) {
   const raw = String(text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
@@ -42,7 +42,7 @@ export async function decideAdaptiveAction({ llm, state, signal }) {
       'readiness.pass is the only evidence-sufficient signal. You cannot override a failed readiness gate.',
       'After a search, you must read a real body before draft/finalize. Snippets, WAF, and shell pages do not count.',
       'Do not write search queries. Choose action, gapId, and plannerMode only. A later planner writes the actual queries.',
-      'plannerMode: initial for first coverage, repair for failed slots, angle_change after a plateau, recovery after a rejected action.',
+      'plannerMode: initial for first coverage, repair for failed slots, angle_change after a plateau, recovery after a rejected action, required_host_recovery when a literal required host was never retrieved.',
       'If a gap lists requiredHosts, those are commitments from the research profile. The planner may use site:host only for allowed hosts.',
       'preferredHosts are ranking hints; only requiredHosts or confirmed observed hosts may use site:host.',
       'Use read to pick unread sources for the current focus gap. Consecutive reads of different unread sources are allowed.',

@@ -138,6 +138,40 @@ ${embedded} ${'This surrounding narrative remains long enough for validation. '.
     assert.ok(check.flags.includes('report_reasoning_token'));
   });
 
+  it('does not fail assembled reports when Evidence quotes source text about think tags', () => {
+    const findings = [{
+      question: 'parser fragility',
+      sources: [{
+        title: 'sndr_core_engine',
+        url: 'https://github.com/Sandermage/sndr_core_engine',
+        content: 'Quantization amplifies upstream parser fragility — <think> tags, multi-tool prompts, and streaming chunk splits produce malformed calls on quantized models.',
+        fetchStatus: 'ok',
+        contentOrigin: 'fetched',
+      }],
+    }];
+    const narrative = `# Research Report
+
+## Summary
+${'The official hardware numbers remain incomplete and the parser discussion is only supporting context. '.repeat(3)} [1.1]
+
+## Key Findings
+- ${'Community notes mention think tags as a parser issue rather than a hardware specification. '.repeat(2)} [1.1]
+`;
+    const report = assembleReport({
+      narrative,
+      findings,
+      query: 'parser fragility',
+    });
+    assert.match(report, /<think>/);
+    const check = validateReportOutput(report, {
+      minChars: 200,
+      mode: 'full',
+      findings,
+    });
+    assert.equal(check.ok, true);
+    assert.equal(check.flags.includes('report_reasoning_token'), false);
+  });
+
   it('rejects a narrative that dumps source bodies into Key Findings', () => {
     const dumped = `# Research Report
 

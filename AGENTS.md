@@ -65,6 +65,7 @@ js-deepresearch-agent
 
 Commands:
   research "query" [flags]
+  research --resume <sessionDir> [--continue-explore --resume-extra-steps n]
   config get [key]
   config set <key> <value>
   history [list]
@@ -165,6 +166,11 @@ npm exec --package=. -- jdr research "Explain the current state of local-first A
 | `--report-max-output-tokens` | `research.report.maxOutputTokens` | 报告输出上限，`0` 不设应用层限制（默认）。`--reserve-report-tokens` 是已废弃别名 |
 | `--max-total-llm-tokens` | `research.budget.maxTotalLlmTokens` | 可选的探索+报告总保险丝，`0` 不限制（默认） |
 | `--focused-iteration-control` | `research.focused.iterationControl.enabled` | 专题调研规则早停 |
+| `--resume <sessionDir>` | — | 从会话目录续跑（见下文「续跑」） |
+| `--continue-explore` | — | 循环已收尾后再探索；必须同时给 `--resume-extra-steps` |
+| `--resume-extra-steps <n>` | — | 再探索步数，`n>=1` |
+| `--resume-extra-searches <n>` | — | 可选；在检查点额度上增加搜索次数帽 |
+| `--resume-extra-reads <n>` | — | 可选；在检查点额度上增加阅读次数帽 |
 | `--output <file>` | — | 额外将 report 写入指定文件 |
 | `--json` | — | stdout 输出 JSON（含 `artifacts` 路径） |
 | `--no-save` | — | 不写入 SQLite 历史 |
@@ -210,6 +216,33 @@ npm exec --package=. -- jdr research "监管处罚" \
 | **`data/intel/`** | 尝试归档到 intel store（失败仅 stderr warning，不阻断调研） |
 
 `--json` 模式下进度只走 stderr，stdout 仅为 JSON，便于 Agent 解析。
+
+### 续跑（`--resume`）
+
+`jdr research --resume <sessionDir>` 按检查点分流，不放松证据合同：
+
+| 条件 | 行为 |
+|---|---|
+| 有 `pre-report` 且无 `--continue-explore` | 只续写报告（noop search；接上已有 `llm-N` 序号） |
+| 无 `pre-report`，但有 `strategy-complete` / `exploratory-loop-complete`，或 step 检查点已带 terminal stop | 不重进探索循环，从该边界续写 passages / 报告 |
+| 无 `pre-report`，有未收尾的 `exploratory-step-complete`（无 terminal stop） | 恢复 `ResearchState` / `loopLocal` / budget / query memory，从**下一步**继续探索循环；使用真实 search |
+| 循环已收尾且要再探索 | 必须同时给 `--continue-explore` 与 `--resume-extra-steps <n>`（`n>=1`） |
+
+```bash
+# 报告阶段失败后只写报告
+npm exec --package=. -- jdr research --resume work_dir/exploratory/2026-09-07_050524
+
+# 进程在探索中途被杀：有 step 检查点即可续循环
+npm exec --package=. -- jdr research --resume work_dir/exploratory/<timestamp>
+
+# 循环已因 planner 耗尽结束，再给有界步数探测未检索的字面 required host
+npm exec --package=. -- jdr research --resume work_dir/exploratory/<timestamp> \
+  --continue-explore --resume-extra-steps 4
+```
+
+`--continue-explore` 缺 `--resume-extra-steps` 会立即拒绝。可选 `--resume-extra-searches` / `--resume-extra-reads` 在检查点剩余额度上加次数帽；未给则沿用检查点额度（探索性默认次数帽为 0）。仅当 `stopDetail` 为 `query_planner_exhausted` / `repair_exhausted` 且仍有字面 required host 为 `not_retrieved` 时，解开对应 gap 的 planner-phase terminal，再走 `required_host_recovery`（Planner 自己写 `site:host`，规则层不拼接）。不得用续跑把 `safety_cap` 改写成 `evidence_sufficient`。
+
+开跑与探索续跑会在**第一次 search / Planner 之前**对 js-eyes 或 SearXNG 做短超时探活；失败立即退出。js-eyes 失败时请手动运行 `js-eyes doctor --json`。`local` 引擎跳过探活。本轮 Web UI / focused / quick 中途续跑不做。
 
 报告由最终研究状态（brief + gaps + readiness + evidence）生成 `ReportContract` / `ReportPlan`，LLM 只负责措辞。研究合同是否满足看 plan，不看 Markdown 标题或跨节去重；每个 verified required slot 必须保留各自已锚定、已引用的绑定 claim，任意 Key Finding 不能冒充另一个 slot。仅精确数字形式的 `[gap-N]`、报告/结构字段开头的完整 `<think>...</think>` 推理前缀、开头孤立 `</think>` 和空列表项会确定性清洗并重渲染；`[source-code]`、`[slot-machine]` 等正常文本及叙事中嵌入的标签不得静默删除，后者保留为 render 失败。其余 `REPORT_OUTPUT_INVALID` 按 `provider`（连续空响应）、`parse`（结构化输出畸形）、`semantic-contract`（合同未满足）和 `render`（无法恢复的排版检查）分类；parse 有独立重试计数，不消耗 semantic retry。错误与 `failure.json` 仅记录安全结构化 `failedChecks`（布尔、长度、计数、枚举、哈希）和最后 `phase`，不得持久化报告行、prompt、reasoning 或 provider 自由文本。默认至少 200 字符且包含 Markdown 标题，但只有长度检查真实失败时才把字符下限列为原因。进度会记录 LLM 阶段、耗时、输出字符数和安全的响应元数据，但不会记录 prompt、推理文本或密钥。`focused` 会为缺失的原始问题/官方证据保留 gap 与 limitation；只有成功读取的正文才能生成 direct-evidence passage，snippet 只能标记为 `search_snippet`。
 

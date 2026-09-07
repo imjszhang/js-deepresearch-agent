@@ -30,6 +30,8 @@ import {
   markRepairAngleExhausted,
   nextSlotRepairAction,
 } from '../adaptive/slot-repair-scheduler.mjs';
+import { checkpointHasTerminalLoopStop } from '../resume-plan.mjs';
+import { listNotRetrievedLiteralRequiredHosts } from '../adaptive/readiness-gate.mjs';
 import { attachPlannedQueries, planSearchQueries } from '../search-query-planner.mjs';
 import { plannerFeedbackFromState } from '../planner-feedback.mjs';
 import { buildExecutedSearchTrace } from '../search-trace.mjs';
@@ -167,7 +169,26 @@ function plannerContext(state, {
     observedHosts: [...(state.observedHosts || [])],
     siteFallbackFor,
     queryMemory,
+    recoveryHosts: listNotRetrievedLiteralRequiredHosts({
+      gap: target,
+      findings: state.findings,
+      query: state.query,
+      brief: state.brief,
+    }),
   };
+}
+
+function plannerModeForGap(state, gap, fallback = 'repair') {
+  const hosts = listNotRetrievedLiteralRequiredHosts({
+    gap,
+    findings: state.findings,
+    query: state.query,
+    brief: state.brief,
+  });
+  if (hosts.length && ['repair', 'recovery'].includes(fallback)) {
+    return 'required_host_recovery';
+  }
+  return fallback;
 }
 
 function recordPlannerMetrics(state, plan, extra = {}) {
@@ -264,6 +285,39 @@ function persistPlannerExhaustion(state, stopDetail) {
   }
 }
 
+function unlockPlannerTerminalsForHostRecovery(state, stopDetail) {
+  if (!['query_planner_exhausted', 'repair_exhausted'].includes(stopDetail)) return [];
+  const unlocked = [];
+  for (const gap of state.gaps || []) {
+    if (gap.rollup || !isRepairTerminal(gap)) continue;
+    if (gap.repairState?.phase && gap.repairState.phase !== 'planner') continue;
+    const hosts = listNotRetrievedLiteralRequiredHosts({
+      gap,
+      findings: state.findings,
+      query: state.query,
+      brief: state.brief,
+    });
+    if (!hosts.length) continue;
+    state.clearRepairTerminal(gap.id);
+    gap.repairFailures = 0;
+    unlocked.push(gap.id);
+  }
+  return unlocked;
+}
+
+function applyResumeExploreBudget(budget, { extraSearches = 0, extraReads = 0 } = {}) {
+  if (!budget?.limits) return;
+  const bump = (key, extra) => {
+    const add = Math.max(0, Number(extra) || 0);
+    if (!add) return;
+    const used = Number(budget.usage?.[key]) || 0;
+    const current = Number(budget.limits[key]) || 0;
+    budget.limits[key] = current > 0 ? current + add : used + add;
+  };
+  bump('searchRequests', extraSearches);
+  bump('sourceReads', extraReads);
+}
+
 function safetyStopDetail(state, { trigger, transportOnly = false } = {}) {
   if (trigger === 'consecutive_invalid') {
     return transportOnly ? 'transport_blocked' : 'consecutive_invalid_steps';
@@ -336,14 +390,24 @@ export async function resolveRecoveryAction(state, {
       reasonCode: 'fallback_read_evidence',
     };
   }
+  const recoveryHosts = listNotRetrievedLiteralRequiredHosts({
+    gap,
+    findings: state.findings,
+    query: state.query,
+    brief: state.brief,
+  });
+  const recoveryMode = recoveryHosts.length ? 'required_host_recovery' : 'recovery';
   const plan = await planSearchQueries({
     ...plannerContext(state, { llm, signal, queryMemory, gate, rejectedQueries, search, gap }),
-    mode: 'recovery',
+    mode: recoveryMode,
+    recoveryHosts,
     gap,
     gapId: gap.id,
-    limit: maxQueriesPerStep,
+    limit: recoveryHosts.length
+      ? Math.min(maxQueriesPerStep, recoveryHosts.length)
+      : maxQueriesPerStep,
   });
-  recordPlannerMetrics(state, plan, { gapId: gap.id, stage: 'recovery' });
+  recordPlannerMetrics(state, plan, { gapId: gap.id, stage: recoveryMode });
   const plannedQueries = plan.ok ? await filter(plan.queries) : [];
   if (plannedQueries.length) {
     return {
@@ -352,9 +416,9 @@ export async function resolveRecoveryAction(state, {
       queries: plannedQueries,
       gapId: gap.id,
       queryOrigin: 'llm_planner',
-      plannerMode: 'recovery',
+      plannerMode: recoveryMode,
       plannedQueries: plan.planned,
-      reasonCode: 'fresh_query_recovery',
+      reasonCode: recoveryHosts.length ? 'required_host_recovery' : 'fresh_query_recovery',
       repairTarget: gap.id,
     };
   }
@@ -520,16 +584,39 @@ export async function runExploratoryLoop(context) {
     trace,
     researchProviders,
     recorder,
+    restoredCheckpoint = null,
+    continueExplore = false,
+    extraSteps = 0,
+    extraSearches = 0,
+    extraReads = 0,
   } = context;
   const exploratory = resolveExploratorySettings(settings);
   const readPolicy = resolveReadSettings(settings, { strategy: 'exploratory' });
   const queryShape = classifyResearchQuery(query);
-  applyExploratoryBudget(budget, exploratory);
-  const maxSteps = effectiveExploratoryMaxSteps(exploratory, budget?.limits?.llmTokens);
+  if (restoredCheckpoint) {
+    budget?.restoreCheckpoint?.(restoredCheckpoint.budget || {});
+    applyResumeExploreBudget(budget, { extraSearches, extraReads });
+  } else {
+    applyExploratoryBudget(budget, exploratory);
+  }
   const evidenceScope = inferEvidenceScope(settings);
-  const incomingBrief = context.brief || researchBriefFromInput(query, { depth: 'exploratory' });
-  let profile = inferResearchProfile({ ...incomingBrief, query }, { settings, evidenceScope, depth: 'exploratory' });
-  profile.brief = mergeResearchBrief(incomingBrief, profile.brief, { query, depth: 'exploratory' });
+  const incomingBrief = restoredCheckpoint?.brief
+    || context.brief
+    || researchBriefFromInput(query, { depth: 'exploratory' });
+  let profile = restoredCheckpoint?.profile || inferResearchProfile(
+    { ...incomingBrief, query },
+    { settings, evidenceScope, depth: 'exploratory' },
+  );
+  if (!restoredCheckpoint) {
+    profile.brief = mergeResearchBrief(incomingBrief, profile.brief, { query, depth: 'exploratory' });
+  }
+  let maxSteps = effectiveExploratoryMaxSteps(exploratory, budget?.limits?.llmTokens);
+  if (restoredCheckpoint) {
+    maxSteps = Number(restoredCheckpoint.maxSteps) || 0;
+    if (continueExplore && extraSteps >= 1) {
+      maxSteps = (Number(restoredCheckpoint.step) || 0) + extraSteps;
+    }
+  }
   const state = new ResearchState({
     query,
     maxSteps,
@@ -540,8 +627,12 @@ export async function runExploratoryLoop(context) {
     profile,
     settings,
     evidenceScope,
-    brief: profile.brief,
+    brief: profile.brief || incomingBrief,
   });
+  if (restoredCheckpoint) {
+    state.restoreCheckpoint(restoredCheckpoint, { queryMemory });
+    state.maxSteps = maxSteps;
+  }
   state.transportMemory.setEventSink((event) => {
     addTrace(trace, state, 'transport_memory', {
       ...event,
@@ -561,12 +652,25 @@ export async function runExploratoryLoop(context) {
     queryMemory.similarityProvider = embedding;
     queryMemory.semanticDedup = true;
   }
-  let degraded = false;
-  let stopReason = null;
-  let stopDetail = null;
-  let stopRequiredAmount = null;
-  let pendingStopReason = null;
-  let consecutiveInvalidSteps = 0;
+  const restoredLocal = restoredCheckpoint?.loopLocal || state.loopLocal || {};
+  let degraded = Boolean(restoredLocal.degraded);
+  let stopReason = continueExplore ? null : (restoredLocal.stopReason || null);
+  let stopDetail = continueExplore ? null : (restoredLocal.stopDetail || null);
+  let stopRequiredAmount = continueExplore ? null : (restoredLocal.stopRequiredAmount || null);
+  let pendingStopReason = continueExplore ? null : (restoredLocal.pendingStopReason || null);
+  let consecutiveInvalidSteps = continueExplore
+    ? 0
+    : (Number(restoredLocal.consecutiveInvalidSteps) || 0);
+  if (continueExplore) {
+    unlockPlannerTerminalsForHostRecovery(state, restoredLocal.stopDetail);
+    budget?.setControllerStopReason?.(null, null, null);
+    if (budget) budget.stopReason = null;
+  }
+  const skipRestoredStop = Boolean(
+    restoredCheckpoint
+    && !continueExplore
+    && checkpointHasTerminalLoopStop({ state: { loopLocal: restoredLocal, budget: restoredCheckpoint.budget } }),
+  );
   const checkpointState = (boundary, extra = {}) => recorder?.checkpoint?.(
     boundary,
     state.exportCheckpoint({
@@ -588,19 +692,33 @@ export async function runExploratoryLoop(context) {
     },
   );
 
-  emit({ stage: 'assessing_query', step: 0, maxSteps: state.maxSteps });
-  emit({ stage: 'gap_opened', gapId: 'gap-1', question: query });
-  addTrace(trace, state, 'assess', {
-    reasonCode: 'exploratory_loop',
-    targetGapIds: ['gap-1'],
-    profile: {
-      flags: profile.flags,
-      requiredHosts: profile.requiredHosts,
-      method: profile.method,
-      evidenceScope,
-      corpusChannelCount: listLocalCorpusChannels(settings).length,
-    },
-  }, budget);
+  if (restoredCheckpoint) {
+    emit({
+      stage: 'research_resumed',
+      step: state.step,
+      maxSteps: state.maxSteps,
+      continueExplore,
+    });
+    addTrace(trace, state, 'resume', {
+      reasonCode: continueExplore ? 'continue_explore' : 'mid_loop_resume',
+      targetGapIds: state.gaps.map((gap) => gap.id),
+      fromStep: restoredCheckpoint.step,
+    }, budget);
+  } else {
+    emit({ stage: 'assessing_query', step: 0, maxSteps: state.maxSteps });
+    emit({ stage: 'gap_opened', gapId: 'gap-1', question: query });
+    addTrace(trace, state, 'assess', {
+      reasonCode: 'exploratory_loop',
+      targetGapIds: ['gap-1'],
+      profile: {
+        flags: profile.flags,
+        requiredHosts: profile.requiredHosts,
+        method: profile.method,
+        evidenceScope,
+        corpusChannelCount: listLocalCorpusChannels(settings).length,
+      },
+    }, budget);
+  }
 
   function refreshState() {
     state.refreshBudgetView({
@@ -887,92 +1005,94 @@ export async function runExploratoryLoop(context) {
     };
   }
 
-  const profileTokensBefore = budget?.usage?.llmTokens || 0;
-  const contract = await planAndNormalizeContract({
-    llm,
-    query,
-    incomingBrief,
-    settings,
-    signal,
-    evidenceScope,
-    depth: 'exploratory',
-  });
-  profile = contract.profile;
-  state.profile = profile;
-  state.brief = contract.brief;
-  state.evidenceScope = profile.evidenceScope || evidenceScope;
-  applyContractGaps(state, contract, { maxGaps: maxOpenGaps });
-  addTrace(trace, state, 'research_brief_sanitized', {
-    reasonCode: contract.contractUnavailable ? 'contract_unavailable' : 'planner_output_validated',
-    brief: state.brief,
-    contractOrigin: state.brief?.contractOrigin,
-    contractRetried: contract.contractRetried,
-    contractFailure: contract.contractFailure,
-  }, budget);
-  state.actionCosts.record('reflect', (budget?.usage?.llmTokens || 0) - profileTokensBefore);
-
-  if (contract.contractUnavailable) {
-    stopReason = STOP_REASONS.safetyCap;
-    stopDetail = 'contract_unavailable';
-    addTrace(trace, state, 'stop', { reasonCode: STOP_REASONS.contractUnavailable }, budget, 'failed');
-    budget?.setControllerStopReason?.(stopReason, stopDetail);
-    refreshState();
-    checkpointState('exploratory-contract-unavailable');
-    emit({
-      stage: 'research_stopped',
-      reason: stopReason,
-      step: state.step,
-      maxSteps: state.maxSteps,
+  if (!restoredCheckpoint) {
+    const profileTokensBefore = budget?.usage?.llmTokens || 0;
+    const contract = await planAndNormalizeContract({
+      llm,
+      query,
+      incomingBrief,
+      settings,
+      signal,
+      evidenceScope,
+      depth: 'exploratory',
     });
-    return attachLoopMeta(state.findings, {
-      stopReason,
-      stopDetail,
-      profile: state.profile,
+    profile = contract.profile;
+    state.profile = profile;
+    state.brief = contract.brief;
+    state.evidenceScope = profile.evidenceScope || evidenceScope;
+    applyContractGaps(state, contract, { maxGaps: maxOpenGaps });
+    addTrace(trace, state, 'research_brief_sanitized', {
+      reasonCode: contract.contractUnavailable ? 'contract_unavailable' : 'planner_output_validated',
       brief: state.brief,
-      gaps: state.gaps,
-      readiness: state.readiness,
-      embeddingTraces: state.embeddingTraces,
-      marginal: state.snapshot().marginal,
-      relevance: state.snapshot().relevance,
-      recovery: state.snapshot().recovery,
-      transportMemory: state.transportMemory.snapshot(),
-      ...state.unresolvedReportNotes(),
-    });
-  }
+      contractOrigin: state.brief?.contractOrigin,
+      contractRetried: contract.contractRetried,
+      contractFailure: contract.contractFailure,
+    }, budget);
+    state.actionCosts.record('reflect', (budget?.usage?.llmTokens || 0) - profileTokensBefore);
 
-  if (queryShape.kind === 'definitional' || contract.slots.length) {
-    addTrace(trace, state, 'decompose', {
-      reasonCode: contract.slots.length ? 'decompose_skipped_slots' : 'decompose_skipped_definitional',
-      targetGapIds: state.gaps.map((gap) => gap.id),
-      subQuestionCount: 0,
-    }, budget, 'skipped');
-  } else {
-    const tokensBefore = budget?.usage?.llmTokens || 0;
-    const planned = (profile.plannedGaps || []).map((item) => item.question).filter(Boolean);
-    const subQuestions = planned.length
-      ? planned
-      : await decomposeQuery({ llm, state, signal });
-    state.actionCosts.record('reflect', (budget?.usage?.llmTokens || 0) - tokensBefore);
-    for (const question of subQuestions) {
-      if (dynamicGapCount(state) >= maxOpenGaps) break;
-      const plannedGap = (profile.plannedGaps || []).find((item) => item.question === question);
-      const gap = state.addGap(question, plannedGap?.priority || 'normal', {
-        requiredHosts: plannedGap?.requiredHosts,
+    if (contract.contractUnavailable) {
+      stopReason = STOP_REASONS.safetyCap;
+      stopDetail = 'contract_unavailable';
+      addTrace(trace, state, 'stop', { reasonCode: STOP_REASONS.contractUnavailable }, budget, 'failed');
+      budget?.setControllerStopReason?.(stopReason, stopDetail);
+      refreshState();
+      checkpointState('exploratory-contract-unavailable');
+      emit({
+        stage: 'research_stopped',
+        reason: stopReason,
+        step: state.step,
+        maxSteps: state.maxSteps,
       });
-      if (gap) emit({ stage: 'gap_opened', gapId: gap.id, question: gap.question });
+      return attachLoopMeta(state.findings, {
+        stopReason,
+        stopDetail,
+        profile: state.profile,
+        brief: state.brief,
+        gaps: state.gaps,
+        readiness: state.readiness,
+        embeddingTraces: state.embeddingTraces,
+        marginal: state.snapshot().marginal,
+        relevance: state.snapshot().relevance,
+        recovery: state.snapshot().recovery,
+        transportMemory: state.transportMemory.snapshot(),
+        ...state.unresolvedReportNotes(),
+      });
     }
-    addTrace(trace, state, 'decompose', {
-      reasonCode: subQuestions.length ? 'query_decomposed' : 'decompose_skipped',
-      targetGapIds: state.gaps.map((gap) => gap.id),
-      subQuestionCount: subQuestions.length,
-    }, budget, subQuestions.length ? 'success' : 'skipped');
+
+    if (queryShape.kind === 'definitional' || contract.slots.length) {
+      addTrace(trace, state, 'decompose', {
+        reasonCode: contract.slots.length ? 'decompose_skipped_slots' : 'decompose_skipped_definitional',
+        targetGapIds: state.gaps.map((gap) => gap.id),
+        subQuestionCount: 0,
+      }, budget, 'skipped');
+    } else {
+      const tokensBefore = budget?.usage?.llmTokens || 0;
+      const planned = (profile.plannedGaps || []).map((item) => item.question).filter(Boolean);
+      const subQuestions = planned.length
+        ? planned
+        : await decomposeQuery({ llm, state, signal });
+      state.actionCosts.record('reflect', (budget?.usage?.llmTokens || 0) - tokensBefore);
+      for (const question of subQuestions) {
+        if (dynamicGapCount(state) >= maxOpenGaps) break;
+        const plannedGap = (profile.plannedGaps || []).find((item) => item.question === question);
+        const gap = state.addGap(question, plannedGap?.priority || 'normal', {
+          requiredHosts: plannedGap?.requiredHosts,
+        });
+        if (gap) emit({ stage: 'gap_opened', gapId: gap.id, question: gap.question });
+      }
+      addTrace(trace, state, 'decompose', {
+        reasonCode: subQuestions.length ? 'query_decomposed' : 'decompose_skipped',
+        targetGapIds: state.gaps.map((gap) => gap.id),
+        subQuestionCount: subQuestions.length,
+      }, budget, subQuestions.length ? 'success' : 'skipped');
+    }
   }
 
   try {
-    while (!hasStepCap(state.maxSteps) || state.step < state.maxSteps) {
+    while (!skipRestoredStop && (!hasStepCap(state.maxSteps) || state.step < state.maxSteps)) {
       abort(signal);
       const gate = refreshState();
-      if (state.step === 0) {
+      if (state.step === 0 && !restoredCheckpoint) {
         checkpointState('exploratory-bootstrap', { readinessPass: Boolean(gate?.pass) });
       }
 
@@ -1088,6 +1208,12 @@ export async function runExploratoryLoop(context) {
       ) {
         const tokensBefore = budget?.usage?.llmTokens || 0;
         let planned;
+        const plannedMode = plannerModeForGap(
+          state,
+          state.getGap(action.gapId || state.focusGap()?.id),
+          action.plannerMode || (state.marginal.plateau ? 'angle_change' : 'repair'),
+        );
+        action = { ...action, plannerMode: plannedMode };
         try {
           planned = await attachPlannedQueries(action, {
             ...plannerContext(state, {
@@ -1098,7 +1224,7 @@ export async function runExploratoryLoop(context) {
               search,
               gap: state.getGap(action.gapId || state.focusGap()?.id),
             }),
-            mode: action.plannerMode || (state.marginal.plateau ? 'angle_change' : 'repair'),
+            mode: plannedMode,
             gap: state.getGap(action.gapId || state.focusGap()?.id),
             gapId: action.gapId || state.focusGap()?.id,
             limit: maxQueriesPerStep,
@@ -1918,6 +2044,13 @@ export async function runExploratoryLoop(context) {
     }
   }
 
+  if (stopReason) {
+    checkpointState('exploratory-loop-complete', {
+      stopReason,
+      stopDetail,
+    });
+  }
+
   if (!stopReason) {
     stopReason = resolveNewRunStopReason(null, {
       step: state.step,
@@ -1953,6 +2086,7 @@ export async function runExploratoryLoop(context) {
   });
   for (const finding of state.findings) {
     finding.unresolvedGaps = notes.unresolvedGaps;
+    finding.unresolvedRequiredHostCommitments = notes.unresolvedRequiredHostCommitments;
     finding.blockedHosts = notes.blockedHosts;
     finding.secondaryOnlyClaims = notes.secondaryOnlyClaims;
     finding.unsupportedDecisions = notes.unsupportedDecisions;

@@ -11,6 +11,7 @@ export const SEARCH_QUERY_MODES = Object.freeze([
   'angle_change',
   'recovery',
   'site_fallback',
+  'required_host_recovery',
 ]);
 
 export const QUERY_ORIGINS = Object.freeze({
@@ -89,6 +90,7 @@ export function validatePlannedQuery(query, {
   expectedEvidence = null,
   intent = null,
   sourceType = null,
+  recoveryHosts = [],
 } = {}) {
   const text = String(query || '').replace(/\s+/g, ' ').trim();
   if (!text) return { ok: false, reason: 'empty_query' };
@@ -107,6 +109,13 @@ export function validatePlannedQuery(query, {
   }
   if (mode === 'site_fallback' && hosts.length) {
     return { ok: false, reason: 'site_mode_violation' };
+  }
+  if (mode === 'required_host_recovery') {
+    const recovery = unique((recoveryHosts || []).map(normalizeHost));
+    if (!hosts.length) return { ok: false, reason: 'site_mode_violation' };
+    if (recovery.length && hosts.every((host) => !recovery.some((item) => hostsMatch(host, item)))) {
+      return { ok: false, reason: 'site_mode_violation' };
+    }
   }
   if (hosts.length) {
     const allowed = allowedSiteHosts({ gap, siteQueryMode, observedHosts, evidenceScope });
@@ -162,6 +171,7 @@ export async function planSearchQueries({
   recentSearchOutcomes = [],
   providerCapabilities = null,
   transportFacts = null,
+  recoveryHosts = [],
 } = {}) {
   const resolvedMode = SEARCH_QUERY_MODES.includes(mode) ? mode : 'initial';
   const resolvedLimit = Number(limit);
@@ -195,13 +205,17 @@ export async function planSearchQueries({
     evidenceScope,
     mode: resolvedMode,
     scopeTexts: [query, brief?.query],
+    recoveryHosts,
   };
-  const allowedHosts = allowedSiteHosts({
-    gap: targetGap || {},
-    siteQueryMode,
-    observedHosts,
-    evidenceScope,
-  });
+  const allowedHosts = unique([
+    ...allowedSiteHosts({
+      gap: targetGap || {},
+      siteQueryMode,
+      observedHosts,
+      evidenceScope,
+    }),
+    ...(resolvedMode === 'required_host_recovery' ? (recoveryHosts || []).map(normalizeHost) : []),
+  ]);
   const accept = (parsed) => extractQueryItems(parsed).some((item) => (
     validatePlannedQuery(item.query, {
       ...validationOptions,
@@ -232,6 +246,7 @@ export async function planSearchQueries({
     recentSearchOutcomes,
     providerCapabilities,
     transportFacts,
+    recoveryHosts,
   };
 
   const result = await completeStructuredJson({

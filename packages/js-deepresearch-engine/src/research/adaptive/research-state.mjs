@@ -124,6 +124,7 @@ export class ResearchState {
     this.brief = brief || this.profile?.brief || null;
     this.step = 0;
     this.lastAction = null;
+    this.loopLocal = null;
     this.gaps = [createRootGap(query, this.profile)];
     this.findings = [];
     this.candidates = new Map();
@@ -874,6 +875,7 @@ export class ResearchState {
     this.actionCosts.restoreCheckpoint(checkpoint.actionCosts || {});
     this.budgetManager?.restoreCheckpoint?.(checkpoint.budget || {});
     queryMemory?.restoreCheckpoint?.(checkpoint.queryMemory || {});
+    this.loopLocal = checkpoint.loopLocal || null;
     return this;
   }
 
@@ -1133,7 +1135,11 @@ export class ResearchState {
         || isRepairTerminal(gap)
         || (status === 'body_read' && this.gapNeedsPrimaryEvidence(gap) && !this.gapHasRequiredHostBody(gap.id));
     });
-    const blockedHosts = [...new Set(unresolved.flatMap((gap) => gap.requiredHosts || []))];
+    const unresolvedRequiredHostCommitments = [...new Set(unresolved.flatMap((gap) => gap.requiredHosts || []))];
+    const successfulBodies = this.findings.flatMap((finding) => (finding.sources || []).filter(sourceHasBody));
+    const unreadRequiredHosts = unresolvedRequiredHostCommitments.filter((host) => (
+      !successfulBodies.some((source) => hostnamesMatch(policyHostnameOf(source.url || source.id), host))
+    ));
     const secondaryOnly = this.findings.flatMap((finding) => (finding.sources || [])
       .filter(sourceHasBody)
       .filter((source) => ['mainstream', 'reprint', 'ugc', 'unknown'].includes(source.tier || classifySourceTier(source, this.getGap(finding.gapId))))
@@ -1146,7 +1152,8 @@ export class ResearchState {
         requiredHosts: gap.requiredHosts,
         reason: gap.blockedReason,
       })),
-      blockedHosts,
+      unresolvedRequiredHostCommitments,
+      blockedHosts: unreadRequiredHosts,
       secondaryOnlyClaims: secondaryOnly.slice(0, 12),
       unsupportedDecisions: this.readiness?.pass
         ? []

@@ -44,6 +44,7 @@ function nextAngle(base, mode, searched) {
     challenge: 'limitations and criticism',
     angle_change: 'alternative sources',
     site_fallback: 'public documents',
+    required_host_recovery: 'official documentation',
   }[mode] || 'follow-up research';
   const angled = `${base} ${suffix}`.trim();
   if (angled && !searched.has(norm(angled))) return angled;
@@ -64,6 +65,15 @@ export function defaultSearchQueryPlan(messages = []) {
   const unusedHints = hints.filter((item) => !searched.has(norm(item)));
   const usableHints = unusedHints.filter((item) => hintUsable(item, user));
   const limit = Number(user.limit) || Math.max(sources.length, usableHints.length, 1);
+
+  if (user.mode === 'required_host_recovery') {
+    const hosts = (user.recoveryHosts || user.gap?.requiredHosts || []).filter(Boolean);
+    const base = sources[0]?.question || user.query || 'topic';
+    const queries = (hosts.length ? hosts : ['example.com']).slice(0, limit).map((host) => (
+      plannedItem(`site:${host} ${base}`.trim(), user, sources[0])
+    ));
+    return JSON.stringify({ queries });
+  }
 
   if (user.mode === 'site_fallback') {
     const raw = String(user.siteFallbackFor || unusedHints[0] || sources[0]?.question || user.query || 'topic fallback');

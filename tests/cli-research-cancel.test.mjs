@@ -4,16 +4,20 @@ import os from 'node:os';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { afterEach, describe, it } from 'node:test';
+import { FileRunRecorder } from 'js-deepresearch-engine';
 import {
   ResearchCancelledError,
   createResearchAbortController,
   runCliResearch,
+  runCliResearchResume,
 } from '../src/cli-research-run.mjs';
 import { resetIntelStoreEngine } from '../src/storage/intel-store.mjs';
 import { migrateDb, closeDb } from '../src/storage/db.mjs';
 import Database from 'better-sqlite3';
 import { ResearchRepository } from '../src/storage/research-repository.mjs';
 import { SourceRepository } from '../src/storage/source-repository.mjs';
+
+const noopProbe = async () => ({ ok: true });
 
 describe('CLI research cancellation', () => {
   const tempDirs = [];
@@ -60,6 +64,7 @@ describe('CLI research cancellation', () => {
           },
         },
         cryptoRandomId: () => 'test-cancel-id',
+        probeSearch: noopProbe,
         signalTarget: new EventEmitter(),
       }),
       ResearchCancelledError,
@@ -102,6 +107,7 @@ describe('CLI research cancellation', () => {
         },
       },
       cryptoRandomId: () => 'test-running-id',
+      probeSearch: noopProbe,
       signalTarget: new EventEmitter(),
       onProgressLog: (...entry) => progressLogs.push(entry),
     });
@@ -134,6 +140,7 @@ describe('CLI research cancellation', () => {
       createSessionDir: () => {
         throw new Error('--no-work-dir must not create a session');
       },
+      probeSearch: noopProbe,
       signalTarget: new EventEmitter(),
       onProgressLog: (...entry) => logs.push(entry),
     });
@@ -157,6 +164,7 @@ describe('CLI research cancellation', () => {
       runner: { run: async () => { throw error; } },
       saveArtifacts: () => { artifactWrites += 1; },
       cryptoRandomId: () => 'invalid-report-id',
+      probeSearch: noopProbe,
       signalTarget: new EventEmitter(),
     }), /no usable report/);
     assert.equal(artifactWrites, 0);
@@ -189,6 +197,134 @@ describe('CLI research cancellation', () => {
     } finally {
       process.exit = originalExit;
     }
+  });
+
+  it('resumes a failed history row into the same session directory', async () => {
+    isolateIntelStore();
+    const db = createTestDb();
+    const researchRepository = new ResearchRepository(db);
+    const sourceRepository = new SourceRepository(db);
+    const workDir = makeWorkRoot();
+    const sessionDir = path.join(workDir, 'exploratory', '2026-09-07_050524');
+    const seed = new FileRunRecorder({
+      sessionDir,
+      runId: 'resume-id',
+      strategy: 'exploratory',
+      query: 'qwen hardware',
+    });
+    seed.checkpoint('pre-report', { query: 'qwen hardware' });
+    seed.finalize('failed', { error: new Error('headers timeout') });
+    researchRepository.create({
+      id: 'resume-id',
+      query: 'qwen hardware',
+      strategy: 'exploratory',
+    });
+    researchRepository.updateStatus('resume-id', 'failed', {
+      error: 'headers timeout',
+      sessionDir,
+      completedAt: new Date().toISOString(),
+    });
+
+    await runCliResearchResume({
+      sessionDir,
+      settings: { research: { strategy: 'exploratory', workDir }, search: {} },
+      flags: {},
+      services: { researchRepository, sourceRepository },
+      runner: {
+        resumeFromSession: async ({ sessionDir: resumedDir }) => {
+          assert.equal(resumedDir, sessionDir);
+          return {
+            report: '# Resumed report\n',
+            sources: [],
+            findings: [],
+            gaps: [],
+            quality: { gate: 'pass' },
+          };
+        },
+      },
+      signalTarget: new EventEmitter(),
+    });
+
+    const record = researchRepository.get('resume-id');
+    assert.equal(record.status, 'completed');
+    assert.equal(record.error, null);
+    assert.equal(record.sessionDir, sessionDir);
+    assert.equal(fs.existsSync(path.join(sessionDir, 'report.md')), true);
+    assert.equal(fs.existsSync(path.join(sessionDir, 'failure.json')), false);
+    const run = JSON.parse(fs.readFileSync(path.join(sessionDir, 'run.json'), 'utf8'));
+    assert.equal(run.status, 'completed');
+    db.close();
+  });
+
+  it('rejects --continue-explore without extra steps before calling the runner', async () => {
+    const workDir = makeWorkRoot();
+    const sessionDir = path.join(workDir, 'exploratory', '2026-09-07_050524');
+    const seed = new FileRunRecorder({
+      sessionDir,
+      runId: 'continue-id',
+      strategy: 'exploratory',
+      query: 'qwen hardware',
+    });
+    seed.checkpoint('pre-report', { query: 'qwen hardware' });
+    seed.finalize('failed', { error: new Error('headers timeout') });
+    let called = false;
+    await assert.rejects(
+      () => runCliResearchResume({
+        sessionDir,
+        settings: { research: { strategy: 'exploratory', workDir }, search: {} },
+        flags: { 'continue-explore': true },
+        services: {
+          researchRepository: { get() { return null; }, create() {}, updateStatus() {} },
+          sourceRepository: { addMany() {} },
+        },
+        runner: {
+          resumeFromSession: async () => {
+            called = true;
+            return { report: '# no', sources: [], findings: [], quality: {} };
+          },
+        },
+        probeSearch: noopProbe,
+        signalTarget: new EventEmitter(),
+      }),
+      /--continue-explore requires --resume-extra-steps/,
+    );
+    assert.equal(called, false);
+  });
+
+  it('resumes an unfinished exploratory step without continue-explore', async () => {
+    const workDir = makeWorkRoot();
+    const sessionDir = path.join(workDir, 'exploratory', '2026-09-07_051000');
+    const seed = new FileRunRecorder({
+      sessionDir,
+      runId: 'mid-loop-id',
+      strategy: 'exploratory',
+      query: 'qwen hardware',
+    });
+    seed.checkpoint('exploratory-step-complete', {
+      query: 'qwen hardware',
+      step: 2,
+      loopLocal: { consecutiveInvalidSteps: 1 },
+    });
+    let seen = null;
+    await runCliResearchResume({
+      sessionDir,
+      settings: { research: { strategy: 'exploratory', workDir }, search: { engine: 'js-eyes' } },
+      flags: {},
+      services: {
+        researchRepository: { get() { return null; }, create() {}, updateStatus() {} },
+        sourceRepository: { addMany() {} },
+      },
+      runner: {
+        resumeFromSession: async (args) => {
+          seen = args;
+          return { report: '# Mid\n', sources: [], findings: [], quality: { gate: 'pass' } };
+        },
+      },
+      probeSearch: noopProbe,
+      signalTarget: new EventEmitter(),
+    });
+    assert.equal(seen.continueExplore, false);
+    assert.equal(seen.sessionDir, sessionDir);
   });
 });
 

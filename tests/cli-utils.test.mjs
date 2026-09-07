@@ -5,6 +5,7 @@ import {
   formatHistory,
   getDeepValue,
   parseArgs,
+  parseResumeExploreFlags,
   setDeepValue,
 } from '../src/cli-utils.mjs';
 
@@ -383,6 +384,27 @@ describe('CLI utilities', () => {
     assert.equal(disabled.research.read.cache.enabled, false);
     const custom = applyResearchFlags({ research: {} }, { 'cache-dir': '/tmp/jdr-cache' });
     assert.equal(custom.research.read.cache.dir, '/tmp/jdr-cache');
+  });
+
+  it('requires extra steps for --continue-explore', () => {
+    assert.throws(
+      () => parseResumeExploreFlags({ 'continue-explore': true }),
+      /--continue-explore requires --resume-extra-steps/,
+    );
+    assert.throws(
+      () => parseResumeExploreFlags({ 'resume-extra-steps': 2 }),
+      /--resume-extra-steps requires --continue-explore/,
+    );
+    assert.deepEqual(parseResumeExploreFlags({
+      'continue-explore': true,
+      'resume-extra-steps': '3',
+      'resume-extra-searches': '1',
+    }), {
+      continueExplore: true,
+      extraSteps: 3,
+      extraSearches: 1,
+      extraReads: 0,
+    });
   });
 
   it('leaves --search searxng unchanged when corpus dirs are omitted', () => {
