@@ -376,7 +376,7 @@ export function validateReportOutput(report, {
       internalReferenceKind: 'gap',
     });
   }
-  const reasoningTokens = [...new Set(text.match(REASONING_TOKEN) || [])];
+  const reasoningTokens = [...new Set(narrativeText.match(REASONING_TOKEN) || [])];
   if (reasoningTokens.length) {
     fail('report_reasoning_token', { reasoningTokenCount: 0 }, {
       reasoningTokenCount: reasoningTokens.length,

@@ -10,6 +10,8 @@ import {
   ReportGenerationError,
   ResearchRunner,
   loadLatestCheckpoint,
+  loadNamedCheckpoint,
+  maxRecordedCallSequence,
   readEventJournal,
   registerContentFetchHandler,
   resetContentFetchHandlers,
@@ -470,6 +472,7 @@ ${secret}
     assert.equal(restoredBudget.usage.llmTokens, 25);
     assert.equal(restoredMemory.entries[0].query, 'alpha');
     assert.deepEqual(restoredMemory.vectorCache.get('alpha'), [0.1, 0.2]);
+    assert.equal(restored.loopLocal.consecutiveInvalidSteps, 2);
   });
 
   it('keeps the pre-report checkpoint and failed report request when report transport fails', async () => {
@@ -520,6 +523,135 @@ ${secret}
     );
     assert.equal(reportRequest.purpose, 'report');
     assert.match(reportRequest.request.body.messages[1].content, /Research query:/);
+  });
+
+  it('reopens a failed session without resetting journal or call sequence', () => {
+    const sessionDir = makeSession();
+    const recorder = new FileRunRecorder({
+      sessionDir,
+      runId: 'run-reopen',
+      strategy: 'quick',
+      query: 'resume topic',
+    });
+    recorder.checkpoint('pre-report', { query: 'resume topic', findings: [] });
+    recorder.callStarted({
+      kind: 'llm',
+      callId: 'llm-2',
+      purpose: 'report',
+      request: { body: { messages: [{ role: 'user', content: 'draft' }] } },
+    });
+    recorder.callFinished({
+      kind: 'llm',
+      callId: 'llm-2',
+      status: 'error',
+      error: new Error('headers timeout'),
+    });
+    recorder.finalize('failed', { error: new Error('headers timeout') });
+    assert.equal(fs.existsSync(path.join(sessionDir, 'failure.json')), true);
+
+    const reopened = FileRunRecorder.reopen(sessionDir);
+    const run = JSON.parse(fs.readFileSync(path.join(sessionDir, 'run.json'), 'utf8'));
+    assert.equal(run.status, 'running');
+    assert.equal(run.error, null);
+    assert.equal(maxRecordedCallSequence(sessionDir, 'llm'), 2);
+    const named = loadNamedCheckpoint(sessionDir, 'pre-report');
+    assert.equal(named.state.query, 'resume topic');
+    reopened.checkpoint('report-draft', { query: 'resume topic' });
+    reopened.finalize('completed');
+    assert.equal(fs.existsSync(path.join(sessionDir, 'failure.json')), false);
+    const events = readEventJournal(sessionDir);
+    assert.ok(events.some((event) => event.type === 'session_resumed'));
+    assert.ok(events.some((event) => event.type === 'session_finished' && event.status === 'completed'));
+    assert.ok(events.filter((event) => event.type === 'session_started').length === 1);
+  });
+
+  it('resumes report generation from a pre-report checkpoint without overwriting prior calls', async () => {
+    const sessionDir = makeSession();
+    const recorder = new FileRunRecorder({
+      sessionDir,
+      runId: 'run-resume-report',
+      strategy: 'quick',
+      query: 'failure topic',
+    });
+    const settings = {
+      llm: { maxTokens: 100 },
+      search: {},
+      research: {
+        strategy: 'quick',
+        iterations: 1,
+        questionsPerIteration: 1,
+        quality: { entailment: 'rules' },
+      },
+    };
+    await assert.rejects(
+      () => new ResearchRunner().run({
+        query: 'failure topic',
+        settings,
+        recorder,
+        search: {
+          async search(query) {
+            return [{ title: query, url: 'https://example.com', snippet: 'evidence' }];
+          },
+        },
+        llm: {
+          async complete({ purpose }) {
+            if (purpose === 'search_query_planning') {
+              return JSON.stringify({ queries: [{ query: 'follow up' }] });
+            }
+            throw new Error('fetch failed');
+          },
+        },
+      }),
+      /fetch failed/,
+    );
+
+    const reopened = FileRunRecorder.reopen(sessionDir);
+    const result = await new ResearchRunner().resumeFromSession({
+      sessionDir,
+      settings,
+      recorder: reopened,
+      llm: {
+        async complete({ purpose }) {
+          if (purpose === 'report') {
+            return [
+              '# Research Report',
+              '',
+              '## Summary',
+              '',
+              'This resumed report summarizes the collected evidence and clearly distinguishes verified observations from unresolved limitations. It provides enough structured prose to validate the report output contract without relying on an empty or placeholder response. [1.1]',
+              '',
+              '## Key Findings',
+              '',
+              'This resumed report keeps a cited key finding in the labeled narrative so post-revision validation can pass without inventing unsupported claims. [1.1]',
+              '',
+              '## Caveats',
+              '',
+              'The test evidence is intentionally limited.',
+            ].join('\n');
+          }
+          return '{}';
+        },
+      },
+    });
+    reopened.finalize('completed');
+
+    assert.match(result.report, /resumed report/);
+    assert.equal(fs.existsSync(path.join(sessionDir, 'failure.json')), false);
+    const calls = fs.readdirSync(path.join(sessionDir, 'calls'));
+    assert.ok(calls.includes('llm-2.request.json'));
+    assert.ok(calls.includes('llm-2.error.json'));
+    assert.ok(calls.includes('llm-3.request.json'));
+    assert.ok(calls.includes('llm-3.response.json'));
+    const failedRequest = JSON.parse(
+      fs.readFileSync(path.join(sessionDir, 'calls', 'llm-2.request.json'), 'utf8'),
+    );
+    assert.equal(failedRequest.purpose, 'report');
+    const resumedRequest = JSON.parse(
+      fs.readFileSync(path.join(sessionDir, 'calls', 'llm-3.request.json'), 'utf8'),
+    );
+    assert.equal(resumedRequest.purpose, 'report');
+    const checkpoints = fs.readdirSync(path.join(sessionDir, 'checkpoints'));
+    assert.ok(checkpoints.some((name) => name.includes('research-complete')));
   });
 
   it('sanitizes nested secret keys while preserving replay parameters', () => {

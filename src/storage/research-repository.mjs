@@ -17,11 +17,11 @@ export class ResearchRepository {
     if (!current) return undefined;
 
     const next = {
-      report: fields.report ?? current.report,
-      error: fields.error ?? current.error,
-      completedAt: fields.completedAt ?? current.completedAt,
-      quality: fields.quality ?? current.quality,
-      sessionDir: fields.sessionDir ?? current.sessionDir,
+      report: Object.hasOwn(fields, 'report') ? fields.report : current.report,
+      error: Object.hasOwn(fields, 'error') ? fields.error : current.error,
+      completedAt: Object.hasOwn(fields, 'completedAt') ? fields.completedAt : current.completedAt,
+      quality: Object.hasOwn(fields, 'quality') ? fields.quality : current.quality,
+      sessionDir: Object.hasOwn(fields, 'sessionDir') ? fields.sessionDir : current.sessionDir,
     };
 
     this.db.prepare(`

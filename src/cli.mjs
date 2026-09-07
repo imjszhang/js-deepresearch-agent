@@ -23,12 +23,14 @@ import {
 import {
   ResearchCancelledError,
   runCliResearch,
+  runCliResearchResume,
 } from './cli-research-run.mjs';
 import {
   applyResearchFlags,
   formatHistory,
   getDeepValue,
   parseArgs,
+  parseResumeExploreFlags,
   setDeepValue,
 } from './cli-utils.mjs';
 
@@ -89,7 +91,30 @@ async function main(argv) {
 async function researchCommand(argv) {
   const { args, flags } = parseArgs(argv);
   const query = args.join(' ').trim();
-  if (!query) throw new Error('Usage: js-deepresearch-agent research "query"');
+  if (flags.resume) {
+    if (flags.resume === true) {
+      throw new Error('Usage: js-deepresearch-agent research --resume <sessionDir>');
+    }
+    if (query) {
+      throw new Error('Research --resume cannot be combined with a new query.');
+    }
+    const settings = settingsFromFlags(flags);
+    const resumeExplore = parseResumeExploreFlags(flags);
+    const { result, artifacts } = await runCliResearchResume({
+      sessionDir: flags.resume,
+      settings,
+      flags,
+      resumeExplore,
+      services,
+    });
+    if (flags.json) {
+      console.log(JSON.stringify({ ...result, artifacts }, null, 2));
+    } else {
+      console.log(result.report);
+    }
+    return;
+  }
+  if (!query) throw new Error('Usage: js-deepresearch-agent research "query" | --resume <sessionDir>');
 
   const settings = settingsFromFlags(flags);
   const { result, artifacts } = await runCliResearch({
@@ -423,6 +448,7 @@ js-deepresearch-agent
 
 Commands:
   research "query" [--search local|js-eyes|searxng] [--corpus-dirs dir1,dir2] [--search-skills skillA,skillB] [--search-server-url ws://localhost:18080] [--strategy focused|quick|exploratory] [--iterations 1] [--questions 2] [--concurrency 1] [--max-search-requests 0] [--max-source-reads 0] [--focused-iteration-control true|false] [--focused-query-memory true|false] [--focused-evidence-passages true|false] [--focused-claim-alignment true|false] [--focused-pre-report-gate true|false] [--work-dir work_dir] [--output report.md] [--json] [--no-save] [--no-work-dir]
+  research --resume <sessionDir> [--continue-explore --resume-extra-steps n] [--resume-extra-searches n] [--resume-extra-reads n] [--output report.md] [--json] [--no-save]
     Strategies: focused (default, 专题调研) | quick (快速调研, default 1 iteration) | exploratory (探索性调研)
     Local search: --search local --corpus-dirs ~/notes,~/reports  (each directory is an independent channel; #16 fan-out with web engines is not in this command)
     Budgets (focused/quick counts): --max-llm-tokens 0 --max-search-requests 0 --max-source-reads 0 --max-rerank-requests 0 --max-rerank-tokens 0
@@ -439,6 +465,8 @@ Commands:
       Host header overrides are exact-host (or *.example.com) browser-header tuning only; Cookie/Authorization/framing headers are rejected.
     Exploratory: --exploratory-max-steps 0 --exploratory-max-reads-per-step 4 --exploratory-min-llm-tokens 600000 --exploratory-max-llm-tokens 1000000 --exploratory-max-search-requests 0 --exploratory-max-source-reads 0 --max-repair-failures-per-gap 3 --max-consecutive-invalid-steps 6
     On --strategy exploratory, --max-search-requests / --max-source-reads write exploratory count caps (default 0 = unlimited) and do not inherit global budget counts.
+    Resume: --resume <sessionDir> writes the report when a pre-report checkpoint exists. An unfinished exploratory-step-complete (no loop-complete) continues the loop. After a finished loop, --continue-explore requires --resume-extra-steps <n> (n>=1); optional --resume-extra-searches / --resume-extra-reads raise count caps.
+    Search preflight: first search is blocked until js-eyes or SearXNG answers a short reachability probe. Failed js-eyes probe: run "js-eyes doctor --json".
     Press Ctrl+C once to cancel gracefully; press again to force exit.
   config get [key]
   config set <key> <value>

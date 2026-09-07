@@ -25,6 +25,7 @@ export function searchQueryPlannerPrompt({
   recentSearchOutcomes = [],
   providerCapabilities = null,
   transportFacts = null,
+  recoveryHosts = [],
 } = {}) {
   const schema = '{"queries":[{"query":"...","targetGapId":"gap-1","intent":"...","expectedEvidence":"...","sourceType":"web|news|filing|local","searchOptions":{"engines":"...","categories":"...","language":"...","pageno":1}}]}';
   return [
@@ -47,6 +48,7 @@ export function searchQueryPlannerPrompt({
         evidenceScope === 'local' ? 'Local corpus search is active. Never emit site: operators.' : '',
         siteQueryMode === 'never' ? 'Do not emit site: operators in this mode.' : '',
         mode === 'site_fallback' ? 'The previous site: query returned only off-host results. Rewrite it without any site: operator.' : '',
+        mode === 'required_host_recovery' ? 'These required hosts were never retrieved. Every query must include site:<host> for at least one host listed in recoveryHosts. Do not omit site:. Do not invent other hosts.' : '',
         mode === 'challenge' ? 'Write a challenge query that looks for counter-evidence or an alternative explanation, still in natural language.' : '',
         mode === 'repair' || mode === 'recovery' ? 'Change the search angle, source type, time range, or wording. Do not repeat rejected or searched queries.' : '',
         'Hints are optional ideas only. Rewrite them; do not execute them unchanged if they contain identifiers or templates.',
@@ -73,6 +75,7 @@ export function searchQueryPlannerPrompt({
         evidenceScope,
         siteQueryMode,
         siteFallbackFor: siteFallbackFor || null,
+        recoveryHosts,
         context: context || null,
         hints,
         rejectionReasons,

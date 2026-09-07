@@ -68,10 +68,17 @@ export {
   NOOP_RUN_RECORDER,
   RUN_RECORD_SCHEMA_VERSION,
   loadLatestCheckpoint,
+  loadNamedCheckpoint,
+  maxRecordedCallSequence,
   readEventJournal,
   recorderOrNoop,
   sanitizeRecordedValue,
 } from './research/run-recorder.mjs';
+export {
+  checkpointHasTerminalLoopStop,
+  isReportResumeMode,
+  selectResearchResumePlan,
+} from './research/resume-plan.mjs';
 export {
   loadRecordedCallExchange,
   loadRecordedLlmRequest,
@@ -219,7 +226,11 @@ export {
   selectSlotPassages,
   slotSupportFingerprint,
 } from './research/gap-slot-support.mjs';
-export { evaluateReadinessGate, repairGapsFromGate } from './research/adaptive/readiness-gate.mjs';
+export {
+  evaluateReadinessGate,
+  listNotRetrievedLiteralRequiredHosts,
+  repairGapsFromGate,
+} from './research/adaptive/readiness-gate.mjs';
 export {
   partitionFindingsForReport,
   applySlotStatusToClaims,

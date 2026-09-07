@@ -7,7 +7,7 @@ import {
   independentEvidenceKeysFromSources,
   requiredHostCoverage,
 } from './source-policy.mjs';
-import { hasUsableResearchContract } from './research-profile.mjs';
+import { extractLiteralHosts, hasUsableResearchContract, sanitizeHosts } from './research-profile.mjs';
 import { evaluateEvidenceCriteria, gapNeedsRequiredEvidence } from '../evidence-criteria.mjs';
 import { collectGapSources, evidenceStatusOf, isRepairTerminal, isRequiredSlot } from '../gap-state.mjs';
 
@@ -58,6 +58,26 @@ function hostAttemptDiagnostics(hosts = [], findings = [], gapId = null) {
       httpStatus: blocked.httpStatus ?? null,
     };
   });
+}
+
+export function listNotRetrievedLiteralRequiredHosts({
+  gap = {},
+  findings = [],
+  query = '',
+  brief = {},
+} = {}) {
+  const literals = new Set([
+    ...extractLiteralHosts(query),
+    ...extractLiteralHosts(brief?.query || ''),
+    ...sanitizeHosts(brief?.requiredHosts || []),
+    ...(brief?.answerSlots || []).flatMap((slot) => sanitizeHosts(slot.requiredHosts || [])),
+  ]);
+  const hosts = (gap.requiredHosts || []).filter((host) => (
+    literals.has(String(host || '').trim().toLowerCase().replace(/^www\./, ''))
+  ));
+  return hostAttemptDiagnostics(hosts, findingsForGap(gap, findings), gap.id)
+    .filter((item) => item.reason === 'not_retrieved')
+    .map((item) => item.host);
 }
 
 function hostFailureMessage(diagnostics = []) {

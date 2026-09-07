@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { evaluateReadinessGate } from '../src/research/adaptive/readiness-gate.mjs';
+import { evaluateReadinessGate, listNotRetrievedLiteralRequiredHosts } from '../src/research/adaptive/readiness-gate.mjs';
 import { inferResearchProfile } from '../src/research/adaptive/research-profile.mjs';
 import { ResearchState } from '../src/research/adaptive/research-state.mjs';
 import { evaluateAnswerReadiness } from '../src/research/adaptive/agent-policy.mjs';
@@ -358,5 +358,25 @@ describe('deterministic readiness gate', () => {
     assert.ok(state.readiness.failures.some((failure) => (
       failure.code === 'critical_gap_open' || failure.code === 'contract_unavailable'
     )));
+  });
+
+  it('lists only literal required hosts that were never retrieved', () => {
+    const hosts = listNotRetrievedLiteralRequiredHosts({
+      query: 'Qwen hardware on qwenlm.github.io and github.com',
+      brief: { query: 'Qwen hardware on qwenlm.github.io and github.com' },
+      gap: {
+        id: 'gap-1',
+        requiredHosts: ['github.com', 'qwenlm.github.io'],
+      },
+      findings: [{
+        gapId: 'gap-1',
+        sources: [{
+          url: 'https://github.com/QwenLM/Qwen',
+          fetchStatus: 'ok',
+          content: 'repository readme body for hardware notes',
+        }],
+      }],
+    });
+    assert.deepEqual(hosts, ['qwenlm.github.io']);
   });
 });

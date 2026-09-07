@@ -39,7 +39,7 @@ export class OpenAICompatibleProvider {
     };
   }
 
-  async completeWithMetadata({ messages, signal, temperature, maxTokens, reasoningEffort }) {
+  async completeWithMetadata({ messages, signal, temperature, maxTokens, reasoningEffort, purpose }) {
     if (!this.config.apiKey) {
       throw new Error('API key is required for OpenAI-compatible provider.');
     }
@@ -50,6 +50,12 @@ export class OpenAICompatibleProvider {
       maxTokens,
       reasoningEffort,
     });
+    const configuredTimeout = Number(this.config.timeoutMs);
+    const timeoutMs = Number.isFinite(configuredTimeout) && configuredTimeout > 0
+      ? configuredTimeout
+      : (purpose === 'report'
+        ? 2_700_000
+        : (this.transportOptions?.headersTimeoutMs || 900_000));
     const response = await this.fetch(request.endpoint, {
       method: 'POST',
       signal,
@@ -58,6 +64,8 @@ export class OpenAICompatibleProvider {
         authorization: `Bearer ${this.config.apiKey}`,
       },
       body: JSON.stringify(request.body),
+      headersTimeout: timeoutMs,
+      bodyTimeout: timeoutMs,
     });
 
     if (!response.ok) {

@@ -136,7 +136,16 @@ export function buildResearchLimitations({
   for (const item of unmetRequiredHosts || []) {
     const host = item.host || item.hostname || item;
     const reason = item.reason || 'not_retrieved';
-    if (!host || reason === 'body_rejected') continue;
+    if (!host) continue;
+    if (reason === 'body_rejected') {
+      addItem(
+        items,
+        `required_host:${host}:${reason}`,
+        'transport',
+        `Required host ${host} was retrieved but the body was rejected as evidence.`,
+      );
+      continue;
+    }
     addItem(items, `required_host:${host}:${reason}`, 'transport', `Required host ${host} was not retrieved (${reason}).`);
   }
   if (readiness && !readiness.pass && (readiness.failures || []).length) {
