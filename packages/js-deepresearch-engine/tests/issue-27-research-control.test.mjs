@@ -1,3 +1,4 @@
+import { ResearchRunner } from './helpers/legacy-research-runner.mjs';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
@@ -9,7 +10,6 @@ import {
   researchBriefFromInput,
   mergeResearchBrief,
   resolveReadSettings,
-  ResearchRunner,
 } from '../src/index.mjs';
 import { runFocusedPipeline } from '../src/research/strategies/focused-pipeline.mjs';
 import { runQuick } from '../src/research/strategies/quick.mjs';

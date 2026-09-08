@@ -66,3 +66,35 @@ export function collectObservabilityMetrics({
     transport: collectTransportMetrics({ findings, transportMemory }),
   };
 }
+
+export function collectCanonicalObservability({ findings = [], trace = [], sourceReadAttempts = null, previous = null } = {}) {
+  const snapshots = new Map();
+  for (const finding of findings) {
+    if (finding.origin === 'document_reuse') continue;
+    for (const source of finding.sources || []) {
+      const key = JSON.stringify([source.finalUrl || source.url || source.id, source.retrievedAt || null,
+        source.documentVersionId || source.contentSha256 || null, source.fetchStatus || null, source.backend || null]);
+      if (!snapshots.has(key)) snapshots.set(key, source);
+    }
+  }
+  const result = collectObservabilityMetrics({ findings: [{ sources: [...snapshots.values()] }], trace });
+  // These are source snapshots, not HTTP attempts: a read may retry or use cache.
+  result.transport = { ...result.transport, scope: 'unique_retrieval_snapshots', sourceReadAttempts,
+    blockedHosts: previous?.transport?.blockedHosts || [] };
+  if (result.sourceAssessment) result.sourceAssessment.scope = 'unique_retrieval_snapshots';
+  return result;
+}
+
+export function summarizeScheduler(snapshot) {
+  if (!snapshot) return null;
+  const actions = snapshot.actions || [];
+  const receipts = snapshot.receipts || [];
+  return { schemaVersion: 1, actionCount: actions.length, dispatchedAttempts: snapshot.round || 0,
+    actionsByType: countBy(actions, (action) => action.type), actionsByStatus: countBy(actions, (action) => action.status),
+    receiptCount: receipts.length, outcomes: countBy(receipts, (receipt) => receipt.outcome?.execution),
+    retryableFailures: receipts.filter((receipt) => receipt.outcome?.execution === 'failed' && receipt.outcome?.retryable).length,
+    unknownOutcomes: receipts.filter((receipt) => receipt.outcome?.execution === 'outcome_unknown').length,
+    appliedReceiptCount: (snapshot.appliedReceiptIds || []).length,
+    sealedPlannerScopes: (snapshot.plannerFailures || []).filter(([, count]) => count >= (snapshot.maxFailures || 3)).length,
+    noChangeCycles: snapshot.noChangeCycles || 0, terminal: snapshot.terminal || null };
+}

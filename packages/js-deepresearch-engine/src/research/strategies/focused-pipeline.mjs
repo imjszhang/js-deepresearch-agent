@@ -134,6 +134,7 @@ async function syncState(state, findings, { llm, signal, query, trace } = {}) {
   state.findings = findings;
   state.syncGapCoverage();
   const support = await judgeOpenSlotSupport({
+    evidenceStore: state.evidenceStore,
     llm,
     signal,
     query: query || state.query,
@@ -637,6 +638,8 @@ export async function runFocusedPipeline(context) {
     stopReason,
   });
   return attachControl(findings, {
+    evidenceStore: state.evidenceStore?.export() || null,
+    embeddingCache: context.researchProviders?.embedding?.stats ? { ...context.researchProviders.embedding.stats } : null,
     schemaVersion: 1,
     brief,
     profile,

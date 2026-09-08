@@ -125,10 +125,7 @@ export async function runRememberedAttempt(url, context, {
   const execute = async () => {
     const callId = `fetch-${crypto.randomUUID()}`;
     const startedAt = Date.now();
-    context.recorder?.callStarted?.({
-      callId,
-      kind: 'content-fetch',
-      request: {
+    const request = {
         url,
         sourceId: context.source?.id || null,
         maxChars: context.maxChars,
@@ -136,8 +133,10 @@ export async function runRememberedAttempt(url, context, {
         requestedFetchBackend: resolveFocusedSettings(context.settings).fetchBackend,
         retrievalPath,
         viaProxy: Boolean(String(context.settings?.http?.proxy || '').trim()),
-      },
-    });
+    };
+    const recovered = context.recorder?.recoverCall?.('content-fetch', request);
+    if (recovered) return recovered.response;
+    context.recorder?.callStarted?.({ callId, kind: 'content-fetch', request });
     try {
       const rawResult = await run();
       const result = {

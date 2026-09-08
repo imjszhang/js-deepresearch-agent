@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import {
+  EvidenceStore,
   buildCitationMap,
   extractQualityClaims,
   getSourceEvidenceClass,
@@ -101,8 +102,8 @@ export function effectiveFindings({ findings = [], sources = [], query = '' } = 
   return [];
 }
 
-export function buildAuditCitationMap({ findings = [], sources = [], query = '' } = {}) {
-  return buildCitationMap(effectiveFindings({ findings, sources, query }));
+export function buildAuditCitationMap({ findings = [], sources = [], query = '', citationRegistry, evidenceStore } = {}) {
+  return buildCitationMap(effectiveFindings({ findings, sources, query }), { citationRegistry, sources, evidenceStore: evidenceStore ? new EvidenceStore(evidenceStore) : null });
 }
 
 function citationKeysOf(claim = {}) {
@@ -112,6 +113,7 @@ function citationKeysOf(claim = {}) {
 
 function lookupSource(entry, sources = []) {
   if (!entry) return null;
+  if (entry.documentVersionId) return entry.source;
   if (entry.sourceId) {
     const byId = sources.find((source) => source.id === entry.sourceId);
     if (byId) return byId;
@@ -130,13 +132,16 @@ export function resolveClaimSources(claim, citationMap, sources = []) {
   const seen = new Set();
   const add = (source) => {
     if (!source) return;
-    const identity = source.id || source.url;
+    const identity = source.documentVersionId || source.id || source.url;
     if (!identity || seen.has(identity)) return;
     seen.add(identity);
     cited.push(source);
   };
-  for (const entry of resolved) add(lookupSource(entry, sources));
-  for (const id of claim.citedSourceIds || []) {
+  for (const entry of resolved) {
+    const source = lookupSource(entry, sources);
+    add(entry.documentVersionId && source ? { ...source, passageIds: claim.passageIds || entry.passageIds } : source);
+  }
+  for (const id of resolved.some((entry) => entry.documentVersionId) ? [] : (claim.citedSourceIds || [])) {
     add(sources.find((source) => source.id === id));
   }
   return { keys, resolved, unresolved, cited };
@@ -145,12 +150,14 @@ export function resolveClaimSources(claim, citationMap, sources = []) {
 export function passagesForSources(cited = [], passages = []) {
   const ids = new Set(cited.map((source) => source.id).filter(Boolean));
   const urls = new Set(cited.map((source) => source.url).filter(Boolean));
-  return (passages || []).filter((passage) => ids.has(passage.sourceId) || urls.has(passage.url));
+  return (passages || []).filter((passage) => cited.some((source) => source.documentVersionId
+    ? passage.documentVersionId === source.documentVersionId && (!source.passageIds?.length || source.passageIds.includes(passage.id))
+    : ids.has(passage.sourceId) || urls.has(passage.url)));
 }
 
 export function citedEvidenceHaystack(cited = [], passages = []) {
   return [
-    ...cited.flatMap((source) => [source.title, source.url, source.snippet, source.summary, source.content]),
+    ...cited.flatMap((source) => source.documentVersionId ? [source.title, source.url] : [source.title, source.url, source.snippet, source.summary, source.content]),
     ...passagesForSources(cited, passages).map((passage) => passage.text),
   ].filter(Boolean).join('\n');
 }

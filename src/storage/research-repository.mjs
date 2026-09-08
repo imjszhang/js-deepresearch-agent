@@ -44,7 +44,7 @@ export class ResearchRepository {
 
   list() {
     return this.db.prepare(`
-      SELECT id, query, status, strategy, report, error, quality_json, session_dir, created_at, updated_at, completed_at
+      SELECT *
       FROM research_history
       ORDER BY created_at DESC
     `).all().map(mapResearch);
@@ -52,7 +52,7 @@ export class ResearchRepository {
 
   get(id) {
     const row = this.db.prepare(`
-      SELECT id, query, status, strategy, report, error, quality_json, session_dir, created_at, updated_at, completed_at
+      SELECT *
       FROM research_history
       WHERE id = ?
     `).get(id);
@@ -62,6 +62,10 @@ export class ResearchRepository {
   delete(id) {
     const result = this.db.prepare('DELETE FROM research_history WHERE id = ?').run(id);
     return result.changes > 0;
+  }
+
+  saveDelivery(id, delivery) {
+    this.db.prepare('UPDATE research_history SET delivery_json=? WHERE id=?').run(JSON.stringify(delivery), id);
   }
 }
 
@@ -75,6 +79,9 @@ function mapResearch(row) {
     error: row.error,
     quality: parseJson(row.quality_json),
     sessionDir: row.session_dir || null,
+    resultRevision: row.result_revision || null,
+    resultManifestPath: row.result_manifest_path || null,
+    delivery: parseJson(row.delivery_json),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     completedAt: row.completed_at,

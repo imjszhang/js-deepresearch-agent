@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import path from 'node:path';
+import { sourceKey } from './source-key.mjs';
 
 const dataDir = path.resolve(process.cwd(), 'data');
 const dbPath = path.join(dataDir, 'js-deepresearch.sqlite');
@@ -72,6 +73,32 @@ function migrate(database) {
   `);
   ensureColumn(database, 'research_history', 'quality_json', 'TEXT');
   ensureColumn(database, 'research_history', 'session_dir', 'TEXT');
+  ensureColumn(database, 'research_history', 'result_revision', 'TEXT');
+  ensureColumn(database, 'research_history', 'result_manifest_path', 'TEXT');
+  ensureColumn(database, 'research_history', 'delivery_json', 'TEXT');
+  database.transaction(() => {
+    ensureColumn(database, 'sources', 'source_key', 'TEXT');
+    ensureColumn(database, 'sources', 'position', 'INTEGER NOT NULL DEFAULT 0');
+    if (database.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'sources_research_key'").get()) return;
+    const seen = new Map();
+    const positions = new Map();
+    for (const row of database.prepare('SELECT * FROM sources ORDER BY id').all()) {
+      const key = sourceKey(row);
+      const group = JSON.stringify([row.research_id, key]);
+      const existingId = seen.get(group);
+      if (existingId) {
+        database.prepare('UPDATE sources SET title=?, url=?, snippet=?, engine=? WHERE id=?')
+          .run(row.title, row.url, row.snippet, row.engine, existingId);
+        database.prepare('DELETE FROM sources WHERE id=?').run(row.id);
+      } else {
+        const position = positions.get(row.research_id) || 0;
+        database.prepare('UPDATE sources SET source_key=?, position=? WHERE id=?').run(key, position, row.id);
+        seen.set(group, row.id);
+        positions.set(row.research_id, position + 1);
+      }
+    }
+    database.exec('CREATE UNIQUE INDEX sources_research_key ON sources(research_id, source_key)');
+  })();
 }
 
 function ensureColumn(database, table, column, type) {

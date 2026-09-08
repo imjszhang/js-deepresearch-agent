@@ -77,6 +77,27 @@ describe('compileWiki', () => {
     assert.equal(second.compiled, 0);
   });
 
+  it('keeps links resolvable when search titles end in ellipses or are truncated at punctuation', () => {
+    const vaultDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wiki-search-titles-'));
+    tempDirs.push(vaultDir);
+    const sources = sampleSources.map((source, index) => ({ ...source,
+      title: index ? `${'x'.repeat(84)} ... more text` : 'Research workflows and ...' }));
+    compileWiki({ vaultDir, sources, report, meta: { query: 'Search results ...' } });
+    assert.equal(lintWiki({ vaultDir }).errorCount, 0);
+    const second = compileWiki({ vaultDir, sources, report, meta: { query: 'Search results ...' } });
+    assert.equal(second.skipped, sources.length);
+    assert.equal(lintWiki({ vaultDir }).errorCount, 0);
+    const manifest = loadManifest(vaultDir);
+    const entry = manifest.sources[sources[0].id];
+    const oldPath = entry.pages[0].replace(/\.md$/, ' .md');
+    fs.renameSync(path.join(vaultDir, entry.pages[0]), path.join(vaultDir, oldPath));
+    entry.pages = [oldPath];
+    fs.writeFileSync(path.join(vaultDir, 'manifest.json'), JSON.stringify(manifest));
+    const repaired = compileWiki({ vaultDir, sources, report, meta: { query: 'Search results ...' } });
+    assert.equal(repaired.compiled, 1);
+    assert.equal(lintWiki({ vaultDir }).errorCount, 0);
+  });
+
   it('recompiles when source hash changes', () => {
     const vaultDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wiki-hash-'));
     tempDirs.push(vaultDir);

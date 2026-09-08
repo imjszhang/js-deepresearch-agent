@@ -1,4 +1,6 @@
 import fs from 'node:fs';
+import crypto from 'node:crypto';
+import { artifactPaths, finishArtifactRevision, publishResearchArtifacts, writeLegacyArtifactCopies, readArtifactManifest } from './result-artifacts.mjs';
 import path from 'node:path';
 import {
   QUALITY_METRICS_VERSION,
@@ -6,6 +8,7 @@ import {
   CLAIM_EVALUATION_VERSION,
 } from './claim-quality.mjs';
 import { publicSearchOptionsSnapshot } from '../search/normalize-search-config.mjs';
+import { EvidenceStore } from './evidence-store.mjs';
 
 function atomicWriteFile(file, content) {
   const temporary = `${file}.tmp-${process.pid}-${Date.now()}`;
@@ -90,23 +93,32 @@ export function saveResearchArtifacts({
   settings,
   result,
   researchId = null,
+  publish = true,
 }) {
   fs.mkdirSync(sessionDir, { recursive: true });
 
-  const artifacts = {
-    sessionDir,
-    reportPath: path.join(sessionDir, 'report.md'),
-    findingsPath: path.join(sessionDir, 'findings.json'),
-    sourcesPath: path.join(sessionDir, 'sources.json'),
-    metaPath: path.join(sessionDir, 'meta.json'),
-    briefPath: path.join(sessionDir, 'brief.json'),
-    gapsPath: path.join(sessionDir, 'gaps.json'),
-    passagesPath: path.join(sessionDir, 'passages.json'),
-    claimsPath: path.join(sessionDir, 'claims.json'),
-    qualityPath: path.join(sessionDir, 'quality.json'),
-    tracePath: path.join(sessionDir, 'trace.json'),
-    reportPlanPath: path.join(sessionDir, 'report-plan.json'),
-  };
+  const revision = result.resultRevision || crypto.randomUUID();
+  const artifacts = artifactPaths(sessionDir, revision, result.evidenceStore ? 2 : 1);
+  if (fs.existsSync(artifacts.manifestPath)) {
+    const existing = readArtifactManifest(sessionDir, artifacts.manifestPath);
+    if (fs.readFileSync(existing.resultPath, 'utf8') !== JSON.stringify(result)) {
+      throw new Error('Result revision already exists with different content');
+    }
+    if (publish) {
+      publishResearchArtifacts(existing);
+      writeLegacyArtifactCopies(existing);
+    }
+    return existing;
+  }
+  fs.mkdirSync(artifacts.resultDir, { recursive: true });
+  if (result.evidenceStore) {
+    const store = new EvidenceStore(result.evidenceStore);
+    fs.mkdirSync(path.join(artifacts.resultDir, 'evidence-bodies'), { recursive: true });
+    for (const [bodyHash, content] of store.bodies) atomicWriteFile(path.join(artifacts.resultDir, 'evidence-bodies', `${bodyHash}.txt`), content);
+    atomicWriteFile(artifacts.evidenceIndexPath, JSON.stringify(store.export({ inlineBodies: false })));
+    atomicWriteFile(artifacts.citationsPath, JSON.stringify(result.citationRegistry));
+    atomicWriteFile(artifacts.evidencePath, result.evidenceAppendix);
+  }
 
   atomicWriteFile(artifacts.reportPath, result.report);
   atomicWriteFile(artifacts.findingsPath, JSON.stringify(result.findings, null, 2));
@@ -139,7 +151,8 @@ export function saveResearchArtifacts({
         query,
         strategy,
         researchId,
-        artifactSchemaVersion: 4,
+        artifactSchemaVersion: result.evidenceStore ? 5 : 4,
+        resultRevision: revision,
         researchBrief: result.brief || null,
         qualityMetricsVersion: result.quality?.qualityMetricsVersion || QUALITY_METRICS_VERSION,
         claimExtractionVersion: result.quality?.claimExtractionVersion || CLAIM_EXTRACTION_VERSION,
@@ -171,6 +184,12 @@ export function saveResearchArtifacts({
     ),
   );
 
+  atomicWriteFile(artifacts.resultPath, JSON.stringify(result));
+  finishArtifactRevision(artifacts);
+  if (publish) {
+    publishResearchArtifacts(artifacts);
+    writeLegacyArtifactCopies(artifacts);
+  }
   return artifacts;
 }
 

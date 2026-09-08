@@ -162,7 +162,7 @@ export function normalizeGapRecord(gap = {}, defaults = {}) {
   const evidenceStatus = inferEvidenceStatus(gap);
   return {
     ...gap,
-    schemaVersion: GAP_SCHEMA_VERSION,
+    schemaVersion: gap.origin && gap.origin !== 'legacy_unknown' ? 6 : GAP_SCHEMA_VERSION,
     id: gap.id || defaults.id || 'gap-1',
     question: String(gap.question || defaults.question || '').trim(),
     contractSlotId: gap.contractSlotId || defaults.contractSlotId || null,

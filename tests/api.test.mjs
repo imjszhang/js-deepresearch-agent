@@ -40,3 +40,42 @@ describe('API', () => {
     assert.equal(response.body.error, 'Query is required.');
   });
 });
+
+describe('canonical committed result API', () => {
+  it('reads the committed registry after pointer publication fails and fails closed on missing evidence', async (t) => {
+    const fs = await import('node:fs');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const { EvidenceStore, saveResearchArtifacts } = await import('js-deepresearch-engine');
+    const { ResultCommitService } = await import('../src/storage/result-commit-service.mjs');
+    const db = migrateDb(new Database(':memory:'));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jdr-api-evidence-'));
+    t.after(() => { db.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+    const app = createApp(db);
+    const services = app.locals.services;
+    services.researchRepository.create({ id: 'run', query: 'query', strategy: 'focused' });
+    services.researchRepository.updateStatus('run', 'running', { sessionDir: dir });
+    const store = new EvidenceStore();
+    const version = store.register({ url: 'https://example.org/tool', content: 'The tool supports local document processing according to its publisher.', fetchStatus: 'ok' });
+    const passage = store.chunks(version.documentVersionId)[0];
+    const result = { resultRevision: 'new', report: '# Committed [9.1]', findings: [], sources: [{ id: version.sourceId, url: version.url }], quality: { gate: 'pass' },
+      evidenceStore: store.export(), evidenceAppendix: '# Committed evidence', citationRegistry: { schemaVersion: 1, entries: [{ citationKey: '9.1', sourceId: version.sourceId, documentVersionId: version.documentVersionId, passageIds: [passage.id], url: version.url }] } };
+    saveResearchArtifacts({ sessionDir: dir, query: 'old', strategy: 'quick', settings: {}, result: { resultRevision: 'old', report: '# Old', findings: [], sources: [] } });
+    const artifacts = saveResearchArtifacts({ sessionDir: dir, query: 'query', strategy: 'focused', settings: {}, result, publish: false });
+    new ResultCommitService({ db, ...services }).commit('run', result, artifacts);
+    const response = await request(app).get('/api/research/run').expect(200);
+    assert.equal(response.body.report, '# Committed [9.1]');
+    assert.equal(response.body.citationRegistry.entries[0].citationKey, '9.1');
+    assert.equal((await request(app).get(response.body.evidenceUrl).expect(200)).text, '# Committed evidence');
+    fs.unlinkSync(path.join(artifacts.resultDir, version.bodyRef));
+    assert.equal((await request(app).get('/api/research/run').expect(503)).body.code, 'RESULT_INTEGRITY');
+  });
+  it('rejects planning context authority fields before queuing research', async () => {
+    const db = migrateDb(new Database(':memory:'));
+    try {
+      const app = createApp(db);
+      await request(app).post('/api/research').send({ query: 'Tool', planningContext: { requiredHosts: ['example.org'] } }).expect(400);
+      assert.equal(app.locals.services.researchRepository.list().length, 0);
+    } finally { db.close(); }
+  });
+});

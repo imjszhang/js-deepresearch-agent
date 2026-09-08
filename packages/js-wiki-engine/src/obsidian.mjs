@@ -4,10 +4,9 @@ export function safeObsidianFilename(title, { maxLength = 120 } = {}) {
   const cleaned = String(title ?? 'Untitled')
     .replace(INVALID_CHARS, '')
     .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/\.+$/g, '');
+    .trim();
   const base = cleaned || 'Untitled';
-  return base.length > maxLength ? base.slice(0, maxLength).trim() : base;
+  return base.slice(0, maxLength).replace(/[.\s]+$/g, '') || 'Untitled';
 }
 
 export function wikilink(target, alias = null) {

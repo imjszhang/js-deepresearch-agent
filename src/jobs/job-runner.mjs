@@ -4,11 +4,14 @@ import {
   ResearchRunner,
   createWorkSessionDir,
   saveResearchArtifacts,
+  normalizePlanningContext,
 } from 'js-deepresearch-engine';
-import { archiveResearchResultSafe } from '../storage/intel-store.mjs';
+import { completeResearch, recordResearchFailure } from '../research-completion.mjs';
+import { acquireSessionLock } from '../session-lock.mjs';
 
 export class JobRunner {
-  constructor({ settingsStore, researchRepository, logRepository, sourceRepository, eventBus }) {
+  constructor({ settingsStore, researchRepository, logRepository, sourceRepository, eventBus, resultCommitService }) {
+    this.resultCommitService = resultCommitService;
     this.settingsStore = settingsStore;
     this.researchRepository = researchRepository;
     this.logRepository = logRepository;
@@ -18,7 +21,8 @@ export class JobRunner {
     this.runner = new ResearchRunner();
   }
 
-  start({ query, overrides = {} }) {
+  start({ query, planningContext, overrides = {} }) {
+    planningContext = normalizePlanningContext(planningContext);
     const settings = this.settingsStore.snapshot(overrides);
     const id = crypto.randomUUID();
     this.researchRepository.create({
@@ -54,6 +58,7 @@ export class JobRunner {
     queueMicrotask(() => this.runJob({
       id,
       query,
+      planningContext,
       settings,
       controller,
       sessionDir,
@@ -73,17 +78,20 @@ export class JobRunner {
   async runJob({
     id,
     query,
+    planningContext,
     settings,
     controller,
     sessionDir: providedSessionDir,
     recorder: providedRecorder,
   }) {
     let recorder = providedRecorder || null;
+    let releaseLock = null;
     try {
       const sessionDir = providedSessionDir || createWorkSessionDir({
         settings,
         strategy: settings.research.strategy,
       });
+      releaseLock = acquireSessionLock(sessionDir);
       if (!recorder) {
         recorder = new FileRunRecorder({
           sessionDir,
@@ -97,73 +105,33 @@ export class JobRunner {
       this.emitLog(id, { message: 'Job started', progress: 1 });
       const result = await this.runner.run({
         query,
+        planningContext,
         settings,
         signal: controller.signal,
         recorder,
         onProgress: (event) => this.emitLog(id, event),
       });
-      const budget = result.quality?.budget?.usage || {};
-      const qualityMetrics = result.quality?.metrics || {};
-      this.emitLog(id, {
-        message: `Quality: ${result.quality?.gate || 'unknown'}; key-supported=${formatRate(qualityMetrics.rates?.keyClaimSupportedRate)}; direct-evidence=${formatRate(qualityMetrics.rates?.directEvidenceRate)}; gaps=${result.gaps?.filter((gap) => gap.status === 'resolved').length || 0}/${result.gaps?.length || 0}; searches=${budget.searchRequests || 0}; reads=${budget.sourceReads || 0}`,
-        progress: 99,
+      await completeResearch({
+        id, result, query, strategy: settings.research.strategy, settings, sessionDir, recorder,
+        services: this, saveArtifacts: saveResearchArtifacts, signal: controller.signal,
+        onWarning: ({ stage, code }) => this.emitLog(id, { level: 'warn', message: `Delivery ${stage} failed (${code}); research result retained.` }),
+        onStatus: (record) => this.eventBus.emit(id, { type: 'status', data: record }),
       });
-
-      this.sourceRepository.addMany(id, result.sources);
-      const artifacts = saveResearchArtifacts({
-        sessionDir,
-        settings,
-        strategy: settings.research.strategy,
-        query,
-        result,
-        researchId: id,
-      });
-      await archiveResearchResultSafe({
-        researchId: id,
-        query,
-        strategy: settings.research.strategy,
-        result,
-        artifacts,
-        settings,
-      }, {
-        onWarning: (message) => {
-          this.emitLog(id, { level: 'warn', message: `Intel store archive failed: ${message}`, progress: null });
-        },
-      });
-      const record = this.researchRepository.updateStatus(id, 'completed', {
-        report: result.report,
-        quality: result.quality,
-        completedAt: new Date().toISOString(),
-      });
-      recorder.finalize('completed', {
-        artifacts: {
-          reportPath: artifacts.reportPath,
-          findingsPath: artifacts.findingsPath,
-          sourcesPath: artifacts.sourcesPath,
-          metaPath: artifacts.metaPath,
-        },
-      });
-      this.eventBus.emit(id, { type: 'status', data: record });
     } catch (error) {
       const status = controller.signal.aborted ? 'cancelled' : 'failed';
-      recorder?.finalize?.(status, { error });
-      const record = this.researchRepository.updateStatus(id, status, {
-        error: error.message,
-        completedAt: new Date().toISOString(),
-      });
+      recordResearchFailure({ recorder, repository: this.researchRepository, id, error, cancelled: status === 'cancelled' });
       this.emitLog(id, { level: 'error', message: error.message, progress: null });
-      this.eventBus.emit(id, { type: 'status', data: record });
+      try { this.eventBus.emit(id, { type: 'status', data: this.researchRepository.get?.(id) }); } catch { /* best effort */ }
     } finally {
+      releaseLock?.();
       this.activeJobs.delete(id);
     }
   }
 
   emitLog(id, { level = 'info', message, progress = null }) {
-    const log = this.logRepository.add(id, { level, message, progress });
-    this.eventBus.emit(id, { type: 'log', data: log });
+    try {
+      const log = this.logRepository.add(id, { level, message, progress });
+      this.eventBus.emit(id, { type: 'log', data: log });
+    } catch { /* logging must not stop a running or committed research */ }
   }
-}
-
-function formatRate(value) {
-  return value === null || value === undefined ? 'n/a' : `${Math.round(value * 100)}%`;
 }

@@ -1,6 +1,7 @@
+import { ResearchRunner } from './helpers/legacy-research-runner.mjs';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { ResearchRunner, SearchProviderError } from '../src/index.mjs';
+import { SearchProviderError } from '../src/index.mjs';
 import { fallbackAdaptiveAction } from '../src/research/adaptive/agent-policy.mjs';
 import { evaluateReadinessGate } from '../src/research/adaptive/readiness-gate.mjs';
 import { inferResearchProfile } from '../src/research/adaptive/research-profile.mjs';

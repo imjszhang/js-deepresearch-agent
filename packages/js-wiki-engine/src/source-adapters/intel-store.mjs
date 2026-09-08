@@ -1,3 +1,4 @@
+import { EvidenceStore, buildCitationMap } from 'js-deepresearch-engine';
 import fs from 'node:fs';
 import path from 'node:path';
 import { normalizeWikiSource } from '../schema.mjs';
@@ -21,9 +22,9 @@ function artifactPathsFromRun(run, reportMeta) {
   }
 
   return {
-    report: path.join(sessionDir, 'report.md'),
-    findings: path.join(sessionDir, 'findings.json'),
-    sources: path.join(sessionDir, 'sources.json'),
+    report: reportPath || path.join(sessionDir, 'report.md'),
+    findings: run?.findingsPath || path.join(sessionDir, 'findings.json'),
+    sources: run?.sourcesPath || path.join(sessionDir, 'sources.json'),
   };
 }
 
@@ -53,17 +54,22 @@ export function loadSourcesFromIntelStore({ engine, researchId }) {
     throw new Error(`Archived research run not found: ${researchId}`);
   }
 
-  const sourcesRaw = engine.readSource('research_sources', { entity_id: researchId }) || [];
-  const reportMeta = engine.readSource('research_reports', { name: researchId });
+  const snapshot = run.resultSnapshotId
+    ? engine.readSource('research_result_snapshots', { name: run.resultSnapshotId })?.result : null;
+  if (run.resultSnapshotId && !snapshot) throw new Error('Archived result snapshot is missing');
+  const evidence = snapshot?.evidenceStore ? new EvidenceStore(snapshot.evidenceStore) : null;
+  if (snapshot?.citationRegistry) buildCitationMap([], { citationRegistry: snapshot.citationRegistry, sources: snapshot.sources, evidenceStore: evidence });
+  const sourcesRaw = snapshot ? snapshot.sources : (engine.readSource('research_sources', { entity_id: researchId }) || []);
+  const reportMeta = snapshot ? { report: snapshot.report, reportPath: run.reportPath } : engine.readSource('research_reports', { name: researchId });
   const safeRead = (name) => {
     try { return (engine.readSource(name, { entity_id: researchId }) || []).map(stripJsonlEntityFields); }
     catch { return []; }
   };
-  const claims = safeRead('research_claims');
-  const passages = safeRead('research_passages');
-  const gaps = safeRead('research_gaps');
+  const claims = snapshot ? snapshot.claims || [] : safeRead('research_claims');
+  const passages = snapshot ? snapshot.passages || [] : safeRead('research_passages');
+  const gaps = snapshot ? snapshot.gaps || [] : safeRead('research_gaps');
   let quality = null;
-  try { quality = engine.readSource('research_quality', { name: researchId }); } catch { /* v2 store */ }
+  try { quality = snapshot ? snapshot.quality : engine.readSource('research_quality', { name: researchId }); } catch { /* v2 store */ }
 
   const report = resolveReportFromIntel(run, reportMeta);
   const artifactPaths = artifactPathsFromRun(run, reportMeta);
@@ -103,6 +109,8 @@ export function loadSourcesFromIntelStore({ engine, researchId }) {
     brief: run.researchBrief ?? null,
     report,
     sources,
+    citationRegistry: snapshot?.citationRegistry || null,
+    evidenceStore: evidence?.export() || null,
     claims,
     passages,
     gaps,

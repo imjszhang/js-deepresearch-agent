@@ -4,6 +4,7 @@ import {
   planResearchProfile,
 } from './adaptive/research-profile.mjs';
 import { mergeResearchBrief, researchBriefFromInput } from './research-brief.mjs';
+import { applyRequestContract } from './research-request.mjs';
 
 export async function planAndNormalizeContract({
   llm,
@@ -19,6 +20,7 @@ export async function planAndNormalizeContract({
   profile.brief = mergeResearchBrief(briefInput, profile.brief, { query, depth });
   profile = await planResearchProfile({ llm, query, profile, signal, settings, evidenceScope });
   profile.brief = mergeResearchBrief(briefInput, profile.brief, { query, depth });
+  profile = applyRequestContract(profile, briefInput);
   if (briefInput.requiredAnswerSlots?.length) {
     profile.brief.contractOrigin = profile.brief.contractOrigin || 'user';
   } else if (profile.brief.requiredAnswerSlots?.length) {
@@ -73,6 +75,11 @@ export function applyContractGaps(state, contract = {}, { maxGaps } = {}) {
       preferredHosts: slot.preferredHosts,
       requiredSourceTypes: slot.requiredSourceTypes,
       evidenceCriteria: slot.evidenceCriteria,
+      taskType: slot.taskType,
+      origin: slot.origin,
+      constraintIds: slot.constraintIds,
+      parentTaskId: slot.parentTaskId,
+      evidencePreferences: slot.evidencePreferences,
       requiredSlot: slot.requiredSlot !== false && explicitSlots,
       kind: explicitSlots ? 'slot' : 'followup',
       deduplicate: !explicitSlots,

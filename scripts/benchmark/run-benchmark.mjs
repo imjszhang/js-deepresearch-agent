@@ -1,4 +1,5 @@
 import {
+  EvidenceStore,
   CLAIM_EVALUATION_VERSION,
   buildClaimEvaluation,
   normalizeClaim,
@@ -103,8 +104,8 @@ export async function runBenchmark({
   const artifacts = researchId
     ? loadArtifactsByResearchId(researchId, engine ? { engine } : {})
     : loadArtifacts(workDir);
-  const citationMap = buildCitationMap(artifacts.findings);
-  const schemaV3 = Array.isArray(artifacts.claims) && artifacts.claims.length > 0;
+  const citationMap = buildCitationMap(artifacts.findings, { citationRegistry: artifacts.citationRegistry, sources: artifacts.sources, evidenceStore: artifacts.evidenceStore ? new EvidenceStore(artifacts.evidenceStore) : null });
+  const schemaV3 = Boolean(artifacts.citationRegistry) || (Array.isArray(artifacts.claims) && artifacts.claims.length > 0);
   const claims = (schemaV3 ? artifacts.claims : extractClaims(artifacts.report))
     .map((claim) => normalizeClaim(claim, {
       origin: schemaV3 ? 'stored_rule' : 'runtime_rule',

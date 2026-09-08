@@ -17,7 +17,7 @@ export class BudgetExceededError extends Error {
 
 function purposeBucket(purpose, report = false) {
   if (report || purpose === 'report') return 'reportTokens';
-  if (purpose === 'claim_entailment') return 'postReportEvaluationTokens';
+  if (['claim_entailment', 'claim_validation', 'narrative_validation'].includes(purpose)) return 'postReportEvaluationTokens';
   if (purpose === 'answer_evaluation') return 'candidateEvaluationTokens';
   return 'explorationTokens';
 }
@@ -70,6 +70,10 @@ export class BudgetManager {
     this.unknown = { llmTokens: false, rerankTokens: false, estimatedCost: false };
     this.stopReason = null;
     this.exhaustedKinds = new Set();
+    this.reservations = new Map();
+    this.settledAttemptIds = new Set();
+    this.executionVersion = 1;
+    this.onChange = null;
     this.emit = emit;
   }
 
@@ -113,7 +117,7 @@ export class BudgetManager {
 
   remainingVsHardCap() {
     if (!this.limits.llmTokens) return null;
-    return Math.max(0, this.limits.llmTokens - this.explorationUsed());
+    return Math.max(0, this.limits.llmTokens - this.explorationUsed() - this.reservedTokens('explorationTokens'));
   }
 
   remainingVsMin() {
@@ -147,6 +151,7 @@ export class BudgetManager {
         this.usage.evaluationTokens = (this.usage.evaluationTokens || 0) + amount;
       }
     }
+    this.onChange?.();
   }
 
   revertLlmClaim(amount, options = {}) {
@@ -156,6 +161,42 @@ export class BudgetManager {
     if (isEvaluationBucket(bucket)) {
       this.usage.evaluationTokens = Math.max(0, (this.usage.evaluationTokens || 0) - amount);
     }
+  }
+
+  reservedTokens(bucket = null) {
+    return [...this.reservations.values()].filter((entry) => !bucket || entry.bucket === bucket).reduce((sum, entry) => sum + entry.amount, 0);
+  }
+
+  reserveAttempt(attemptId, amount, options = {}) {
+    if (this.reservations.has(attemptId) || this.settledAttemptIds.has(attemptId)) throw new Error('Attempt already accounted.');
+    if (!this.canClaim('llmTokens', amount, options)) throw new BudgetExceededError('llmTokens', amount);
+    this.reservations.set(attemptId, { attemptId, amount, bucket: purposeBucket(options.purpose, options.report),
+      purpose: options.purpose, report: Boolean(options.report), status: 'pending' });
+    this.onChange?.();
+  }
+
+  settleAttempt(attemptId, usage) {
+    if (this.settledAttemptIds.has(attemptId)) return false;
+    const reservation = this.reservations.get(attemptId);
+    if (!reservation) return false;
+    const tokens = Number(usage?.totalTokens ?? usage?.total_tokens);
+    if (Number.isFinite(tokens) && tokens >= 0) {
+      this.reservations.delete(attemptId);
+      this.recordLlmUsage(usage, reservation);
+      this.settledAttemptIds.add(attemptId);
+      if (this.executionVersion === 2) {
+        for (const bucket of ['explorationTokens', 'reportTokens', 'candidateEvaluationTokens', 'postReportEvaluationTokens']) {
+          this.unknown[bucket] = Boolean(this.legacyUsageUnknown) || [...this.reservations.values()].some((entry) => entry.bucket === bucket && entry.status === 'outcome_unknown');
+        }
+        this.unknown.llmTokens = Boolean(this.legacyUsageUnknown) || [...this.reservations.values()].some((entry) => entry.status === 'outcome_unknown');
+      }
+    } else {
+      reservation.status = 'outcome_unknown';
+      this.unknown.llmTokens = true;
+      this.unknown[reservation.bucket] = true;
+    }
+    this.onChange?.();
+    return true;
   }
 
   markExhausted(kind) {
@@ -197,22 +238,22 @@ export class BudgetManager {
 
   canClaim(kind, amount = 1, options = {}) {
     if (kind === 'llmTokens') {
-      if (this.limits.totalLlmTokens > 0 && (this.usage.llmTokens || 0) + amount > this.limits.totalLlmTokens) {
+      if (this.limits.totalLlmTokens > 0 && (this.usage.llmTokens || 0) + this.reservedTokens() + amount > this.limits.totalLlmTokens) {
         return false;
       }
       if (this.isReportClaim(options)) return true;
       const bucket = purposeBucket(options.purpose, options.report);
       if (bucket === 'postReportEvaluationTokens') {
         const cap = this.limits.postReportEvaluationTokens || 0;
-        return cap === 0 || (this.usage.postReportEvaluationTokens || 0) + amount <= cap;
+        return cap === 0 || (this.usage.postReportEvaluationTokens || 0) + this.reservedTokens(bucket) + amount <= cap;
       }
       if (bucket === 'candidateEvaluationTokens') {
         const cap = this.limits.candidateEvaluationTokens || 0;
-        return cap === 0 || (this.usage.candidateEvaluationTokens || 0) + amount <= cap;
+        return cap === 0 || (this.usage.candidateEvaluationTokens || 0) + this.reservedTokens(bucket) + amount <= cap;
       }
       const cap = this.limits.llmTokens || 0;
       if (cap === 0) return true;
-      return this.explorationUsed() + amount <= cap;
+      return this.explorationUsed() + this.reservedTokens(bucket) + amount <= cap;
     }
     const cap = this.limits[kind] || 0;
     if (cap === 0) return true;
@@ -221,6 +262,16 @@ export class BudgetManager {
 
   snapshot() {
     return {
+      executionVersion: this.executionVersion,
+      legacyUsageUnknown: Boolean(this.legacyUsageUnknown),
+      reservations: [...this.reservations.values()],
+      settledAttemptIds: [...this.settledAttemptIds],
+      // Confirmed usage is a lower bound even when another attempt is unknown.
+      // The unknown reservation still constrains the ceiling independently.
+      floorStatus: this.executionVersion === 2 && this.explorationUsed() >= this.minLlmTokens ? 'met'
+        : (this.executionVersion === 2 ? this.unknown.explorationTokens : this.unknown.llmTokens) ? 'unknown'
+        : this.explorationUsed() >= this.minLlmTokens ? 'met' : 'unmet',
+      floorShortfallTokens: Math.max(0, this.minLlmTokens - this.explorationUsed()),
       limits: { ...this.limits },
       reserveReportTokens: 0,
       maxReportOutputTokens: this.maxReportOutputTokens,
@@ -250,6 +301,10 @@ export class BudgetManager {
   }
 
   restoreCheckpoint(checkpoint = {}) {
+    this.executionVersion = checkpoint.executionVersion || 1;
+    this.legacyUsageUnknown = Boolean(checkpoint.legacyUsageUnknown);
+    this.reservations = new Map((checkpoint.reservations || []).map((entry) => [entry.attemptId, entry]));
+    this.settledAttemptIds = new Set(checkpoint.settledAttemptIds || []);
     if (checkpoint.limits) this.limits = { ...this.limits, ...checkpoint.limits };
     if (checkpoint.usage) this.usage = { ...this.usage, ...checkpoint.usage };
     if (checkpoint.unknown) this.unknown = { ...this.unknown, ...checkpoint.unknown };
@@ -279,6 +334,7 @@ export function wrapProvidersWithBudget({
   searchCallSequence = 0,
 }) {
   const recorder = recorderOrNoop(providedRecorder);
+  if (budget.executionVersion === 2) budget.onChange = () => recorder.checkpoint('budget-ledger', { budget: budget.exportCheckpoint() });
   let llmSeq = Number(llmCallSequence) || 0;
   let searchSeq = Number(searchCallSequence) || 0;
   let lastLlmCall = null;
@@ -292,13 +348,6 @@ export function wrapProvidersWithBudget({
         const startedAt = Date.now();
         onLlmEvent({ status: 'started', callId, purpose });
         try {
-          budget.usage.llmRequests += 1;
-          const requested = Number(args?.maxTokens);
-          const isReport = purpose === 'report';
-          const claimAmount = Number.isFinite(requested) && requested > 0
-            ? requested
-            : (isReport ? 1 : (budget.limits.llmTokens > 0 ? budget.defaultLlmMaxTokens : 1));
-          budget.claim('llmTokens', claimAmount, { purpose, report: isReport });
           const recordedRequest = typeof llm.buildRecordedRequest === 'function'
             ? llm.buildRecordedRequest(args)
             : {
@@ -311,6 +360,25 @@ export function wrapProvidersWithBudget({
                 reasoningEffort: args?.reasoningEffort,
               },
             };
+          const recovered = budget.executionVersion === 2 ? recorder.recoverCall?.('llm', recordedRequest, purpose) : null;
+          if (recovered) {
+            budget.settleAttempt(recovered.callId, recovered.response.usage);
+            lastLlmCall = { callId: recovered.callId, purpose, status: 'completed', recovered: true };
+            onLlmEvent(lastLlmCall);
+            return String(recovered.response.text || '');
+          }
+          const requested = Number(args?.maxTokens);
+          const isReport = purpose === 'report';
+          const claimAmount = Number.isFinite(requested) && requested > 0
+            ? requested
+            : (isReport ? 1 : (budget.limits.llmTokens > 0 ? budget.defaultLlmMaxTokens : 1));
+          if (budget.executionVersion === 2) {
+            const promptBound = Buffer.byteLength(JSON.stringify(args?.messages || []), 'utf8');
+            if (isReport && !(requested > 0) && budget.limits.totalLlmTokens > 0) throw new BudgetExceededError('totalLlmTokens');
+            budget.reserveAttempt(callId, claimAmount + promptBound, { purpose, report: isReport });
+          } else budget.claim('llmTokens', claimAmount, { purpose, report: isReport });
+          budget.usage.llmRequests += 1;
+          budget.onChange?.();
           const recordedMessages = recordedRequest?.body?.messages || args?.messages || [];
           const promptText = JSON.stringify(recordedMessages);
           const requestMetadata = {
@@ -340,12 +408,6 @@ export function wrapProvidersWithBudget({
           const result = typeof llm.completeWithMetadata === 'function'
             ? await llm.completeWithMetadata(args)
             : await llm.complete(args);
-          if (result?.usage) {
-            budget.revertLlmClaim(claimAmount, { purpose, report: isReport });
-            budget.recordLlmUsage(result.usage, { purpose, report: isReport });
-          } else {
-            budget.unknown.llmTokens = true;
-          }
           const text = typeof result === 'string' ? result : (result?.text ?? result?.content ?? '');
           lastLlmCall = {
             status: 'completed',
@@ -373,9 +435,18 @@ export function wrapProvidersWithBudget({
             },
             durationMs: lastLlmCall.durationMs,
           });
+          if (budget.executionVersion === 2) {
+            budget.settleAttempt(callId, result?.usage);
+          } else if (result?.usage) {
+            budget.revertLlmClaim(claimAmount, { purpose, report: isReport });
+            budget.recordLlmUsage(result.usage, { purpose, report: isReport });
+          } else {
+            budget.unknown.llmTokens = true;
+          }
           onLlmEvent(lastLlmCall);
           return String(text || '');
         } catch (error) {
+          if (budget.executionVersion === 2 && budget.reservations.has(callId)) budget.settleAttempt(callId, null);
           lastLlmCall = {
             status: error?.name === 'AbortError' ? 'cancelled' : 'failed',
             callId,
@@ -401,6 +472,9 @@ export function wrapProvidersWithBudget({
       ...search,
       capabilities: search.capabilities,
       async search(query, options) {
+        const request = { provider: search.id || search.provider || 'search', query, options: { ...(options || {}), signal: undefined } };
+        const recovered = budget.executionVersion === 2 ? recorder.recoverCall?.('search', request) : null;
+        if (recovered) return recovered.response;
         budget.claim('searchRequests');
         const callId = `search-${++searchSeq}`;
         const startedAt = Date.now();

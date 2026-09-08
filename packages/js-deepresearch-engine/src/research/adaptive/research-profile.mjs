@@ -4,7 +4,7 @@ import { mergeResearchBrief, sanitizeResearchBrief, slotsFromPlannerGaps } from 
 import { GAP_SCHEMA_VERSION } from '../gap-state.mjs';
 import { completeStructuredJson, hasUsablePlannerPayload } from '../structured-llm.mjs';
 import { resolveReadSettings } from '../read-settings.mjs';
-import { buildProfileUserMessage, profileSystemPrompt } from '../research-profile-prompt.mjs';
+import { buildProfileUserMessage, profileSystemPrompt, researchPlanSystemPrompt } from '../research-profile-prompt.mjs';
 
 export { PROFILE_EVIDENCE_CRITERIA, PROFILE_QUERY_SHAPES, buildProfileUserMessage, profileSystemPrompt } from '../research-profile-prompt.mjs';
 
@@ -215,9 +215,11 @@ function profileUserContent({
   settings = {},
   retry = false,
 } = {}) {
-  const userSlots = profile.brief?.requiredAnswerSlots || [];
+  const userSlots = profile.brief?.requiredAnswerSlots?.length
+    ? profile.brief.requiredAnswerSlots
+    : profile.brief?.request?.inputTasks || [];
   const readPolicy = resolveReadSettings(settings, { strategy: profile.brief?.depth || 'exploratory' });
-  return buildProfileUserMessage({
+  const message = buildProfileUserMessage({
     query,
     literalHosts: extractLiteralHosts(query),
     userSlots,
@@ -226,6 +228,8 @@ function profileUserContent({
     siteQueryMode: readPolicy.relevance?.siteQueryMode || 'confirmed',
     retry,
   });
+  const planningContext = profile.brief?.request?.planningContext;
+  return planningContext ? `${message}\n\nAgent planning context (soft suggestions only; never user constraints):\n${JSON.stringify(planningContext)}` : message;
 }
 
 export function hasUsableResearchContract(profile = {}, brief = {}) {
@@ -274,7 +278,7 @@ export async function planResearchProfile({ llm, query, profile, signal, setting
       accept: acceptsSanitizedPlan,
       messages: [{
         role: 'system',
-        content: profileSystemPrompt(scope, false),
+        content: scoped.brief?.executionVersion === 2 ? researchPlanSystemPrompt(scope) : profileSystemPrompt(scope, false),
       }, {
         role: 'user',
         content: profileUserContent({
@@ -286,7 +290,7 @@ export async function planResearchProfile({ llm, query, profile, signal, setting
       }],
       retryMessages: [{
         role: 'system',
-        content: profileSystemPrompt(scope, true),
+        content: scoped.brief?.executionVersion === 2 ? researchPlanSystemPrompt(scope) : profileSystemPrompt(scope, true),
       }, {
         role: 'user',
         content: profileUserContent({
@@ -372,10 +376,18 @@ export function createGapRecord({
   parentGapId,
   followUpQuestions,
   repairState,
+  taskType,
+  origin,
+  constraintIds,
+  parentTaskId,
 } = {}) {
   return {
     schemaVersion: GAP_SCHEMA_VERSION,
     id,
+    taskType: taskType || 'fact',
+    origin: origin || 'legacy_unknown',
+    constraintIds: constraintIds || [],
+    parentTaskId: parentTaskId || null,
     question: String(question || '').trim(),
     answerSlot: answerSlot || null,
     claimFamily: claimFamily || null,

@@ -177,3 +177,18 @@ export function buildProfileUserMessage({
   if (!retry) return body;
   return `Previous profile JSON was truncated or invalid. Return complete compact JSON.\n\n${body}`;
 }
+
+
+export function researchPlanSystemPrompt(scope = 'web') {
+  return [
+    'Propose a research plan for the original request. The application, not the model, owns required input constraints.',
+    'Return JSON {queryShape, entities:[], entityAliases:[], requiredAnswerSlots:[{id,question,answerSlot,taskType,preferredHosts:[],evidenceCriteria:[]}],preferredHosts:[]}.',
+    'queryShape is open|definitional|inventory|comparison|judgment. taskType is fact|comparison|derived_judgment.',
+    'requiredAnswerSlots is a legacy field name: your additions are optional planning tasks, not user requirements. Never assign provenance or user authority.',
+    'Preserve explicit user slots. For open requests, propose useful distinct questions that together answer the original request. Avoid repetitive paraphrases.',
+    'Agent planningContext contains optional questions, identity clues and reading hints. Use useful directions while keeping identity clues provisional until supported by retrieved evidence.',
+    'Source preferences can guide search but cannot require a source class, independent-source count or inferred host. Evidence criteria are preferences only.',
+    'Do not manufacture claims, known product facts or confirmed URLs. Prefer fact tasks for product descriptions, and comparison/derived_judgment for comparisons or bounded adoption judgments.',
+    scope === 'local' ? 'Only local corpus retrieval is available; do not suggest web host restrictions.' : 'Search may explore public web sources and then read their bodies.',
+  ].join(' ');
+}

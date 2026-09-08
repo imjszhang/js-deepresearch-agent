@@ -142,10 +142,11 @@ export function evaluateReadinessGate({
   const resolvedProfile = profile.flags || profile.requiredHosts || profile.contractUnavailable != null
     ? profile
     : (state?.profile || {});
-  const failures = [];
+  const failures = (resolvedProfile?.brief?.constraints || state?.brief?.constraints || []).filter((item) => item.validationStatus === 'unresolved').map((item) => ({ code: 'unresolved_request_constraint', constraintId: item.id }));
   const flags = [];
   const brief = resolvedProfile.brief || state?.brief || {};
   for (const slot of brief.requiredAnswerSlots || []) {
+    if (brief.executionVersion === 2 && slot.requiredSlot === false) continue;
     const matches = resolvedGaps.filter((gap) => (
       isRequiredSlot(gap)
       && (gap.contractSlotId === slot.id

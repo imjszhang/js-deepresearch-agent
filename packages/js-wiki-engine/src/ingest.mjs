@@ -1,4 +1,5 @@
 import path from 'node:path';
+import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { escapeLiteralWikilinks, extractClaimLines, renderPage } from './markdown.mjs';
 import {
@@ -164,8 +165,9 @@ function buildClaimsPage(topicTitle, report, sources, claimArtifacts = [], resea
     const cite = claimArtifacts.length
       ? ` _(${claim.effectiveVerdict}; ${claim.evidence?.length || 0} evidence; ${claim.evaluationOrigin})_`
       : (claim.hasCitation ? ' _(has citation)_' : ' _(no citation)_');
+    const role = claim.claimType === 'source_attributed' ? ' [Source statement]' : claim.claimType === 'derived' ? ' [Derived judgment]' : '';
     const evidenceLink = claim.id && researchId ? ` — ${wikilinkPath(evidencePageRelativePath(researchId, claim.id), 'Evidence')}` : '';
-    return `${index + 1}. **${claim.section || 'General'}**: ${claim.text}${cite}${evidenceLink}`;
+    return `${index + 1}. **${claim.section || 'General'}**: ${claim.text}${role}${cite}${evidenceLink}`;
   }
 
   const body = [
@@ -253,6 +255,7 @@ function buildEvidencePage({ researchId, claim, passages, sources }) {
         researchId,
         claimId: claim.id,
         claimKind: claim.kind,
+        claimType: claim.claimType || null,
         verdict: claim.effectiveVerdict,
         evidenceCount: claim.evidence?.length || 0,
         missingPassages,
@@ -346,7 +349,10 @@ export function compileWiki({
 
     for (const source of researchSources) {
       const hash = hashSource(source);
-      if (!force && !shouldRecompileSource(manifest, source.id, hash)) {
+      const expectedPath = sourcePageRelativePath(source);
+      const currentPath = manifest.sources?.[source.id]?.pages?.includes(expectedPath)
+        && fs.existsSync(path.join(root, expectedPath));
+      if (!force && currentPath && !shouldRecompileSource(manifest, source.id, hash)) {
         summary.skipped += 1;
         continue;
       }

@@ -1,4 +1,5 @@
 import './types.mjs';
+export { resolveResearchArtifacts, publishResearchArtifacts, writeLegacyArtifactCopies, readArtifactManifest } from './research/result-artifacts.mjs';
 
 export { ResearchRunner } from './research/research-runner.mjs';
 export {
@@ -359,3 +360,6 @@ export {
   parseSourceUrlFrontMatter,
   readManualImportSidecar,
 } from './research/manual-import.mjs';
+export { createResearchRequest, normalizePlanningContext, EXECUTION_VERSION } from './research/research-request.mjs';
+export { EvidenceStore } from './research/evidence-store.mjs';
+export { readArtifactEvidence } from './research/result-artifacts.mjs';

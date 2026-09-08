@@ -60,9 +60,10 @@ export function buildUrlRecord(source = {}, {
 }
 
 export class UrlPool {
-  constructor({ maxPerHostname = 2 } = {}) {
+  constructor({ maxPerHostname = 2, duplicatePolicy = 'legacy_title' } = {}) {
     this.records = new Map();
     this.maxPerHostname = Math.max(1, Number(maxPerHostname) || 2);
+    this.duplicatePolicy = duplicatePolicy;
   }
 
   get(id) {
@@ -100,7 +101,7 @@ export class UrlPool {
     const duplicate = this.findDuplicate(record);
     if (duplicate) {
       record.status = 'duplicate';
-      record.skipReason = 'same_domain_reprint';
+      record.skipReason = this.duplicatePolicy === 'canonical_url' ? 'same_canonical_url' : 'same_domain_reprint';
       record.clusterId = duplicate.clusterId || duplicate.id;
     }
     this.records.set(record.id, { ...source, ...record });
@@ -108,6 +109,10 @@ export class UrlPool {
   }
 
   findDuplicate(record) {
+    if (this.duplicatePolicy === 'canonical_url') {
+      return record.normalizedUrl ? this.values().find((item) => item.id !== record.id
+        && item.status !== 'duplicate' && item.normalizedUrl === record.normalizedUrl) || null : null;
+    }
     if (!record.registrableDomain && !record.title) return null;
     const titleKey = String(record.title || '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
     return this.values().find((item) => {
@@ -166,15 +171,24 @@ export class UrlPool {
   exportCheckpoint() {
     return {
       maxPerHostname: this.maxPerHostname,
+      duplicatePolicy: this.duplicatePolicy,
       records: this.values().map((record) => ({ ...record })),
     };
   }
 
   restoreCheckpoint(checkpoint = {}) {
     this.maxPerHostname = Math.max(1, Number(checkpoint.maxPerHostname) || this.maxPerHostname);
+    this.duplicatePolicy = checkpoint.duplicatePolicy || this.duplicatePolicy;
     this.records = new Map(
       (checkpoint.records || []).map((record) => [record.id, { ...record }]),
     );
+    if (this.duplicatePolicy === 'canonical_url') {
+      for (const record of this.records.values()) {
+        if (record.status === 'duplicate' && record.skipReason === 'same_domain_reprint' && !this.findDuplicate(record)) {
+          record.status = 'unread'; record.skipReason = null; record.clusterId = null;
+        }
+      }
+    }
     return this;
   }
 }

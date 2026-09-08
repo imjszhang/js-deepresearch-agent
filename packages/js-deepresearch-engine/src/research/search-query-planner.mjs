@@ -42,6 +42,7 @@ export function createPlannedQuery({
   intent = null,
   expectedEvidence = null,
   sourceType = null,
+  relevance = 'confirmed',
   searchOptions = null,
 } = {}) {
   return {
@@ -55,6 +56,7 @@ export function createPlannedQuery({
     intent: intent || null,
     expectedEvidence: expectedEvidence || null,
     sourceType: sourceType || null,
+    relevance,
     searchOptions: sanitizeSearchOptions(searchOptions),
   };
 }
@@ -64,6 +66,7 @@ export function allowedSiteHosts({
   siteQueryMode = 'confirmed',
   observedHosts = [],
   evidenceScope = 'web',
+  softScope = false,
 } = {}) {
   if (evidenceScope === 'local' || siteQueryMode === 'never') return [];
   const required = unique((gap.requiredHosts || []).map(normalizeHost));
@@ -72,6 +75,7 @@ export function allowedSiteHosts({
   if (siteQueryMode === 'always') return unique([...required, ...preferred]);
   return unique([
     ...required,
+    ...(softScope ? observed : []),
     ...preferred.filter((host) => observed.some((item) => hostsMatch(item, host))),
   ]);
 }
@@ -91,6 +95,7 @@ export function validatePlannedQuery(query, {
   intent = null,
   sourceType = null,
   recoveryHosts = [],
+  softScope = false,
 } = {}) {
   const text = String(query || '').replace(/\s+/g, ' ').trim();
   if (!text) return { ok: false, reason: 'empty_query' };
@@ -118,11 +123,12 @@ export function validatePlannedQuery(query, {
     }
   }
   if (hosts.length) {
-    const allowed = allowedSiteHosts({ gap, siteQueryMode, observedHosts, evidenceScope });
+    const allowed = allowedSiteHosts({ gap, siteQueryMode, observedHosts, evidenceScope, softScope });
     if (!allowed.length || hosts.some((host) => !allowed.some((item) => hostsMatch(host, item)))) {
       return { ok: false, reason: 'site_mode_violation' };
     }
   }
+  let uncertain = false;
   if (gap && Object.keys(gap).length) {
     let inScope;
     try {
@@ -135,16 +141,17 @@ export function validatePlannedQuery(query, {
     } catch {
       inScope = false;
     }
-    if (!inScope) return { ok: false, reason: 'scope_mismatch' };
+    if (!inScope && !softScope) return { ok: false, reason: 'scope_mismatch' };
+    uncertain = !inScope;
   }
   const duplicate = (comparedQueries || []).find((seen) => (
     normalizeQuery(seen) === normalizeQuery(text)
-    || querySimilarity(seen, text) >= similarityThreshold
+    || (!softScope && querySimilarity(seen, text) >= similarityThreshold)
   ));
   if (duplicate) {
     return { ok: false, reason: 'all_duplicates', duplicateOf: duplicate };
   }
-  return { ok: true, query: text };
+  return { ok: true, query: text, relevance: uncertain ? 'uncertain' : 'confirmed' };
 }
 
 export async function planSearchQueries({
@@ -197,9 +204,10 @@ export async function planSearchQueries({
     ...(rejectedQueries || []).map((item) => item.query || item),
   ]);
   const validationOptions = {
+    softScope: brief.executionVersion === 2,
     gap: targetGap || {},
     entities: brief?.entities || [],
-    comparedQueries: compared,
+    comparedQueries: brief.executionVersion === 2 ? [] : compared,
     siteQueryMode,
     observedHosts,
     evidenceScope,
@@ -209,6 +217,7 @@ export async function planSearchQueries({
   };
   const allowedHosts = unique([
     ...allowedSiteHosts({
+      softScope: brief.executionVersion === 2,
       gap: targetGap || {},
       siteQueryMode,
       observedHosts,
@@ -253,8 +262,8 @@ export async function planSearchQueries({
     llm,
     signal,
     purpose: SEARCH_QUERY_PLANNER_PURPOSE,
-    maxTokens: resolvedMode === 'initial' ? 600 : 400,
-    retryMaxTokens: 500,
+    maxTokens: brief.executionVersion === 2 ? Math.max(1000, resolvedLimit * 250) : resolvedMode === 'initial' ? 600 : 400,
+    retryMaxTokens: brief.executionVersion === 2 ? Math.max(1000, resolvedLimit * 250) : 500,
     accept,
     messages: searchQueryPlannerPrompt(promptArgs),
     retryMessages: searchQueryPlannerRetryPrompt(promptArgs),
@@ -487,6 +496,7 @@ function finalizeQueries(items, {
     seen.add(normalized);
     accepted.push(createPlannedQuery({
       query: validation.query,
+      relevance: validation.relevance,
       origin: QUERY_ORIGINS.llmPlanner,
       plannerMode: mode,
       targetGapId: item.targetGapId || gapId || null,
@@ -498,7 +508,7 @@ function finalizeQueries(items, {
     }));
     if (accepted.length >= limit) break;
   }
-  if (queryMemory?.enabled && accepted.length) {
+  if (queryMemory?.enabled && accepted.length && !validationOptions.softScope) {
     const memoryRejected = [];
     const kept = [];
     for (const item of accepted) {

@@ -1,5 +1,20 @@
+import { getSearchMeta } from '../search/search-result.mjs';
 function terms(value) {
   return new Set(normalizeQuery(value).split(' ').filter((term) => term.length > 1));
+}
+
+import { createHash } from 'node:crypto';
+
+function stableValue(value) {
+  if (Array.isArray(value)) return value.map(stableValue);
+  if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stableValue(value[key])]));
+  return value;
+}
+
+export function searchRequestKey(query, provider = '', effectiveOptions = {}) {
+  // Quotes and operators affect search semantics; do not strip them as lexical matching does.
+  const normalized = String(query).normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim();
+  return createHash('sha256').update(JSON.stringify([normalized, provider, stableValue(effectiveOptions)])).digest('hex');
 }
 
 export function normalizeQuery(value = '') {
@@ -37,6 +52,7 @@ export class QueryMemory {
     this.similarityProvider = semanticDedup ? similarityProvider : null;
     this.onSkip = onSkip;
     this.entries = [];
+    this.executed = new Map();
     this.vectorCache = new Map();
   }
 
@@ -170,16 +186,28 @@ export class QueryMemory {
 
   snapshot() { return this.entries.map((entry) => ({ ...entry })); }
 
+  getExecuted(query, provider, effectiveOptions) {
+    return this.executed.get(searchRequestKey(query, provider, effectiveOptions)) || null;
+  }
+
+  recordExecuted(query, provider, effectiveOptions, results) {
+    const key = searchRequestKey(query, provider, effectiveOptions);
+    this.executed.set(key, { key, results: globalThis.structuredClone(results), searchMeta: globalThis.structuredClone(getSearchMeta(results)), provider, effectiveOptions });
+    return key;
+  }
+
   exportCheckpoint() {
     return {
       enabled: this.enabled,
       similarityThreshold: this.similarityThreshold,
       entries: this.snapshot(),
+      executed: [...this.executed],
       vectorCache: [...this.vectorCache.entries()].map(([query, vector]) => [query, [...vector]]),
     };
   }
 
   restoreCheckpoint(checkpoint = {}) {
+    this.executed = new Map(checkpoint.executed || []);
     this.enabled = checkpoint.enabled !== false;
     this.similarityThreshold = Number(checkpoint.similarityThreshold) || this.similarityThreshold;
     this.entries = Array.isArray(checkpoint.entries)

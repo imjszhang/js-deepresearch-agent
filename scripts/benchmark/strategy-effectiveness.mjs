@@ -571,10 +571,12 @@ export function auditStrategyRun({
   trace = [],
   meta = {},
   usage = {},
+  citationRegistry = null,
+  evidenceStore = null,
 } = {}) {
   const battery = matchQueryBattery(query);
   const normalizedStrategy = normalizeStrategy(strategy, { meta, trace });
-  const citationMap = buildAuditCitationMap({ findings, sources, query });
+  const citationMap = buildAuditCitationMap({ findings, sources, query, citationRegistry, evidenceStore });
   const narrativeClaims = selectNarrativeClaims(claims, report, query);
   const citationClaims = (claims || []).filter((claim) => (
     claim.kind === 'key_claim' || claim.kind === 'premise_fact' || !claim.kind

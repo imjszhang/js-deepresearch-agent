@@ -177,7 +177,7 @@ async function enrichOneSource(source, {
     }
   }
 
-  budget?.claim('sourceReads');
+  if (!recorder?.hasRecoverable?.('content-fetch', { url })) budget?.claim('sourceReads');
   const fetched = await resolveUrlContent(url, {
     source,
     settings,
@@ -423,7 +423,7 @@ export async function enrichFindingSources(finding, options = {}) {
 
   const candidates = [];
   for (const source of finding.sources) {
-    if (budget && !budget.canClaim('sourceReads')) break;
+    if (budget && !budget.canClaim('sourceReads') && !options.recorder?.hasRecoverable?.('content-fetch', { url: source.url })) continue;
     const url = String(source.url || '').trim();
     if (!url || seenUrls.has(url)) continue;
     if (enrichedCount.value >= maxUrlsTotal) break;
@@ -448,7 +448,7 @@ export async function enrichFindingSources(finding, options = {}) {
         throw error;
       }
 
-      if (budget && !budget.canClaim('sourceReads')) {
+      if (budget && !budget.canClaim('sourceReads') && !options.recorder?.hasRecoverable?.('content-fetch', { url: candidates[nextIndex]?.url })) {
         budget.markExhausted('sourceReads');
         break;
       }

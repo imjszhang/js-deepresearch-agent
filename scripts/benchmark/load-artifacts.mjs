@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { resolveResearchArtifacts, readArtifactEvidence } from 'js-deepresearch-engine';
 import path from 'node:path';
 import { loadArtifactsByResearchId as loadFromIntelStore } from '../../src/storage/intel-store.mjs';
 
@@ -32,31 +33,38 @@ export function loadArtifacts(workDir) {
     throw new Error(`Work directory not found: ${resolvedDir}`);
   }
 
-  const missing = REQUIRED_FILES.filter((file) => !fs.existsSync(path.join(resolvedDir, file)));
+  const artifactPaths = resolveResearchArtifacts(resolvedDir);
+  const readDir = artifactPaths.resultDir;
+  const missing = REQUIRED_FILES.filter((file) => !fs.existsSync(path.join(readDir, file)));
   if (missing.length > 0) {
     throw new Error(`Missing required artifact files: ${missing.join(', ')}`);
   }
 
-  const meta = readJsonFile(path.join(resolvedDir, 'meta.json'));
-  const findings = readJsonFile(path.join(resolvedDir, 'findings.json'));
-  const sources = readJsonFile(path.join(resolvedDir, 'sources.json'));
-  const report = fs.readFileSync(path.join(resolvedDir, 'report.md'), 'utf8');
+  const meta = readJsonFile(path.join(readDir, 'meta.json'));
+  const findings = readJsonFile(path.join(readDir, 'findings.json'));
+  const sources = readJsonFile(path.join(readDir, 'sources.json'));
+  const report = fs.readFileSync(path.join(readDir, 'report.md'), 'utf8');
   const optional = Object.fromEntries(OPTIONAL_JSON.map((name) => {
-    const file = path.join(resolvedDir, `${name}.json`);
+    const file = path.join(readDir, `${name}.json`);
     const fallback = name === 'quality' || name === 'brief' ? null : [];
     return [name, fs.existsSync(file) ? readJsonFile(file) : fallback];
   }));
 
-  const reportPlanFile = path.join(resolvedDir, 'report-plan.json');
+  const reportPlanFile = path.join(readDir, 'report-plan.json');
   const reportPlan = fs.existsSync(reportPlanFile) ? readJsonFile(reportPlanFile) : null;
 
   return {
     workDir: resolvedDir,
+    artifactPaths,
     meta,
     findings,
     sources,
     report,
     reportPlan,
+    canonicalResult: artifactPaths.schemaVersion === 2 ? readJsonFile(artifactPaths.resultPath) : null,
+    evidenceAppendix: artifactPaths.evidencePath ? fs.readFileSync(artifactPaths.evidencePath, 'utf8') : null,
+    citationRegistry: artifactPaths.citationsPath ? readJsonFile(artifactPaths.citationsPath) : null,
+    evidenceStore: readArtifactEvidence(artifactPaths)?.export() || null,
     ...optional,
   };
 }

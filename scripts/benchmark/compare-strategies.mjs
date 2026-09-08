@@ -110,6 +110,8 @@ export async function compareStrategySessions({
       sources: artifacts.sources,
       claims: artifacts.claims,
       passages: artifacts.passages,
+      citationRegistry: artifacts.citationRegistry,
+      evidenceStore: artifacts.evidenceStore,
       gaps: artifacts.gaps,
       brief: artifacts.brief,
       quality: artifacts.quality,

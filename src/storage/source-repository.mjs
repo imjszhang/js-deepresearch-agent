@@ -1,3 +1,5 @@
+import { sourceSnapshot } from './source-key.mjs';
+
 export class SourceRepository {
   constructor(db) {
     this.db = db;
@@ -5,12 +7,15 @@ export class SourceRepository {
 
   addMany(researchId, sources) {
     const insert = this.db.prepare(`
-      INSERT INTO sources (research_id, title, url, snippet, engine, created_at)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO sources (research_id, title, url, snippet, engine, created_at, source_key, position)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(research_id, source_key) DO UPDATE SET
+        title=excluded.title, url=excluded.url, snippet=excluded.snippet,
+        engine=excluded.engine, position=excluded.position
     `);
     const now = new Date().toISOString();
     const transaction = this.db.transaction((items) => {
-      for (const source of items) {
+      for (const { source, key, position } of items) {
         insert.run(
           researchId,
           source.title || '',
@@ -18,10 +23,22 @@ export class SourceRepository {
           source.snippet || '',
           source.engine || '',
           now,
+          key,
+          position,
         );
       }
     });
-    transaction(dedupeSources(sources));
+    transaction(sourceSnapshot(sources));
+  }
+
+  replaceForResearch(researchId, sources) {
+    this.db.transaction(() => {
+      const keys = new Set(sourceSnapshot(sources).map((entry) => entry.key));
+      for (const row of this.db.prepare('SELECT id, source_key FROM sources WHERE research_id=?').all(researchId)) {
+        if (!keys.has(row.source_key)) this.db.prepare('DELETE FROM sources WHERE id=?').run(row.id);
+      }
+      this.addMany(researchId, sources);
+    })();
   }
 
   list(researchId) {
@@ -29,7 +46,7 @@ export class SourceRepository {
       SELECT id, research_id, title, url, snippet, engine, created_at
       FROM sources
       WHERE research_id = ?
-      ORDER BY id ASC
+      ORDER BY position ASC, id ASC
     `).all(researchId).map((row) => ({
       id: row.id,
       researchId: row.research_id,
@@ -40,14 +57,4 @@ export class SourceRepository {
       createdAt: row.created_at,
     }));
   }
-}
-
-function dedupeSources(sources) {
-  const seen = new Set();
-  return sources.filter((source) => {
-    const key = source.url || `${source.title}:${source.snippet}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
 }

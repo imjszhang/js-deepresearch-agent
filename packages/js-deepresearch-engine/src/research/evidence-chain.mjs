@@ -19,12 +19,16 @@ function hash(prefix, value) {
 }
 
 export function stableSourceId(source = {}) {
+  if (source.canonicalSourceId) return source.canonicalSourceId;
   const identity = normalizeSourceUrl(source.url) || `${source.title || ''}:${source.content || source.summary || source.snippet || ''}`;
   return hash('source', identity);
 }
 
 function mergeSourceRecord(existing, incoming) {
   if (!existing) return { ...incoming };
+  if (existing.documentVersionId && incoming.documentVersionId && existing.documentVersionId !== incoming.documentVersionId) {
+    return { ...existing, documentVersionIds: [...new Set([...(existing.documentVersionIds || [existing.documentVersionId]), incoming.documentVersionId])] };
+  }
   const merged = { ...existing };
   const existingBodyUsable = isSuccessfulBody(existing);
   const incomingBodyUsable = isSuccessfulBody(incoming);
@@ -97,11 +101,14 @@ function attachRankedPassages({
 }) {
   for (const passage of ranked) {
     const contentHash = crypto.createHash('sha256').update(passage.text).digest('hex');
-    const idValue = hash('passage', `${sourceId}:${contentHash}`);
+    const idValue = source.documentVersionId
+      ? hash('passage', `${source.documentVersionId}:${passage.startChar}:${passage.endChar}:${contentHash}`)
+      : hash('passage', `${sourceId}:${contentHash}`);
     if (!passages.some((item) => item.id === idValue)) {
       passages.push({
         id: idValue,
         sourceId,
+        documentVersionId: source.documentVersionId || null,
         url: source.url || null,
         findingIds: [findingId],
         text: passage.text,
@@ -117,6 +124,9 @@ function attachRankedPassages({
         assessmentStatus: source.assessmentStatus || null,
         provenance: pickSourceProvenance(source),
       });
+    } else {
+      const existing = passages.find((item) => item.id === idValue);
+      existing.findingIds = [...new Set([...existing.findingIds, findingId])];
     }
     passageIds.push(idValue);
   }
@@ -314,6 +324,7 @@ export function buildPassageArtifacts({ query, findings = [], options = {} } = {
 }
 
 export async function buildPassageArtifactsAsync({ query, findings = [], options = {} } = {}) {
+  if (options.evidenceStore) return buildCanonicalPassageArtifacts({ query, findings, options });
   const state = collectNormalizedFindings({ findings, options });
   const normalizedFindings = [];
   for (const job of state.jobs) {
@@ -345,6 +356,41 @@ export async function buildPassageArtifactsAsync({ query, findings = [], options
     sourceMap: state.sourceMap,
     passages: state.passages,
   });
+}
+
+async function buildCanonicalPassageArtifacts({ query, findings, options }) {
+  const store = options.evidenceStore;
+  store.captureFindings(findings);
+  const state = collectNormalizedFindings({ findings, options });
+  const selected = new Map();
+  const normalizedFindings = [];
+  for (const job of state.jobs) {
+    const passageIds = [];
+    for (const item of job.passageJobs) {
+      const version = item.source.documentVersionId;
+      if (!version) continue; // Never manufacture direct evidence from a snippet/summary.
+      const association = [...store.associations.values()].find((entry) => entry.documentVersionId === version && entry.taskId === job.finding.gapId);
+      let passages = (association?.passageIds || []).map((key) => store.passages.get(key));
+      if (!passages.length) {
+        options.signal?.throwIfAborted?.();
+        // Report preparation consumes canonical ranges. It does not repeat external
+        // ranking for every uninspected task/document association or mark them checked.
+        const focus = rankingFocus({ query, question: job.finding.question });
+        passages = store.chunks(version).map((passage) => ({ ...passage,
+          retrievalScore: tokenOverlapScore(focus, passage.text), rankingMethod: 'overlap',
+        })).sort(compareRankedPassages).slice(0, state.maxPassages);
+      }
+      for (const passage of passages) {
+        const prior = selected.get(passage.id);
+        selected.set(passage.id, { ...passage, assessment: association?.assessment || item.source.assessment || null,
+          assessmentStatus: association?.assessmentStatus || item.source.assessmentStatus || null,
+          findingIds: [...new Set([...(prior?.findingIds || []), job.id])] });
+        passageIds.push(passage.id);
+      }
+    }
+    normalizedFindings.push(toNormalizedFinding(job, [...new Set(passageIds)]));
+  }
+  return { ...finalizePassageArtifacts({ normalizedFindings, sourceMap: state.sourceMap, passages: [...selected.values()] }), evidenceStore: store.export() };
 }
 
 function finalizeAlignedClaim(claim, index, passages, citationMap, options = {}) {

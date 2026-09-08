@@ -1,3 +1,4 @@
+import { resolveResearchArtifacts } from 'js-deepresearch-engine';
 import fs from 'node:fs';
 import path from 'node:path';
 import { loadArtifacts } from '../benchmark/load-artifacts.mjs';
@@ -121,7 +122,7 @@ export function importWorkDirSessions({
       const runPath = path.join(sessionDir, 'run.json');
       const hasRunManifest = fs.existsSync(runPath);
       const run = readJsonIfPresent(runPath);
-      if (hasRunManifest && (!run || run.status !== 'completed')) {
+      if (hasRunManifest && (!run || run.status !== 'completed') && !fs.existsSync(path.join(sessionDir, 'result-current.json'))) {
         item.status = 'skipped';
         item.reason = run
           ? `session status is ${run.status || 'unknown'}`
@@ -130,7 +131,7 @@ export function importWorkDirSessions({
         summary.items.push(item);
         continue;
       }
-      if (!hasRequiredArtifacts(sessionDir)) {
+      if (!hasRequiredArtifacts(resolveResearchArtifacts(sessionDir).resultDir)) {
         item.status = 'skipped';
         item.reason = 'missing required artifact files';
         summary.skipped += 1;
@@ -171,7 +172,11 @@ export function importWorkDirSessions({
         continue;
       }
 
-      const result = {
+      const result = artifacts.canonicalResult || {
+        executionVersion: artifacts.evidenceStore ? 2 : undefined,
+        evidenceStore: artifacts.evidenceStore || undefined,
+        citationRegistry: artifacts.citationRegistry || undefined,
+        evidenceAppendix: artifacts.evidenceAppendix || undefined,
         report: artifacts.report,
         findings: artifacts.findings,
         sources: artifacts.sources,
@@ -185,7 +190,7 @@ export function importWorkDirSessions({
         reportContract: artifacts.reportPlan?.contract || undefined,
       };
 
-      if (artifacts.reportPlan?.claims?.length && (!result.claims.length || upgradeExisting)) {
+      if (!artifacts.canonicalResult && artifacts.reportPlan?.claims?.length && (!result.claims.length || upgradeExisting)) {
         result.claims = artifacts.reportPlan.claims;
       }
 
@@ -209,18 +214,8 @@ export function importWorkDirSessions({
         strategy: artifacts.meta?.strategy ?? strategy,
         result,
         artifacts: {
+          ...artifacts.artifactPaths,
           sessionDir: artifacts.workDir,
-          reportPath: path.join(sessionDir, 'report.md'),
-          findingsPath: path.join(sessionDir, 'findings.json'),
-          sourcesPath: path.join(sessionDir, 'sources.json'),
-          metaPath: path.join(sessionDir, 'meta.json'),
-          briefPath: path.join(sessionDir, 'brief.json'),
-          gapsPath: path.join(sessionDir, 'gaps.json'),
-          passagesPath: path.join(sessionDir, 'passages.json'),
-          claimsPath: path.join(sessionDir, 'claims.json'),
-          qualityPath: path.join(sessionDir, 'quality.json'),
-          tracePath: path.join(sessionDir, 'trace.json'),
-          reportPlanPath: path.join(sessionDir, 'report-plan.json'),
         },
         settings: { research: artifacts.meta?.settings ?? {} },
         engine,

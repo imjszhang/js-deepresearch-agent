@@ -4,6 +4,25 @@ import { UrlPool } from '../src/research/adaptive/url-pool.mjs';
 import { ResearchState } from '../src/research/adaptive/research-state.mjs';
 
 describe('per-gap URL discovery metadata', () => {
+  it('canonical candidates preserve distinct documents with similar titles and migrate only unproven title duplicates', () => {
+    const legacy = new UrlPool();
+    legacy.add({ id: 'home', url: 'https://example.org', title: 'Orbit Lab' });
+    legacy.add({ id: 'license', url: 'https://example.org/license', title: 'Orbit Lab License' });
+    assert.equal(legacy.get('license').status, 'duplicate');
+    const old = legacy.exportCheckpoint();
+    // Early v2 checkpoints had no explicit candidate duplicate policy.
+    delete old.duplicatePolicy;
+    const canonical = new UrlPool({ duplicatePolicy: 'canonical_url' }).restoreCheckpoint(old);
+    assert.equal(canonical.get('license').status, 'unread');
+    assert.equal(legacy.get('license').status, 'duplicate');
+    canonical.add({ id: 'pricing', url: 'https://example.org/pricing', title: 'Orbit Lab' });
+    assert.equal(canonical.get('pricing').status, 'unread');
+    canonical.add({ id: 'same-price', url: 'https://example.org/pricing#section', title: 'Other title' });
+    assert.equal(canonical.get('same-price').status, 'duplicate');
+    assert.equal(canonical.get('same-price').skipReason, 'same_canonical_url');
+    assert.equal(new UrlPool().restoreCheckpoint(canonical.exportCheckpoint()).duplicatePolicy, 'canonical_url');
+  });
+
   it('retains every discovering gap and its queries for the same URL', () => {
     const pool = new UrlPool();
     pool.add({ id: 'shared', url: 'https://example.com/shared', title: 'Shared' }, {

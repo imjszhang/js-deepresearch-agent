@@ -1,9 +1,11 @@
+import { maxRecordedCallSequence } from './run-recorder.mjs';
 import { querySimilarity } from './query-memory.mjs';
 import { HttpRerankProvider } from './providers/http-rerank-provider.mjs';
 import { JinaRerankProvider } from './providers/jina-rerank-provider.mjs';
 import { OpenAiEmbeddingProvider } from './providers/openai-embedding-provider.mjs';
 import { DisabledRerankProvider, RulesRerankProvider } from './providers/rules-rerank-provider.mjs';
 import { isAbortError } from './providers/semantic-provider-errors.mjs';
+import { cacheEmbedding } from './embedding-cache.mjs';
 
 export const deterministicResearchProviders = Object.freeze({
   similarity: { async similarity(left, right) { return querySimilarity(left, right); } },
@@ -198,7 +200,7 @@ function wrapRerank(primary, fallback, {
 }
 
 export function createResearchProviders(config = {}, runtime = {}) {
-  let callSequence = 0;
+  let callSequence = runtime.recorder?.sessionDir ? Math.max(maxRecordedCallSequence(runtime.recorder.sessionDir, 'embedding'), maxRecordedCallSequence(runtime.recorder.sessionDir, 'embed'), maxRecordedCallSequence(runtime.recorder.sessionDir, 'rerank')) : 0;
   const wrappedRuntime = {
     ...runtime,
     nextCallId: (kind) => `${kind}-${++callSequence}`,
@@ -206,7 +208,7 @@ export function createResearchProviders(config = {}, runtime = {}) {
   const fetch = runtime.fetch;
   const fallback = new RulesRerankProvider(config.rerank || {});
   const rerank = resolveRerank(config.rerank, { budget: runtime.budget, fetch });
-  const embedding = wrapEmbedding(resolveEmbedding(config.embedding, { fetch }), wrappedRuntime);
+  const embedding = cacheEmbedding(wrapEmbedding(resolveEmbedding(config.embedding, { fetch }), wrappedRuntime), { sessionDir: runtime.recorder?.sessionDir });
   return {
     ...deterministicResearchProviders,
     ...config,
