@@ -29,7 +29,7 @@ export async function selectClaimReviewContext({ graph, store, gaps = [], query 
     const ranked = passages.map((passage, passageIndex) => ({ passage,
       score: questionVectors && passageVectors ? cosineSimilarity(questionVectors[index], passageVectors[passageIndex])
         : tokenOverlapScore(questions[index], `${passage.section || ''} ${passage.text}`),
-    })).filter(item => !supportIds.has(item.passage.id))
+    })).filter(item => !supportIds.has(item.passage.id) && item.score > 0)
       .sort((a, b) => b.score - a.score || a.passage.id.localeCompare(b.passage.id));
     const selected = [], versions = new Set();
     // First compare independent document versions, then remaining local context.

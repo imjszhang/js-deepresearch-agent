@@ -13,6 +13,8 @@ import { isRequiredSlot, needsSemanticClose } from './gap-state.mjs';
 import { splitContentForPassages, tokenOverlapScore } from './passage-utils.mjs';
 import { gapSlotSupportPrompt } from './prompts.mjs';
 import { completeStructuredJson } from './structured-llm.mjs';
+import { normalizeClaimCandidates, VALIDATION_PROTOCOL_VERSION } from './claim-candidates.mjs';
+import { isExecutionInterruption } from '../search/search-health.mjs';
 
 export const SLOT_SUPPORT_VERDICTS = Object.freeze([
   'supported',
@@ -135,7 +137,8 @@ export function selectSlotPassages(gap, findings = [], {
         retrievalScore: tokenOverlapScore(focus, chunk.text),
       }));
     })
-    .filter((passage) => !inspectUnseen || !evidenceStore?.checked(gap.id, passage))
+    .filter((passage) => !inspectUnseen || !evidenceStore?.checked(gap.id, passage, { questionRevision: gap.questionRevision || 1,
+      criterionRevision: gap.criterionRevision || 1, validationProtocolVersion: VALIDATION_PROTOCOL_VERSION }))
     .sort((left, right) => (right.retrievalScore || 0) - (left.retrievalScore || 0));
   const selected = [];
   const used = new Set();
@@ -179,7 +182,7 @@ export function slotSupportFingerprint(gap, passages = [], extras = {}) {
     taskType: gap?.taskType || 'fact',
     questionRevision: gap?.questionRevision || 1,
     criterionRevision: gap?.criterionRevision || 1,
-    inspectionProtocol: passages.some((passage) => passage.documentVersionId) ? 2 : 1,
+    inspectionProtocol: passages.some((passage) => passage.documentVersionId) ? VALIDATION_PROTOCOL_VERSION : 1,
     previousSupport: passages.some((passage) => passage.documentVersionId) && gap?.slotSupport?.quoteAnchored
       ? { verdict: gap.slotSupport.verdict, answer: gap.slotSupport.answer, quote: gap.slotSupport.quote, passageIds: gap.slotSupport.supportingPassageIds, counterPassageIds: gap.slotSupport.contradictingPassageIds } : null,
     evidenceCriteria: criteria,
@@ -265,6 +268,9 @@ export function failClosedSupport(reason = 'invalid_or_empty_json') {
 }
 
 function normalizeJudgment(raw = {}, passages = [], previousPassages = []) {
+  let claimCandidates;
+  try { claimCandidates = normalizeClaimCandidates(raw.claimCandidates, [...passages, ...previousPassages]); }
+  catch { return failClosedSupport('invalid_claim_candidates'); }
   const verdict = String(raw.verdict || '').trim();
   const quote = String(raw.quote || '').trim();
   const passageIds = new Set([...passages, ...previousPassages].map((passage) => passage.id));
@@ -280,6 +286,7 @@ function normalizeJudgment(raw = {}, passages = [], previousPassages = []) {
     question: raw.question || null,
     verdict,
     answer: String(raw.answer || '').trim().slice(0, 4000),
+    claimCandidates,
     missingFacets: Array.isArray(raw.missingFacets) ? raw.missingFacets.filter((item) => typeof item === 'string').map((item) => item.slice(0, 400)).slice(0, 10) : [],
     quote,
     supportingPassageIds: passages.some((passage) => passage.documentVersionId)
@@ -326,6 +333,7 @@ export function applySlotSupportJudgments(gaps = [], judgments = []) {
     if ((incomingFailedClosed || narrowerInspection) && priorAnchored) {
       gap.slotSupport = {
         ...prior,
+        claimCandidates: [...new Map([...(prior.claimCandidates || []), ...(judgment.claimCandidates || [])].map(c => [c.candidateId, c])).values()],
         officialSourceIds: unique([
           ...(prior.officialSourceIds || []),
           ...(judgment.officialSourceIds || []),
@@ -337,7 +345,8 @@ export function applySlotSupportJudgments(gaps = [], judgments = []) {
       };
       continue;
     }
-    gap.slotSupport = judgment;
+    gap.slotSupport = { ...judgment, claimCandidates: [...new Map([...(prior?.claimCandidates || []), ...(judgment.claimCandidates || [])]
+      .map(c => [c.candidateId, c])).values()] };
   }
   return gaps;
 }
@@ -354,6 +363,10 @@ function failClosedTargets(targets, reason) {
 function hasCompleteBatchPayload(parsed, targets) {
   if (!hasUsableSupportPayload(parsed)) return false;
   const judgments = judgmentsFromParsed(parsed);
+  if (targets.every(target => target.passages.every(p => p.documentVersionId))) {
+    return judgments.length === targets.length && new Set(judgments.map(j => j.gapId)).size === targets.length
+      && targets.every(({ gap }) => judgments.some(j => j.gapId === gap.id));
+  }
   if (targets.length === 1 && judgments.length === 1) return true;
   return targets.every(({ gap }) => Boolean(matchJudgment(gap, judgments)));
 }
@@ -386,7 +399,8 @@ function normalizeBatchJudgments(targets, parsed) {
 }
 
 async function judgeTargetBatch({ llm, signal, query, targets }) {
-  const maxTokens = Math.max(800, targets.length * 600);
+  const maxTokens = targets.some(target => target.passages.some(p => p.documentVersionId))
+    ? Math.max(2000, targets.length * 1800) : Math.max(800, targets.length * 600);
   try {
     const result = await completeStructuredJson({
       llm,
@@ -430,7 +444,7 @@ async function judgeTargetBatch({ llm, signal, query, targets }) {
       splitRetries: 0,
     };
   } catch (error) {
-    if (error?.name === 'AbortError' || error?.name === 'BudgetExceededError' || signal?.aborted) throw error;
+    if (error?.name === 'AbortError' || error?.name === 'BudgetExceededError' || signal?.aborted || isExecutionInterruption(error)) throw error;
     if (targets.length > 1) {
       const midpoint = Math.ceil(targets.length / 2);
       const left = await judgeTargetBatch({ llm, signal, query, targets: targets.slice(0, midpoint) });
@@ -597,6 +611,8 @@ export async function judgeOpenSlotSupport({
       for (const documentVersionId of unique(target.passages.map((passage) => passage.documentVersionId))) {
         const passages = target.passages.filter((passage) => passage.documentVersionId === documentVersionId);
         evidenceStore.recordInspection({ taskId: target.gap.id, documentVersionId, passageIds: passages.map((passage) => passage.id),
+          questionRevision: target.gap.questionRevision || 1, criterionRevision: target.gap.criterionRevision || 1,
+          validationProtocolVersion: VALIDATION_PROTOCOL_VERSION,
           verdict: passages.some((passage) => (judgment.contradictingPassageIds || []).includes(passage.id)) ? 'contradicted'
             : passages.some((passage) => (judgment.supportingPassageIds || []).includes(passage.id)) && ['supported', 'partially_supported'].includes(judgment.verdict) ? 'supported' : 'checked_without_support', missingFacets: judgment.missingFacets });
       }

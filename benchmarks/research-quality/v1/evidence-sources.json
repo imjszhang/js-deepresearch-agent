@@ -1,0 +1,172 @@
+{
+  "schemaVersion": 1,
+  "sources": [
+    {
+      "id": "redis72",
+      "url": "https://raw.githubusercontent.com/redis/redis/7.2.0/COPYING",
+      "version": "7.2.0",
+      "bodyHash": "97f0a15b7bbae580d2609dad2e11f1956ae167be296ab60f4691ab9c30ee9828",
+      "extractionVersion": "jsdom-text-whitespace-v1",
+      "commit": "29622276ecd7b74312798e6772744858a8a6f9bf",
+      "pinnedUrl": "https://raw.githubusercontent.com/redis/redis/29622276ecd7b74312798e6772744858a8a6f9bf/COPYING"
+    },
+    {
+      "id": "redis74",
+      "url": "https://raw.githubusercontent.com/redis/redis/7.4.0/LICENSE.txt",
+      "version": "7.4.0",
+      "bodyHash": "abffee3703161c0a6a0cd7f635b2c1ebb3b81bd199e9d18ea89652d678ae4287",
+      "extractionVersion": "jsdom-text-whitespace-v1",
+      "commit": "c9d29f6a918c335bc1778d9f68e521c1bbb36a0f",
+      "pinnedUrl": "https://raw.githubusercontent.com/redis/redis/c9d29f6a918c335bc1778d9f68e521c1bbb36a0f/LICENSE.txt"
+    },
+    {
+      "id": "redis80",
+      "url": "https://raw.githubusercontent.com/redis/redis/8.0.0/LICENSE.txt",
+      "version": "8.0.0",
+      "bodyHash": "a797fcaa899397001f7fb0097583db96bcc74e9b0606c95435d8a293d84cdb76",
+      "extractionVersion": "jsdom-text-whitespace-v1",
+      "commit": "e91a340e241cf0abe3c6a0c254214fbe4aa1d95f",
+      "pinnedUrl": "https://raw.githubusercontent.com/redis/redis/e91a340e241cf0abe3c6a0c254214fbe4aa1d95f/LICENSE.txt"
+    },
+    {
+      "id": "redis2025",
+      "url": "https://redis.io/blog/redis-8-ga/",
+      "version": "8.0 GA announcement",
+      "bodyHash": "55f99fb4cd7dc9515bd736e5447f9b8d868cd613b1ad3b18ef9607a595110520",
+      "extractionVersion": "jsdom-text-whitespace-v1"
+    },
+    {
+      "id": "redis2024",
+      "url": "https://redis.io/blog/redis-adopts-dual-source-available-licensing/",
+      "version": "2024-03 announcement",
+      "bodyHash": "55ca270693221d606a59cff11c14a2ade2d0ac06b7eab6a04325ceae2c044e62",
+      "extractionVersion": "jsdom-text-whitespace-v1"
+    },
+    {
+      "id": "redisagpl",
+      "url": "https://redis.io/blog/agplv3/",
+      "version": "2025-05 announcement",
+      "bodyHash": "60c97d3cb8048d396df734e863e7ca7940383af8faa8717ad916b33a4dd17ad5",
+      "extractionVersion": "jsdom-text-whitespace-v1"
+    },
+    {
+      "id": "isolation",
+      "url": "https://www.sqlite.org/isolation.html",
+      "version": "current-doc; only 3.46.0 verified behavior eligible",
+      "bodyHash": "c425e7bb31fd221608cba4681dc6c01122a476ef5ad97f9d2273ac1a2fe71bc6",
+      "extractionVersion": "jsdom-text-whitespace-v1"
+    },
+    {
+      "id": "checkpoint",
+      "url": "https://www.sqlite.org/c3ref/wal_checkpoint_v2.html",
+      "version": "current-doc; verify against 3.46.0 sqlite3.h",
+      "bodyHash": "6fe89784c4548393d316f1288bb14ddaca1b8c81e314212dd1fdbd99cacc436b",
+      "extractionVersion": "jsdom-text-whitespace-v1"
+    },
+    {
+      "id": "wal",
+      "url": "https://www.sqlite.org/wal.html",
+      "version": "current-doc; only 3.46.0 verified behavior eligible",
+      "bodyHash": "f263ea8d62f35d6ee12ebd741d9137282956083ca9eebf68956a23ab460f7467",
+      "extractionVersion": "jsdom-text-whitespace-v1"
+    },
+    {
+      "id": "busy",
+      "url": "https://www.sqlite.org/c3ref/busy_timeout.html",
+      "version": "current-doc; verify against 3.46.0 sqlite3.h",
+      "bodyHash": "c8815b9b70f00269313aa9653f4a324cdffcb3cc410cb8f6af35f5698a16cef3",
+      "extractionVersion": "jsdom-text-whitespace-v1"
+    },
+    {
+      "id": "release",
+      "url": "https://www.sqlite.org/releaselog/3_46_0.html",
+      "version": "3.46.0 release",
+      "bodyHash": "c94b579e3a83cce270133bbba80c544bcc5f8e2f1b8787ea4412d3856a05c95f",
+      "extractionVersion": "jsdom-text-whitespace-v1"
+    },
+    {
+      "id": "backup",
+      "url": "https://www.sqlite.org/backup.html",
+      "version": "current-doc; verify against 3.46.0 sqlite3.h",
+      "bodyHash": "c9be94420116cf887e9fa56dddd61806b60fd604a9a6eaa32e314e005be77926",
+      "extractionVersion": "jsdom-text-whitespace-v1"
+    },
+    {
+      "id": "vacuum",
+      "url": "https://www.sqlite.org/lang_vacuum.html",
+      "version": "current-doc; verify against 3.46.0 source",
+      "bodyHash": "4a34794b86c40a56a75713fcb8c928429fddcbad0ab840aad68d17a58d346932",
+      "extractionVersion": "jsdom-text-whitespace-v1"
+    },
+    {
+      "id": "sqlite346-header",
+      "url": "https://www.sqlite.org/2024/sqlite-amalgamation-3460000.zip",
+      "version": "3.46.0; source ID 96c92aba00c8375bc32fafcdf12429c58bd8aabfcadab6683e35bbb9cdebf19e",
+      "bodyHash": "d088aa96aa70db50f02acc5c86eca61a5d17556e4c363b9c06079239bf7f87b1",
+      "extractionVersion": "plain-text-v1"
+    }
+  ],
+  "sqliteOracle": {
+    "sqliteVersion": "3.46.0",
+    "sourceId": "2024-05-23 13:25:27 96c92aba00c8375bc32fafcdf12429c58bd8aabfcadab6683e35bbb9cdebf19e",
+    "journalMode": "wal",
+    "synchronous": 2,
+    "busyTimeout": 0,
+    "walAutocheckpoint": 0,
+    "writerBusy": 5,
+    "snapshotBusy": 517,
+    "checkpointBefore": [
+      1,
+      0
+    ],
+    "checkpointAfter": [
+      0,
+      0
+    ],
+    "mainFileCopyRows": 3,
+    "backupRows": 4,
+    "committedRows": 4,
+    "passed": 4,
+    "compileOptions": [
+      "ATOMIC_INTRINSICS=1",
+      "COMPILER=clang-21.0.0",
+      "DEFAULT_AUTOVACUUM",
+      "DEFAULT_CACHE_SIZE=-2000",
+      "DEFAULT_FILE_FORMAT=4",
+      "DEFAULT_JOURNAL_SIZE_LIMIT=-1",
+      "DEFAULT_MMAP_SIZE=0",
+      "DEFAULT_PAGE_SIZE=4096",
+      "DEFAULT_PCACHE_INITSZ=20",
+      "DEFAULT_RECURSIVE_TRIGGERS",
+      "DEFAULT_SECTOR_SIZE=4096",
+      "DEFAULT_SYNCHRONOUS=2",
+      "DEFAULT_WAL_AUTOCHECKPOINT=1000",
+      "DEFAULT_WAL_SYNCHRONOUS=2",
+      "DEFAULT_WORKER_THREADS=0",
+      "DIRECT_OVERFLOW_READ",
+      "MALLOC_SOFT_LIMIT=1024",
+      "MAX_ATTACHED=10",
+      "MAX_COLUMN=2000",
+      "MAX_COMPOUND_SELECT=500",
+      "MAX_DEFAULT_PAGE_SIZE=8192",
+      "MAX_EXPR_DEPTH=1000",
+      "MAX_FUNCTION_ARG=127",
+      "MAX_LENGTH=1000000000",
+      "MAX_LIKE_PATTERN_LENGTH=50000",
+      "MAX_MMAP_SIZE=0x7fff0000",
+      "MAX_PAGE_COUNT=0xfffffffe",
+      "MAX_PAGE_SIZE=65536",
+      "MAX_SQL_LENGTH=1000000000",
+      "MAX_TRIGGER_DEPTH=1000",
+      "MAX_VARIABLE_NUMBER=32766",
+      "MAX_VDBE_OP=250000000",
+      "MAX_WORKER_THREADS=8",
+      "MUTEX_PTHREADS",
+      "SYSTEM_MALLOC",
+      "TEMP_STORE=1",
+      "THREADSAFE=1"
+    ],
+    "sourceZipSha256": "712a7d09d2a22652fb06a49af516e051979a3984adb067da86760e60ed51a7f5",
+    "reviewer": "agent-executed"
+  }
+}

@@ -2,11 +2,19 @@ import { evaluateSourceRelevance } from '../adaptive/source-policy.mjs';
 import { planSearchQueries, validatePlannedQuery } from '../search-query-planner.mjs';
 import { applySlotSupportJudgments, judgeOpenSlotSupport, selectSlotPassages } from '../gap-slot-support.mjs';
 import { addTrace, plannerContext, recordPlannerMetrics } from './exploratory-planning.mjs';
+import { isExecutionInterruption } from '../../search/search-health.mjs';
+import { buildClaimGraph, deliverableBinding } from '../claim-graph.mjs';
+import { validateResearchClaims, applyValidatedBindings } from '../claim-validation.mjs';
 
 function stateCounts(state) {
   return { candidates: state.candidates.size, versions: state.evidenceStore.versions.size,
     inspections: state.evidenceStore.inspections.size,
+    validatedClaims: state.validatedClaimIds?.length || 0,
     verified: state.gaps.filter((gap) => !gap.rollup && gap.status === 'verified').length };
+}
+function semanticProgress(state) {
+  return JSON.stringify({ claims: state.validatedClaimIds || [],
+    completedTasks: state.gaps.filter(g => !g.rollup && g.claimValidation?.complete && g.status === 'verified').map(g => g.id).sort() });
 }
 function dependencies(state, gapId) {
   return [...state.evidenceStore.associations.values()].filter((entry) => entry.taskId === gapId && entry.relevance?.accepted !== false).map((entry) => entry.documentVersionId).sort();
@@ -34,7 +42,7 @@ export async function runActionExploration({ state, loopLocal, query, llm, searc
     checkpointState('exploratory-loop-complete', { stopReason: reason, stopDetail: detail });
   };
   let noChangeCycles = scheduler.noChangeCycles || 0;
-  let cycleStart = scheduler.cycleStart || JSON.stringify(stateCounts(state));
+  let cycleStart = scheduler.cycleStart || semanticProgress(state);
   const planningTurns = scheduler.planningTurns;
   function seedLocal() {
     state.evidenceStore.captureFindings(state.findings);
@@ -62,13 +70,24 @@ export async function runActionExploration({ state, loopLocal, query, llm, searc
 
   while (!scheduler.terminal) {
     if (signal?.aborted) { stop('user_cancelled', null); signal.throwIfAborted(); }
+    seedLocal();
+    const graph = buildClaimGraph({ gaps: state.gaps, passages: [...state.evidenceStore.passages.values()] });
+    if (graph.records.length) {
+      const validation = await validateResearchClaims({ graph, store: state.evidenceStore, gaps: state.gaps, query,
+        llm, signal, recorder, budget, constraints: state.brief.constraints || [], cache: state.claimValidationCache });
+      applyValidatedBindings(state.gaps, validation.graph);
+      state.claimValidationCache = validation.cache;
+      state.validatedClaimIds = [...new Set(graph.bindings.filter(deliverableBinding).map(b => b.claimId))].sort();
+      if (validation.newValidationCount) checkpointState('exploratory-step-complete', { action: 'validate_claims', count: validation.newValidationCount });
+    }
     const gate = refreshState();
+    if (gate?.pass && (graph.bindings.some(b => b.required && b.adequacy !== 'verified')
+      || (state.brief.constraints || []).some(c => c.validationStatus === 'unresolved'))) gate.pass = false;
     if (gate?.pass && budget?.snapshot().floorStatus === 'met') { stop('evidence_sufficient', null); break; }
     if (state.maxSteps > 0 && state.step >= state.maxSteps && ![...scheduler.actions.values()].some((item) => item.status === 'pending' && recorder?.hasRecoverable?.(null, { actionId: item.actionId }))) { stop('safety_cap', 'max_steps'); break; }
-    seedLocal();
     let action = scheduler.next({ canRun });
     if (!action) {
-      const counts = JSON.stringify(stateCounts(state));
+      const counts = semanticProgress(state);
       if (counts !== cycleStart) { noChangeCycles = 0; scheduler.surveyTaskIds = []; }
       cycleStart = counts; scheduler.cycleStart = counts;
       scheduler.noChangeCycles = noChangeCycles;
@@ -93,7 +112,7 @@ export async function runActionExploration({ state, loopLocal, query, llm, searc
         hints: [...(gap.slotSupport?.missingFacets || []), ...(state.brief.request?.planningContext?.readingHints || [])],
       }); } catch (error) {
         if (error.name === 'AbortError') { stop('user_cancelled', null); throw error; }
-        if (error.name === 'BudgetExceededError') throw error;
+        if (error.name === 'BudgetExceededError' || isExecutionInterruption(error)) throw error;
         plan = { planned: [], queries: [], ok: false, attempts: 1, failure: 'planner_error' };
       }
       state.actionCosts.record('reflect', (budget?.usage.llmTokens || 0) - before);
@@ -158,7 +177,7 @@ export async function runActionExploration({ state, loopLocal, query, llm, searc
       checkpointState('exploratory-action-receipt', { receiptId: receipt.receiptId });
       scheduler.apply(receipt);
       checkpointState('exploratory-step-complete', { actionId: action.actionId });
-      if (error.name === 'AbortError' || error.name === 'BudgetExceededError' || error.code === 'EVIDENCE_INTEGRITY') throw error;
+      if (error.name === 'AbortError' || error.name === 'BudgetExceededError' || isExecutionInterruption(error)) throw error;
       continue;
     } finally { recorder?.setActionContext?.(null); }
     outcome.coverageBefore = before; outcome.coverageAfter = stateCounts(state);

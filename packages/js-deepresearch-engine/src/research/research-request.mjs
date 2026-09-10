@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { sanitizeAsOf } from './research-brief.mjs';
+import { explicitInputTasks, REQUEST_CONTRACT_VERSION } from './request-deliverables.mjs';
 
 export const EXECUTION_VERSION = 2;
 const hash = (value) => createHash('sha256').update(value).digest('hex');
@@ -22,32 +23,6 @@ export function normalizePlanningContext(value) {
   return out;
 }
 
-function explicitInputTasks(query) {
-  const tasks = [];
-  function add(text, startChar) {
-    const value = text.trim();
-    if (!value) return;
-    tasks.push({ id: `input-${startChar}`, question: value, answerSlot: value, requiredSlot: true, priority: 'critical',
-      taskType: /比较|对比|compare/i.test(value) ? 'comparison' : /建议|适用场景|recommend/i.test(value) ? 'derived_judgment' : 'fact',
-      basisRange: [startChar, startChar + text.length], requiredHosts: [], requiredSourceTypes: [], evidenceCriteria: [] });
-  }
-  for (const match of query.matchAll(/(?:系统调查|调查以下|调研以下|研究以下|请分别回答|请比较|包括以下)\s*[：:]\s*([^。；;\n]+)/g)) {
-    const list = match[1];
-    const offset = match.index + match[0].lastIndexOf(list);
-    for (const item of list.matchAll(/[^、，,]+/g)) add(item[0], offset + item.index);
-  }
-  for (const match of query.matchAll(/^\s*\d+[.)、]\s*([^\n]+)/gm)) add(match[1], match.index + match[0].lastIndexOf(match[1]));
-  for (const match of query.matchAll(/最后给出\s*([^。；;\n]+)/g)) {
-    for (const item of match[1].matchAll(/[^、，,]+/g)) {
-      // Questions about unknowns and report limitations are presentation obligations,
-      // not factual assertions requiring a quote that proves absence.
-      if (/待验证|调研限制|研究限制|不确定/.test(item[0])) continue;
-      add(item[0], match.index + match[0].lastIndexOf(match[1]) + item.index);
-    }
-  }
-  return tasks;
-}
-
 // Only called at a trusted run entry, never with provider output or checkpoint data.
 export function createResearchRequest(input, { planningContext, inputSource = 'engine' } = {}) {
   const structured = typeof input === 'object' && input !== null;
@@ -68,7 +43,7 @@ export function createResearchRequest(input, { planningContext, inputSource = 'e
     if (input.asOf != null && !sanitizeAsOf(input.asOf)) throw new TypeError('asOf must contain a valid ISO date.');
   }
   return {
-    schemaVersion: 1, requestId: randomUUID(), originalQuery, queryHash: hash(originalQuery),
+    schemaVersion: 1, requestContractVersion: REQUEST_CONTRACT_VERSION, requestId: randomUUID(), originalQuery, queryHash: hash(originalQuery),
     inputSource, planningContext: normalizePlanningContext(planningContext ?? (structured ? input.planningContext : null)),
     inputTasks: explicitInputTasks(originalQuery),
     explicitSlots: structured ? globalThis.structuredClone(input.requiredAnswerSlots || []) : [],
@@ -88,7 +63,8 @@ function constraint(request, kind, value, { path, range, origin = 'explicit_inpu
 export function applyRequestContract(profile, incomingBrief) {
   const request = incomingBrief?.request;
   if (request?.schemaVersion !== 1) return profile; // Legacy contracts retain their original semantics.
-  const explicit = request.explicitSlots.length ? (incomingBrief.requiredAnswerSlots || []) : request.inputTasks || [];
+  const structuredSlots = request.explicitSlots.length ? (incomingBrief.requiredAnswerSlots || []) : [];
+  const explicit = [...structuredSlots, ...(request.inputTasks || []).filter(slot => !structuredSlots.some(item => item.question === slot.question))];
   const proposals = profile.brief?.requiredAnswerSlots || [];
   const constraints = [];
   const userSlots = explicit.map((slot, index) => {
@@ -118,10 +94,31 @@ export function applyRequestContract(profile, incomingBrief) {
     range: [freshnessBasis.index, freshnessBasis.index + freshnessBasis[0].length],
   }));
   if (request.explicitProfile.asOf != null) constraints.push(constraint(request, 'freshness', request.explicitProfile.asOf, { path: 'asOf' }));
-  for (const match of request.originalQuery.matchAll(/(?:必须|不得|不要|只能|仅限|只用|仅用|至少|\bmust\b|\bonly\b|\bat least\b)[^。；;\n.!?]*/gi)) {
+  for (const match of request.originalQuery.matchAll(/(?:必须|不得|不要|只能|仅限|仅讨论|不推断|只用|仅用|至少|用[^。；;\n]*?支持结论|\bmust\b|\bonly\b|\bdo not\b|\bat least\b)[^。；;\n.!?]*/gi)) {
     if (/^(?:至少|at least)\s*\d+\s*(?:个|家|份)?\s*(?:独立来源|independent sources)\s*$/i.test(match[0])) continue;
     const item = constraint(request, 'unresolved_request_constraint', match[0], { range: [match.index, match.index + match[0].length] });
     constraints.push({ ...item, validationStatus: 'unresolved' });
+  }
+  // A recognized list is not permission to discard a later unrecognized
+  // instruction. Retain residual prose conservatively until its meaning can
+  // be validated; shared introductory context is already attached to tasks.
+  if (request.inputTasks?.length) {
+    const ranges = [...request.inputTasks.map(t => t.basisRange), ...constraints.filter(c => c.basisRef.startChar != null
+      && c.kind !== 'answer' && c.origin !== 'system_policy').map(c => [c.basisRef.startChar, c.basisRef.endChar])];
+    const first = Math.min(...request.inputTasks.map(t => t.basisRange[0]));
+    let start = null;
+    const remainder = [];
+    for (let i = first; i <= request.originalQuery.length; i++) {
+      const covered = i === request.originalQuery.length || ranges.some(([a, b]) => i >= a && i < b);
+      if (!covered && start == null) start = i;
+      if (covered && start != null) { remainder.push([start, i]); start = null; }
+    }
+    for (const range of remainder) {
+      const value = request.originalQuery.slice(...range);
+      if (!value.replace(/最后给出|系统调查|调查以下|调研以下|研究以下|请分别回答|包括以下|以及|并且|\band\b|\bplease\b/gi, '')
+        .replace(/[\s\d.)、，,。；;:：!?！？*-]/g, '')) continue;
+      constraints.push({ ...constraint(request, 'unresolved_request_constraint', value.trim(), { range }), validationStatus: 'unresolved' });
+    }
   }
   const rootSlot = {
     id: 'request-answer', answerSlot: request.originalQuery, question: request.originalQuery,
@@ -138,7 +135,7 @@ export function applyRequestContract(profile, incomingBrief) {
       requiredHosts: [], requiredSourceTypes: [], evidencePreferences: slot.evidenceCriteria || [], evidenceCriteria: [],
     }));
   const slots = [...(userSlots.length ? userSlots : [rootSlot]), ...suggested];
-  const brief = { ...profile.brief, schemaVersion: 3, request, executionVersion: EXECUTION_VERSION,
+  const brief = { ...profile.brief, schemaVersion: 3, request, requestContractVersion: request.requestContractVersion || 1, executionVersion: EXECUTION_VERSION,
     query: request.originalQuery, requiredAnswerSlots: slots, constraints, contractOrigin: 'request',
     researchPlan: { schemaVersion: 1, revision: 1, tasks: slots, changes: [] },
   };

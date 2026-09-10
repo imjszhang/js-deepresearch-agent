@@ -9,6 +9,7 @@ import {
   isReportResumeMode,
   selectResearchResumePlan,
   normalizePlanningContext,
+  resolveRunExecutionSettings,
 } from 'js-deepresearch-engine';
 import { completeResearch, recordResearchFailure, deliveryFailure } from './research-completion.mjs';
 import { acquireSessionLock } from './session-lock.mjs';
@@ -203,6 +204,9 @@ export async function runCliResearchResume({
       continueExplore: exploreFlags.continueExplore,
       extraSteps: exploreFlags.extraSteps,
     });
+    if (resumePlan.mode !== 'commit-result') settings = resolveRunExecutionSettings(settings, {
+      sessionDir: resolvedSessionDir, checkpoint: resumePlan.checkpoint?.state,
+    }).settings;
     if (!flags['no-save'] && runId) {
       recordId = runId;
       const existing = services.researchRepository.get(recordId);

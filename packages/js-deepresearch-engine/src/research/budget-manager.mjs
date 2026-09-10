@@ -1,5 +1,7 @@
 import crypto from 'node:crypto';
-import { recorderOrNoop } from './run-recorder.mjs';
+import { loadNamedCheckpoint, recorderOrNoop } from './run-recorder.mjs';
+import { SearchHealth } from '../search/search-health.mjs';
+import { attachSearchMeta, getSearchMeta } from '../search/search-result.mjs';
 
 function limit(value) {
   const number = Number(value);
@@ -338,6 +340,14 @@ export function wrapProvidersWithBudget({
   let llmSeq = Number(llmCallSequence) || 0;
   let searchSeq = Number(searchCallSequence) || 0;
   let lastLlmCall = null;
+  const savedHealth = budget.executionVersion === 2 && recorder.sessionDir
+    ? loadNamedCheckpoint(recorder.sessionDir, 'search-health')?.state : null;
+  let prefetched = savedHealth?.prefetched || null;
+  if (savedHealth?.channels) search.restoreSearchHealthState?.(savedHealth.channels);
+  const saveHealth = snapshot => recorder.checkpoint('search-health', { health: snapshot, prefetched,
+    channels: search.getSearchHealthState?.() || null, budget: budget.exportCheckpoint() });
+  const health = budget.executionVersion === 2 ? new SearchHealth({ snapshot: savedHealth?.health, onChange: saveHealth }) : null;
+  const searchKey = (query, options) => JSON.stringify([query, options?.searchOptions || {}]);
   return {
     llm: {
       ...llm,
@@ -374,7 +384,10 @@ export function wrapProvidersWithBudget({
             : (isReport ? 1 : (budget.limits.llmTokens > 0 ? budget.defaultLlmMaxTokens : 1));
           if (budget.executionVersion === 2) {
             const promptBound = Buffer.byteLength(JSON.stringify(args?.messages || []), 'utf8');
-            if (isReport && !(requested > 0) && budget.limits.totalLlmTokens > 0) throw new BudgetExceededError('totalLlmTokens');
+            if (isReport && !(requested > 0) && budget.limits.totalLlmTokens > 0) {
+              const error = new Error('A finite total budget requires a finite report output limit.');
+              error.code = 'INVALID_REPORT_BUDGET_CONFIGURATION'; throw error;
+            }
             budget.reserveAttempt(callId, claimAmount + promptBound, { purpose, report: isReport });
           } else budget.claim('llmTokens', claimAmount, { purpose, report: isReport });
           budget.usage.llmRequests += 1;
@@ -471,9 +484,26 @@ export function wrapProvidersWithBudget({
     search: {
       ...search,
       capabilities: search.capabilities,
+      healthSnapshot: () => health?.snapshot() || null,
+      async ensureReady(query, { signal } = {}) {
+        if (!search.requiresReadinessProbe || !health) return;
+        prefetched = null;
+        health.beginProbe();
+        search.beginReadinessProbe?.();
+        const options = { signal, healthProbe: true };
+        const result = await this.search(query, options);
+        prefetched = { key: searchKey(query, options), result, meta: getSearchMeta(result) };
+        saveHealth(health.snapshot());
+      },
       async search(query, options) {
+        health?.assertAvailable();
+        if (prefetched?.key === searchKey(query, options)) {
+          const cached = prefetched; prefetched = null;
+          saveHealth(health.snapshot());
+          return attachSearchMeta(cached.result, cached.meta || {});
+        }
         const request = { provider: search.id || search.provider || 'search', query, options: { ...(options || {}), signal: undefined } };
-        const recovered = budget.executionVersion === 2 ? recorder.recoverCall?.('search', request) : null;
+        const recovered = budget.executionVersion === 2 && !options?.healthProbe ? recorder.recoverCall?.('search', request) : null;
         if (recovered) return recovered.response;
         budget.claim('searchRequests');
         const callId = `search-${++searchSeq}`;
@@ -491,7 +521,9 @@ export function wrapProvidersWithBudget({
           },
         });
         try {
-          const result = await search.search(query, options);
+          let result;
+          try { result = await search.search(query, options); }
+          catch (error) { if (health) health.fail(error); throw error; }
           recorder.callFinished({
             callId,
             kind: 'search',
@@ -499,6 +531,7 @@ export function wrapProvidersWithBudget({
             response: result,
             durationMs: Date.now() - startedAt,
           });
+          health?.succeed();
           return result;
         } catch (error) {
           recorder.callFinished({

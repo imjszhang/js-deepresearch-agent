@@ -42,9 +42,12 @@ export function selectResearchResumePlan({
     loadNamedCheckpoint(sessionDir, 'exploratory-action-start'), loadNamedCheckpoint(sessionDir, 'exploratory-action-receipt'),
     loadNamedCheckpoint(sessionDir, 'exploratory-plan-start'), loadNamedCheckpoint(sessionDir, 'legacy-state-migrated'));
   const ledger = loadNamedCheckpoint(sessionDir, 'budget-ledger');
-  for (const entry of [pre, strategyComplete, loopComplete, stepComplete]) {
+  const start = loadNamedCheckpoint(sessionDir, 'research-start');
+  const healthLedger = loadNamedCheckpoint(sessionDir, 'search-health');
+  const latestLedger = newest(ledger, healthLedger);
+  for (const entry of [pre, strategyComplete, loopComplete, stepComplete, start]) {
     if (!entry?.state || entry.state.budget?.executionVersion !== 2) continue;
-    const latestBudget = newest(entry, ledger) === ledger ? ledger.state.budget : entry.state.budget;
+    const latestBudget = latestLedger && newest(entry, latestLedger) === latestLedger ? latestLedger.state.budget : entry.state.budget;
     const budget = new BudgetManager({}).restoreCheckpoint(latestBudget);
     for (const reservation of [...budget.reservations.values()]) {
       if (!/^llm-\d+$/.test(reservation.attemptId)) throw new Error('Invalid budget attempt ID');
@@ -101,6 +104,8 @@ export function selectResearchResumePlan({
   if (stepComplete?.state) {
     return { mode: 'mid-loop', checkpoint: stepComplete };
   }
+
+  if (start?.state) return { mode: 'start', checkpoint: start };
 
   throw new Error(
     'Session has no pre-report, strategy-complete, exploratory-loop-complete, '

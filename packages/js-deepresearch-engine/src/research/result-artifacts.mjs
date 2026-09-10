@@ -80,6 +80,7 @@ export function readArtifactManifest(sessionDir, manifestPath) {
       keys.add(entry.citationKey);
     }
     const result = JSON.parse(fs.readFileSync(artifacts.resultPath, 'utf8'));
+    if ((result.reportPlan?.claimGraphVersion || 1) > 2 || (result.reportPlan?.claimReviewVersion || 1) > 4) throw new Error('Unsupported claim validation protocol');
     if (JSON.stringify(result.citationRegistry) !== JSON.stringify(registry)
       || JSON.stringify(new EvidenceStore(result.evidenceStore).export()) !== JSON.stringify(store.export())) throw new Error('Canonical result evidence mismatch');
   }

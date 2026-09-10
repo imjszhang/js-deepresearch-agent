@@ -24,11 +24,12 @@ import { researchBriefFromInput } from './research-brief.mjs';
 import { createResearchRequest, EXECUTION_VERSION } from './research-request.mjs';
 
 import { loadNamedCheckpoint, maxRecordedCallSequence, recorderOrNoop } from './run-recorder.mjs';
-import { selectResearchResumePlan, finalResultFromCheckpoint } from './resume-plan.mjs';
+import { selectResearchResumePlan, finalResultFromCheckpoint, isReportResumeMode } from './resume-plan.mjs';
 
 import { runExploratoryLoop } from './strategies/exploratory-loop.mjs';
 import { buildReportContract } from './report-contract.mjs';
 import { buildReportPlan } from "./report-plan.mjs";
+import { createRunExecutionConfig, resolveRunExecutionSettings } from './run-execution-config.mjs';
 
 export class ResearchRunner {
   async run({
@@ -41,16 +42,19 @@ export class ResearchRunner {
     llm: providedLlm,
     search: providedSearch,
     recorder: providedRecorder,
+    restoredStart = null,
   }) {
     if (![1, EXECUTION_VERSION].includes(executionVersion)) throw new TypeError("Unsupported execution version");
-    const request = createResearchRequest(query, { planningContext });
+    const request = restoredStart?.brief?.request || createResearchRequest(query, { planningContext });
     const recorder = recorderOrNoop(providedRecorder);
+    const executionConfig = executionVersion === 2 ? createRunExecutionConfig(settings) : null;
+    if (executionConfig) recorder.setExecutionConfig?.(executionConfig);
     const proxiedFetch = createHttpFetch(settings?.http?.proxy);
     const rawLlm = providedLlm || createLlmProvider(settings);
     const rawSearch = providedSearch || createSearchEngine(settings);
     const strategy = settings.research.strategy || 'focused';
     const queryWasStructured = typeof query === 'object' && query !== null;
-    const brief = researchBriefFromInput(query, { depth: strategy });
+    const brief = restoredStart?.brief ? globalThis.structuredClone(restoredStart.brief) : researchBriefFromInput(query, { depth: strategy });
     if (executionVersion === EXECUTION_VERSION) Object.assign(brief, { schemaVersion: 3, request, executionVersion, query: request.originalQuery });
     query = request.originalQuery;
     const emit = createProgressEmitter(onProgress);
@@ -79,11 +83,14 @@ export class ResearchRunner {
     });
     const budget = new BudgetManager(settings, emit);
     budget.executionVersion = executionVersion;
+    if (restoredStart?.budget) budget.restoreCheckpoint(restoredStart.budget);
     const { llm, search } = wrapProvidersWithBudget({
       llm: rawLlm,
       search: rawSearch,
       budget,
       recorder,
+      llmCallSequence: recorder.sessionDir ? maxRecordedCallSequence(recorder.sessionDir, 'llm') : 0,
+      searchCallSequence: recorder.sessionDir ? maxRecordedCallSequence(recorder.sessionDir, 'search') : 0,
       onLlmEvent: (event) => {
         trace.push({
           step: trace.length + 1,
@@ -115,6 +122,8 @@ export class ResearchRunner {
       onSkip: (event) => trace.push({ step: trace.length + 1, action: 'query_skipped_duplicate', ...event, createdAt: new Date().toISOString() }),
     });
     recorder.checkpoint('research-start', {
+      executionConfig,
+      recoveryCheckpointId: restoredStart?.recoveryCheckpointId || null,
       strategy,
       query,
       brief,
@@ -125,6 +134,7 @@ export class ResearchRunner {
 
     try {
     emit({ stage: 'research_started' });
+    await search.ensureReady?.(query, { signal });
     let findings;
     try {
       findings = await runStrategy({
@@ -190,6 +200,16 @@ export class ResearchRunner {
     if (plan.mode === 'commit-result') {
       signal?.throwIfAborted();
       return finalResultFromCheckpoint(plan.checkpoint, sessionDir);
+    }
+    const resolved = resolveRunExecutionSettings(settings, { sessionDir, checkpoint: plan.checkpoint?.state });
+    settings = resolved.settings;
+    providedRecorder?.setExecutionConfig?.(resolved.config);
+    if (plan.mode === 'start') {
+      const recoveryCheckpointId = plan.checkpoint.state.recoveryCheckpointId || plan.checkpoint.checkpoint.checkpointId;
+      providedRecorder?.enableRecovery?.(recoveryCheckpointId);
+      return this.run({ query: plan.checkpoint.state.query, settings, signal, onProgress,
+        llm: providedLlm, search: providedSearch, recorder: providedRecorder,
+        restoredStart: { ...plan.checkpoint.state, recoveryCheckpointId } });
     }
     if (plan.mode === 'report-from-strategy') {
       return this.resumeReportFromStrategyComplete({
@@ -618,6 +638,7 @@ export class ResearchRunner {
     try {
       emit({ stage: 'research_started' });
       let findings;
+      if (!isReportResumeMode(plan.mode)) await search.ensureReady?.(query, { signal });
       try {
         findings = await runExploratoryLoop({
           query,

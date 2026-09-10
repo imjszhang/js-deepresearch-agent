@@ -5,6 +5,7 @@ import { SearchProviderError } from '../search-provider-error.mjs';
 
 export class SearxngSearchEngine {
   constructor(config) {
+    this.requiresReadinessProbe = true;
     this.config = config;
     this.capabilities = {
       ...DEFAULT_SEARCH_CAPABILITIES,

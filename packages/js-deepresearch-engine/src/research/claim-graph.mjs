@@ -1,11 +1,25 @@
 import { createHash } from 'node:crypto';
 import { passageContainsQuote } from './claim-entailment.mjs';
+import { CLAIM_GRAPH_VERSION } from './claim-candidates.mjs';
 
 const hash = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0, 24);
 
 export function buildClaimGraph({ gaps = [], passages = [], priorRegistry = null } = {}) {
   const records = new Map();
   const bindings = [];
+  const bindingByTaskClaim = new Map();
+  function bind(binding) {
+    const key = JSON.stringify([binding.taskId, binding.claimId]);
+    const prior = bindingByTaskClaim.get(key);
+    if (!prior) {
+      bindingByTaskClaim.set(key, binding);
+      bindings.push(binding);
+      return;
+    }
+    prior.required ||= binding.required;
+    prior.missingFacets = [...new Set([...prior.missingFacets, ...binding.missingFacets])];
+    if (binding.adequacy !== 'verified' || prior.missingFacets.length) prior.adequacy = 'partial';
+  }
   const entries = globalThis.structuredClone(priorRegistry?.entries || []);
   function cite(passage) {
     let entry = entries.find((item) => item.documentVersionId === passage.documentVersionId && item.passageIds.includes(passage.id));
@@ -20,7 +34,7 @@ export function buildClaimGraph({ gaps = [], passages = [], priorRegistry = null
   }
   function make(proposition, kind, support, extra = {}) {
     const supportRefs = support.map((passage) => ({ passageId: passage.id, documentVersionId: passage.documentVersionId, sourceId: passage.sourceId }));
-    const claimId = `claim-${hash([proposition, kind, supportRefs])}`;
+    const claimId = `claim-${hash([proposition, kind, supportRefs, extra.conditions || [], extra.entity || null, extra.version || null, extra.premiseClaimIds || []])}`;
     if (!records.has(claimId)) records.set(claimId, { claimId, revision: 1, kind, proposition, supportRefs, counterRefs: [],
       citationKeys: [...new Set(support.map(cite))], conditions: [], evaluation: { verdict: 'unverifiable', method: 'pending' }, ...extra });
     // A premise may also directly answer a separate required question.
@@ -29,6 +43,28 @@ export function buildClaimGraph({ gaps = [], passages = [], priorRegistry = null
   }
   for (const gap of gaps.filter((item) => !item.rollup)) {
     const support = gap.slotSupport;
+    if (support?.claimCandidates?.length) {
+      const build = (candidate, premiseOnly = false) => {
+        const refs = passages.filter(p => p.documentVersionId && candidate.supportingPassageIds.includes(p.id));
+        if (!refs.length || !passageContainsQuote(refs, candidate.quote)) return null;
+        const premises = (candidate.premises || []).map(p => build(p, true));
+        if (premises.some(p => !p) || candidate.kind === 'derived' && !premises.length) return null;
+        return make(candidate.proposition, candidate.kind, refs, { atomic: true, premiseOnly,
+          conditions: candidate.conditions, entity: candidate.entity, version: candidate.version,
+          premiseClaimIds: premises.map(p => p.claimId), candidateId: candidate.candidateId });
+      };
+      for (const candidate of support.claimCandidates) {
+        const record = build(candidate);
+        if (record) record.counterRefs = [...new Map([...record.counterRefs,
+          ...passages.filter(p => p.documentVersionId && (support.contradictingPassageIds || []).includes(p.id))
+            .map(p => ({ passageId: p.id, documentVersionId: p.documentVersionId, sourceId: p.sourceId }))]
+          .map(ref => [ref.passageId, ref])).values()];
+        bind({ taskId: gap.id, claimId: record?.claimId || null, atomic: true, answerRelation: 'pending',
+          adequacy: record && gap.status === 'verified' && support.verdict === 'supported' && !support.missingFacets?.length ? 'verified' : 'partial',
+          missingFacets: support.missingFacets || [], required: Boolean(gap.requiredSlot) });
+      }
+      continue;
+    }
     const refs = passages.filter((passage) => passage.documentVersionId && (
       (support?.supportingPassageIds || []).includes(passage.id)
       || (passage.findingIds?.length && passageContainsQuote([passage], support?.quote)
@@ -54,7 +90,7 @@ export function buildClaimGraph({ gaps = [], passages = [], priorRegistry = null
   }
   // Unbound observations stay in EvidenceStore. A document's presence is not an
   // obligation to publish a claim about it, nor permission to bypass task review.
-  return { schemaVersion: 1, records: [...records.values()], bindings, citationRegistry: { schemaVersion: 1, entries } };
+  return { schemaVersion: CLAIM_GRAPH_VERSION, records: [...records.values()], bindings, citationRegistry: { schemaVersion: 1, entries } };
 }
 
 export function validateClaimGraph(graph, evidenceStore) {
@@ -93,7 +129,11 @@ export function propagateClaimVerdicts(graph) {
   } while (changed);
   for (const binding of graph.bindings) {
     const record = byId.get(binding.claimId);
-    if (!record || record.evaluation.verdict !== 'supported') binding.adequacy = 'limited';
+    if (!record || record.evaluation.verdict !== 'supported' || binding.atomic && binding.answerRelation !== 'supported') binding.adequacy = 'limited';
     else if (binding.missingFacets?.length && binding.adequacy === 'verified') binding.adequacy = 'partial';
   }
+}
+
+export function deliverableBinding(binding) {
+  return binding.adequacy === 'verified' || binding.atomic && binding.answerRelation === 'supported' && binding.adequacy === 'partial';
 }

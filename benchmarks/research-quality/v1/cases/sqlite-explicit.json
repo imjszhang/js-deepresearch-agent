@@ -1,0 +1,50 @@
+{
+  "id": "sqlite-explicit",
+  "topicId": "sqlite",
+  "variant": "explicit",
+  "query": "针对 SQLite 3.46.0，一个单机服务在本地文件系统上使用 WAL，多个独立进程访问同一数据库，有长时间读取和持续写入。调研读写并发限制、SQLITE_BUSY 与 SQLITE_BUSY_SNAPSHOT 的相关场景、长读事务对 checkpoint 和 WAL 增长的影响，以及运行中可靠备份的方式。说明建议的前提，区分文档确认的机制、依赖配置的行为和仍需实验验证的判断。",
+  "language": "zh-CN",
+  "scope": "SQLite 3.46.0; single host, local filesystem; WAL; separate connections/processes",
+  "requirements": [
+    {
+      "id": "sqlite-req-1",
+      "text": "读写并发限制",
+      "span": [
+        66,
+        72
+      ]
+    },
+    {
+      "id": "sqlite-req-2",
+      "text": "SQLITE_BUSY 与 SQLITE_BUSY_SNAPSHOT 的相关场景",
+      "span": [
+        73,
+        113
+      ]
+    },
+    {
+      "id": "sqlite-req-3",
+      "text": "长读事务对 checkpoint 和 WAL 增长的影响",
+      "span": [
+        114,
+        142
+      ]
+    },
+    {
+      "id": "sqlite-req-4",
+      "text": "运行中可靠备份的方式",
+      "span": [
+        145,
+        155
+      ]
+    },
+    {
+      "id": "sqlite-req-5",
+      "text": "说明建议的前提，区分文档确认的机制、依赖配置的行为和仍需实验验证的判断",
+      "span": [
+        156,
+        191
+      ]
+    }
+  ]
+}

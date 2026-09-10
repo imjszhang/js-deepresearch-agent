@@ -123,7 +123,7 @@ test('report resume revalidates an older claim review version without searching'
     recorder: FileRunRecorder.reopen(dir), llm: canonicalLlm({ conflict: true, onCall: ({ purpose }) => calls.push(purpose) }),
     search: { async search() { assert.fail('Report upgrade must not search'); } } });
   assert.deepEqual(calls, ['claim_validation', 'report', 'narrative_validation']);
-  assert.equal(result.reportPlan.claimReviewVersion, 3);
+  assert.equal(result.reportPlan.claimReviewVersion, 4);
   assert.equal(result.quality.gate, 'fail');
   assert.deepEqual(result.reportPlan.claimRecords.map(record => record.claimId), previous.claimRecords.map(record => record.claimId));
 });

@@ -70,7 +70,7 @@ export function runCommand({
         stdio: ['ignore', 'pipe', 'pipe'],
       });
     } catch (error) {
-      settle(reject, new Error(`Failed to start JS Eyes CLI: ${error.message}`));
+      settle(reject, Object.assign(new Error(`Failed to start JS Eyes CLI: ${error.message}`), { code: 'cli_spawn_failed', phase: 'spawn' }));
       return;
     }
 
@@ -85,16 +85,20 @@ export function runCommand({
       stderr = appendOutput(stderr, chunk);
     });
     child.on?.('error', (error) => {
-      settle(reject, new Error(`JS Eyes CLI failed to start: ${error.message}`));
+      settle(reject, Object.assign(new Error(`JS Eyes CLI failed to start: ${error.message}`), { code: 'cli_spawn_failed', phase: 'spawn' }));
     });
     child.on?.('close', (code, signalName) => {
       if (timedOut) {
-        settle(reject, new Error(`JS Eyes search timed out after ${timeoutMs}ms. Run "js-eyes doctor --json" for diagnostics.`));
+        settle(reject, Object.assign(new Error(`JS Eyes search timed out after ${timeoutMs}ms. Run "js-eyes doctor --json" for diagnostics.`), { code: 'call_timeout', phase: 'timeout' }));
         return;
       }
       if (code !== 0) {
         const detail = summarize(stderr || stdout || signalName || 'no output');
-        settle(reject, new Error(`JS Eyes search exited with code ${code}: ${detail}. Run "js-eyes doctor --json" for diagnostics.`));
+        let payload = null;
+        try { payload = JSON.parse(stdout); } catch { /* no structured response */ }
+        settle(reject, Object.assign(new Error(`JS Eyes search exited with code ${code}: ${detail}. Run "js-eyes doctor --json" for diagnostics.`), {
+          code: 'cli_exit_failed', phase: 'response', exitCode: code, signalName, payload,
+        }));
         return;
       }
       settle(resolve, { stdout, stderr });

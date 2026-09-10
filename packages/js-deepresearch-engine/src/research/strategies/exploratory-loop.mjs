@@ -1,6 +1,7 @@
 export { resolveRecoveryAction } from './exploratory-planning.mjs';
 import { createReadExecutor } from './exploratory-read.mjs';
 import { runActionExploration } from './exploratory-action-loop.mjs';
+import { isExecutionInterruption } from '../../search/search-health.mjs';
 import { createSearchExecutor } from './exploratory-search.mjs';
 import { createFinalizationGate } from './exploratory-finalization.mjs';
 import { resolveReadSettings } from '../read-settings.mjs';
@@ -799,6 +800,12 @@ export async function runExploratoryLoop(context) {
       break;
     }
   } catch (error) {
+    if (isExecutionInterruption(error) || error?.code === 'REPORT_OUTPUT_INVALID') {
+      if (error.code === 'SEARCH_PROVIDER_UNAVAILABLE') checkpointState('exploratory-step-complete', {
+        interruption: { code: error.code, resumable: true },
+      });
+      throw error;
+    }
     if (error?.name === 'AbortError') {
       loopLocal.stopReason = STOP_REASONS.userCancelled;
       addTrace(trace, state, 'stop', { reasonCode: STOP_REASONS.userCancelled }, budget, 'cancelled');

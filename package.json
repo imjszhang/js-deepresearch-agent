@@ -24,7 +24,8 @@
     "intel:import": "node scripts/intel/import-work-dir.mjs",
     "intel:inspect": "node scripts/intel/inspect.mjs",
     "wiki:compile": "node scripts/wiki/compile.mjs",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "benchmark:quality": "node scripts/benchmark-quality.mjs"
   },
   "keywords": [
     "deep-research",

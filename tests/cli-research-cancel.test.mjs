@@ -299,6 +299,7 @@ describe('CLI research cancellation', () => {
       runId: 'mid-loop-id',
       strategy: 'exploratory',
       query: 'qwen hardware',
+      metadata: { settings: { search: { engine: 'js-eyes' } } },
     });
     seed.checkpoint('exploratory-step-complete', {
       query: 'qwen hardware',

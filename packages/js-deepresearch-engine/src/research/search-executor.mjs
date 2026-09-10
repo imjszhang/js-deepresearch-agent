@@ -1,5 +1,6 @@
 import { getSearchMeta } from '../search/search-result.mjs';
 import { isTransientSearchError, serializeSearchError } from '../search/search-provider-error.mjs';
+import { isExecutionInterruption } from '../search/search-health.mjs';
 
 function questionText(item) {
   if (typeof item === 'string') return item;
@@ -58,7 +59,7 @@ export async function searchQuestion({
     onResult(result);
     return result;
   } catch (error) {
-    if (isAbortError(error)) throw error;
+    if (isAbortError(error) || isExecutionInterruption(error)) throw error;
     if (!isTransientSearchError(error)) {
       queryMemory?.record({ query, gapId, provider: search.id || '', status: 'failed', results: [] });
     }

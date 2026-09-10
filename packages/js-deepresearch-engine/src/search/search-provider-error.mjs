@@ -7,6 +7,9 @@ export class SearchProviderError extends Error {
     const retryAfter = Number(extra.retryAfterMs);
     this.retryAfterMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : null;
     this.provider = extra.provider || null;
+    this.failureScope = ['provider', 'endpoint', 'skill'].includes(extra.failureScope) ? extra.failureScope : 'provider';
+    this.skillId = typeof extra.skillId === 'string' ? extra.skillId : null;
+    this.phase = ['spawn', 'timeout', 'response', 'search_call'].includes(extra.phase) ? extra.phase : 'search_call';
   }
 }
 
@@ -27,6 +30,9 @@ export function serializeSearchError(error) {
       retryable: Boolean(error.retryable),
       retryAfterMs: error.retryAfterMs ?? null,
       provider: error.provider || null,
+      failureScope: error.failureScope || null,
+      skillId: error.skillId || null,
+      phase: error.phase || null,
     };
   }
   return {
@@ -36,6 +42,9 @@ export function serializeSearchError(error) {
     retryable: Boolean(error.retryable),
     retryAfterMs: error.retryAfterMs ?? null,
     provider: error.provider || null,
+    failureScope: error.failureScope || null,
+    skillId: error.skillId || null,
+    phase: error.phase || null,
   };
 }
 
@@ -58,6 +67,9 @@ export function searchErrorFromProviderPayload(payload, {
       retryable: err.retryable === true || err.detail?.retryable === true,
       retryAfterMs: err.retryAfterMs ?? err.retry_after_ms ?? err.detail?.retryAfterMs,
       provider,
+      failureScope: err.scope || err.failureScope,
+      skillId: err.skillId,
+      phase: err.phase,
     });
   }
   return new SearchProviderError(

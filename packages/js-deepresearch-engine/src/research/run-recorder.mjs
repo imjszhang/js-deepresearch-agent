@@ -241,6 +241,12 @@ export class FileRunRecorder {
     return new FileRunRecorder({ sessionDir, reopen: true });
   }
 
+  setExecutionConfig(config) {
+    this.executionConfig = config;
+    this.run.executionConfig = config;
+    atomicWrite(this.runPath, this.run);
+  }
+
   #reopenExisting() {
     if (!fs.existsSync(this.runPath)) {
       throw new Error(`Cannot reopen session without run.json: ${this.sessionDir}`);
@@ -316,6 +322,7 @@ export class FileRunRecorder {
   }
 
   checkpoint(boundary, state, metadata = {}) {
+    if (this.executionConfig) state = { ...state, executionConfig: this.executionConfig };
     const checkpointId = String(++this.checkpointSequence).padStart(6, '0');
     const externalizedState = this.#externalize(sanitizeRecordedValue(state));
     const stateBlob = this.writeBlob(externalizedState, { sanitized: true });

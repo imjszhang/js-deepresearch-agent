@@ -363,3 +363,5 @@ export {
 export { createResearchRequest, normalizePlanningContext, EXECUTION_VERSION } from './research/research-request.mjs';
 export { EvidenceStore } from './research/evidence-store.mjs';
 export { readArtifactEvidence } from './research/result-artifacts.mjs';
+export { createRunExecutionConfig, resolveRunExecutionSettings, validateRunExecutionConfig } from './research/run-execution-config.mjs';
+export { SearchHealth, SearchUnavailableError, isExecutionInterruption } from './search/search-health.mjs';

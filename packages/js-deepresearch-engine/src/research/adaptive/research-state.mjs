@@ -201,6 +201,8 @@ export class ResearchState {
     this.searchOutcomes = [];
     this.plannerRejections = [];
     this.slotSupportCache = new Map();
+    this.claimValidationCache = {};
+    this.validatedClaimIds = [];
     this.lastAgentSnapshotChars = null;
   }
 
@@ -255,6 +257,7 @@ export class ResearchState {
       parentGapId: options.parentGapId,
       followUpQuestions: options.followUpQuestions,
     });
+    for (const key of ['basisRanges', 'contextRanges', 'sharedContext']) if (options[key] != null) gap[key] = globalThis.structuredClone(options[key]);
     this.gaps.push(gap);
     return gap;
   }
@@ -837,6 +840,8 @@ export class ResearchState {
       searchOutcomes: this.searchOutcomes,
       plannerRejections: this.plannerRejections,
       slotSupportCache: [...this.slotSupportCache.entries()],
+      claimValidationCache: this.claimValidationCache,
+      validatedClaimIds: this.validatedClaimIds,
       lastAgentSnapshotChars: this.lastAgentSnapshotChars,
       budgetView: this.budgetView,
       readiness: this.readiness,
@@ -891,6 +896,8 @@ export class ResearchState {
     this.searchOutcomes = Array.isArray(checkpoint.searchOutcomes) ? checkpoint.searchOutcomes : [];
     this.plannerRejections = Array.isArray(checkpoint.plannerRejections) ? checkpoint.plannerRejections : [];
     this.slotSupportCache = new Map(checkpoint.slotSupportCache || []);
+    this.claimValidationCache = checkpoint.claimValidationCache || {};
+    this.validatedClaimIds = checkpoint.validatedClaimIds || [];
     this.lastAgentSnapshotChars = checkpoint.lastAgentSnapshotChars ?? null;
     this.budgetView = checkpoint.budgetView || null;
     this.readiness = checkpoint.readiness || null;

@@ -8,11 +8,12 @@ export async function probeSearchProvider(settings, {
   fetchImpl = globalThis.fetch,
   spawnImpl = spawn,
   timeoutMs = SEARCH_PREFLIGHT_TIMEOUT_MS,
+  signal,
 } = {}) {
   const engine = settings?.search?.engine || 'searxng';
   if (engine === 'local') return { ok: true, engine };
   if (engine === 'js-eyes') {
-    return probeJsEyes(settings, { spawnImpl, timeoutMs });
+    return probeJsEyes(settings, { spawnImpl, timeoutMs, signal });
   }
   return probeSearxng(settings, { fetchImpl, timeoutMs });
 }
@@ -22,7 +23,8 @@ async function probeSearxng(settings, { fetchImpl, timeoutMs }) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    await fetchImpl(baseUrl, { method: 'GET', signal: controller.signal });
+    const response = await fetchImpl(baseUrl, { method: 'GET', signal: controller.signal });
+    if (response?.ok === false) throw new Error('Unsuccessful HTTP response');
     return { ok: true, engine: 'searxng' };
   } catch {
     throw new Error(
@@ -33,14 +35,14 @@ async function probeSearxng(settings, { fetchImpl, timeoutMs }) {
   }
 }
 
-async function probeJsEyes(settings, { spawnImpl, timeoutMs }) {
+async function probeJsEyes(settings, { spawnImpl, timeoutMs, signal }) {
   const serverUrl = settings?.search?.provider?.serverUrl
     || settings?.search?.jsEyesServerUrl
     || '';
   if (serverUrl) {
     try {
       await probeTcp(serverUrl, timeoutMs);
-      return { ok: true, engine: 'js-eyes' };
+      // A listening socket is not proof that the browser or Google works.
     } catch {
       /* fall through to doctor */
     }
@@ -49,16 +51,24 @@ async function probeJsEyes(settings, { spawnImpl, timeoutMs }) {
   try {
     const command = resolveCliCommand(cli);
     const target = resolveSpawnTarget(command, ['doctor', '--json']);
-    await runCommand({
+    const result = await runCommand({
       command: target.command,
       args: target.args,
       timeoutMs,
       spawnImpl,
+      signal,
     });
-    return { ok: true, engine: 'js-eyes' };
-  } catch {
+    const posture = JSON.parse(result.stdout);
+    if (!posture || !Array.isArray(posture.skills)) throw new Error('Invalid doctor schema');
+    const requested = settings?.search?.provider?.skills || settings?.search?.jsEyesSkills || [];
+    const skills = Array.isArray(requested) ? requested : [requested];
+    if (skills.length && !skills.some(id => posture.skills.some(skill => skill.id === id && skill.enabled === true))) throw new Error('No enabled requested skill');
+    return { ok: true, engine: 'js-eyes', readiness: 'configuration_only', businessSearchRequired: true };
+  } catch (cause) {
+    if (cause?.name === 'AbortError') throw cause;
     throw new Error(
       'JS Eyes search is not ready. Run "js-eyes doctor --json" and start `js-eyes server` before research.',
+      { cause },
     );
   }
 }
