@@ -84,6 +84,13 @@ Wiki retrieval supports normalized Chinese/English queries, Chinese character pa
 
 ## Benchmark
 
+For independent answer coverage, factual accuracy and citation evaluation, use the [research quality suite](benchmarks/research-quality/v1/README.md). It includes Redis/SQLite cases, frozen local gold evidence, a fixed-version SQLite oracle, an eight-run live Google campaign, revision-pinned scoring and checkpoint diagnostics. Research verdicts are not treated as ground truth; machine scores retain their review status.
+
+```bash
+npm run benchmark:quality -- --help
+npm run benchmark:quality -- validate --suite benchmarks/research-quality/v1/suite.json
+```
+
 Evaluate whether a saved research report is supported by its cited sources. The benchmark reads artifacts from a work session directory and does not rerun search or research.
 
 ```bash
@@ -327,3 +334,13 @@ Generated files and local runtime state are intentionally ignored:
 - `.env`
 
 Run `npm run lint` and `npm test` before opening a pull request.
+
+## Research quality improvement round 1
+
+The v2 runtime freezes resumable execution settings, checks business search readiness before planning, and shares dependency-aware claim validation between exploration and reporting. Atomic claims can be delivered for partially answered tasks while unresolved obligations remain explicit. Claim review protocol is now version 4; completed historical revisions stay immutable.
+
+The quality benchmark adds typed statement verification, per-item checkpoints, isolated evaluation revisions, and a fixed-body `rebuild` mode. Formal scoring requires a passing calibration. Candidate plans can persist `--improvement-gate-config <file>` to gate a live campaign on regression checks, compatible scoring and the fixed-body coverage target. Use `npm run benchmark:quality -- --help` for commands.
+
+The first implementation passed programmatic regression checks, but its real judge calibration exposed a missed factual heading and evidence-silence misclassification. No new live campaign was started. See the [implementation and validation record](journal/2026-09-10/research-system-improvement-round-1-implementation.md) for results and remaining limits.
+
+The subsequent review fixes deduplicate task/claim bindings, preserve startup response recovery across repeated interruptions, and add independent line-by-line extraction coverage review. The evaluator is now `quality-judge-4`; calibration requires `--holdout-file <fresh versioned fixture>` and cannot reuse exposed holdouts. Code regressions pass, but the real v4 calibration failed: the new holdout matched 14/20 cases, with three omitted factual headings correctly held for review and unresolved evidence-silence errors. See the [review fix record](journal/2026-09-11/review-fixes.md) and [real calibration results](journal/2026-09-11/calibration-v4-results.md).

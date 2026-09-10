@@ -21,7 +21,12 @@
 - focused/exploratory 的 EvidenceStore 按正文版本保存真实读取内容；位置是提取文本的 UTF-16 区间，summary/snippet 不产生正文锚点。检查范围不足不能写成全文或公开资料不存在。
 - 新报告通过固定 ClaimRecord/SlotBinding 生成。`[n.m]` 必须查 `citations.json`，不能猜测 findings 坐标。来源自述、前提与推导分别验证；失败或冲突会降低绑定与完成度。
 - 未绑定研究问题的文档只保留在证据层，不自动提升为报告主张。主张校验从已有正文片段选择交叉核对上下文，保留反证锚点；比较材料不能替代主张缺失的直接支持。报告恢复仅复用同一校验版本的冻结主张，新 revision 保持已有引用编号。
-- 主张与表达校验要求每个 claimId 恰好一个判断；重复、额外或缺失 ID 按结构错误处理。返回有效反证片段时不能同时判为 supported。当前 claimReviewVersion=3，旧未完成报告需重新校验；已完成结果仍直接交付原 revision。指标 uniqueCitationCount 只统计主报告使用的引用，历史编号总量看 citationRegistryEntryCount。
+- 主张与表达校验要求每个 claimId 恰好一个判断；重复、额外或缺失 ID 按结构错误处理。返回有效反证片段时不能同时判为 supported。当前 claimReviewVersion=4 / claimGraphVersion=2，原子候选还需逐 task 校验回答关系；旧未完成报告需重新校验，已完成结果仍直接交付原 revision。指标 uniqueCitationCount 只统计主报告使用的引用，历史编号总量看 citationRegistryEntryCount。
+- v2 开跑在首次 Planner 前执行一次真实业务搜索探测；正常空结果算成功。搜索调用连续失败会中断依赖动作并保留恢复边界，不能记为正常探索收尾。多 skill 的通道健康独立保存。
+- 新 run 冻结脱敏 executionConfig/configHash；恢复沿用已保存报告输出上限和账本，凭据从当前环境绑定。配置损坏、身份漂移或必要历史身份无法确认需显式报错，不能冒充预算不足。
+- requestContractVersion=2 保留受限语法识别的独立交付项、原文范围与共享上下文；未解析的剩余指令继续作为 unresolved_request_constraint。原子结论通过真值与回答关系校验后可部分交付，不能据此把未完成槽位标为完整。
+- claim_validation 在探索与报告中共用按依赖和协议版本缓存的判断，始终归入校验用量，不补探索下限。新相关反证、条件/版本或协议变化要求重新验证。
+- benchmark 的 quality-judge-4 / quality-scoring-2 使用独立 evaluationRevision，旧分数保留。事实提取须通过独立逐行遗漏复核；空正文提取、遗漏或不确定复核保持 pending_review。正式重评先通过冻结校准；calibrate 需显式提供带当前 judgeVersion 的新 --holdout-file，已暴露的 v3 留出集不能复用为新留出集。artifact_rebuild 仅使用既有正文、不搜索或抓取，floorApplicable=false，不混入正式 Google 批次。校准或覆盖改善门槛未通过时不启动后续昂贵实验。
 - v2 manifest 在原文件外包含 `evidence-index.json / citations.json / evidence.md` 及 `evidence-bodies/<hash>.txt`。使用 `readArtifactManifest` / `readArtifactEvidence` 校验；不得回退嵌套 findings 正文来掩盖损坏。无 work-dir 时 result.evidenceStore 带按 hash 去重的内联正文。
 - API 用数据库已提交的 `resultRevision / resultManifestPath` 读取同版本引用和证据，不能用可能滞后的 result-current 指针拼接。`GET /api/research/:id/evidence` 提供独立证据附件；缺失返回完整性错误。
 - 探索下限仍为 600000、探索上限 1000000；`floorStatus=met|unmet|unknown` 独立于保存状态/证据充分性，报告与评估不补探索下限。`action_frontier_exhausted / no_state_change` 如实标记安全停止。禁止空转凑 token。
