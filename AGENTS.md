@@ -26,7 +26,10 @@
 - 新 run 冻结脱敏 executionConfig/configHash；恢复沿用已保存报告输出上限和账本，凭据从当前环境绑定。配置损坏、身份漂移或必要历史身份无法确认需显式报错，不能冒充预算不足。
 - requestContractVersion=2 保留受限语法识别的独立交付项、原文范围与共享上下文；未解析的剩余指令继续作为 unresolved_request_constraint。原子结论通过真值与回答关系校验后可部分交付，不能据此把未完成槽位标为完整。
 - claim_validation 在探索与报告中共用按依赖和协议版本缓存的判断，始终归入校验用量，不补探索下限。新相关反证、条件/版本或协议变化要求重新验证。
-- benchmark 的 quality-judge-4 / quality-scoring-2 使用独立 evaluationRevision，旧分数保留。事实提取须通过独立逐行遗漏复核；空正文提取、遗漏或不确定复核保持 pending_review。正式重评先通过冻结校准；calibrate 需显式提供带当前 judgeVersion 的新 --holdout-file，已暴露的 v3 留出集不能复用为新留出集。artifact_rebuild 仅使用既有正文、不搜索或抓取，floorApplicable=false，不混入正式 Google 批次。校准或覆盖改善门槛未通过时不启动后续昂贵实验。
+- benchmark 的 quality-judge-9 / quality-scoring-2 使用独立 evaluationRevision，旧分数和 v5–v8 实模失败记录保持原样。工程验收使用 `npm run verify:programmatic -- --output-dir <new-local-dir>`，由真实离线测试、lint/build/diff 和固定场景生成验收记录，不依赖模型准确率；不得以手写 passed 布尔值或模型满分代替。产物完整性、程序验收、模型语义观察分开；`modelThresholdsMet` 仅描述模型判断的聚合，不能证明内容正确。程序/人工来源不能由 provider 声明。
+- 新 benchmark `score --mode model-observation --program-verification <file>` 和 `rebuild --program-verification <file>` 不要求真实校准命中；真实操作仍需用户明确要求。旧 `--calibration`、`validationGate` 保留原严格语义，禁止与新门槛混用或静默改写。普通 `jdr research` / API 不新增验收文件要求。artifact_rebuild 只用既有正文，不搜索或抓取，floorApplicable=false，不混入正式 Google 批次；旧失败不能因新工程验收通过而改成成功。
+- 模型提取、回答关系和出处忠实性仍是模型观察，待审保留分母；相同关系修复不能通过重复审核消除原分歧，绑定按 UTF-16 区间并集判断真正新增，合法零新增结束修复并保留原判断。候选结构失败仅在用量已知、正文完整时退到空提示全文判断；未知调用、预算和完整性错误仍暂停。脚本化 fixture 只验证程序行为，不进入真实观察/曝光账本。
+- 如另行执行真实 calibrate，仍须提供当前版本 --suite、--plan-file、--validation-file 并遵守冻结阶段和预算。v8 suite 只能由其冻结代码继续，不能冒充 v9 留出。已暴露材料不能冒充新留出，首次实模调用后不得改冻结代码、输入、oracle 或预算。
 - v2 manifest 在原文件外包含 `evidence-index.json / citations.json / evidence.md` 及 `evidence-bodies/<hash>.txt`。使用 `readArtifactManifest` / `readArtifactEvidence` 校验；不得回退嵌套 findings 正文来掩盖损坏。无 work-dir 时 result.evidenceStore 带按 hash 去重的内联正文。
 - API 用数据库已提交的 `resultRevision / resultManifestPath` 读取同版本引用和证据，不能用可能滞后的 result-current 指针拼接。`GET /api/research/:id/evidence` 提供独立证据附件；缺失返回完整性错误。
 - 探索下限仍为 600000、探索上限 1000000；`floorStatus=met|unmet|unknown` 独立于保存状态/证据充分性，报告与评估不补探索下限。`action_frontier_exhausted / no_state_change` 如实标记安全停止。禁止空转凑 token。
@@ -607,93 +610,44 @@ History / Results 中 completed 调研可直达 `/wiki.html?researchId=<id>`；�
 
 ---
 
-## `benchmark` — 评估报告与来源匹配
+## `benchmark` — 新版评测兼容入口
 
-离线评估已保存调研产物，**不会**重新执行 `research` 或搜索。入口为独立脚本（**未**并入主 CLI `jdr`）。
-
-```bash
-# 从 work_dir 会话目录（新产物在 work_dir/focused|quick|exploratory/；source-based 等为历史目录，仍可读）
-node scripts/benchmark-research.mjs work_dir/focused/2026-05-26_043125
-node scripts/benchmark-research.mjs work_dir/source-based/2026-05-26_043125 --no-llm --json
-
-# 从 intel store（需先 archive 或 intel import）
-node scripts/benchmark-research.mjs --research-id 00176e84-2548-4160-add1-7df5a49f7e27 --no-llm
-node scripts/benchmark-research.mjs --research-id imported__source-based__2026-05-26_065414 --strict-platform js-eyes:zhihu
-```
-
-| Flag | 说明 |
-|---|---|
-| `--research-id <id>` | 从 `data/intel` 加载四件套（与 `work_dir` 路径二选一） |
-| `--json` | 输出机器可读 JSON |
-| `--no-llm` | 仅规则层评分，不调用 LLM |
-| `--strict-platform` | 要求引用来源的 `engine` 匹配指定值，如 `js-eyes:zhihu` |
-| `--compare <id1,id2>` | 横向比较多个 Intel Store run 的质量、证据、成本指标，不重新调研 |
-
-输入需包含 `report.md`、`findings.json`、`sources.json`、`meta.json`（目录或 intel 归档均可）。脚本会：
-
-1. 从 `findings.json` 建立 `[1.1]` 引用映射
-2. 从 `Summary` / `Key Findings` / `Evidence` 提取 claim
-3. 规则层检查引用是否存在、来源字段是否完整、平台是否匹配
-4. 可选调用当前 LLM 配置，判定 `supported / partially_supported / unsupported / unverifiable`
-
-典型用途：对比修复前后两次调研，例如 `sources.json` 为空但报告仍完整时，benchmark 会标记 `empty_sources` 与 `no_citation` 风险。
-
-质量指标采用 v2 口径：按 claim 而非 evidence 条目计数；事实 claim 的五种互斥结论之和必须等于 `evaluatedClaimCount`。局限与建议保留展示但不进入事实支持率，Sources/参考文献条目不算 claim，分母为 0 时 rate 为 `null`（文本显示 `n/a`）。Schema v3 的 `--no-llm` 会复用归档 verdict，旧产物才运行本地规则；输出中的 `evaluationOrigin` 用于区分 stored/runtime 与 rules/llm。
-
-### 策略对比 benchmark（`benchmark-strategies`）
-
-横向比较 **quick**、**focused**、**exploratory** 的质量、耗时与成本（LLM tokens、搜索次数、source reads、rerank 次数）。支持离线对比已有 `work_dir` 会话，或对同一 query 依次跑三种策略。
+`benchmark`、`benchmark:strategies`、`benchmark:extract` 共用 `benchmark:quality` 的子命令实现。`score / summary / compare / verify-artifacts / verify-program / plan / run / rebuild` 等参数、预算和执行门槛保持一致；入口仍是独立脚本，不属于 `jdr` 子命令。
 
 ```bash
-# 离线对比已有会话（推荐，不重新调研）
-npm run benchmark:strategies -- \
-  --sessions work_dir/focused/2026-07-13_051140,work_dir/exploratory/2026-07-13_051626 \
-  --no-llm --output tmp/strategy-compare.md
-
-# 从 intel store 对比
-npm run benchmark:strategies -- --research-ids <id1>,<id2> --no-llm --json
-
-# 对同一 query 依次跑三种策略（会调用 LLM + 搜索）
-npm run benchmark:strategies -- \
-  --run "Ollama vs llama.cpp for local LLM deployment" \
-  --strategies quick,focused,exploratory \
-  --no-llm
+npm run benchmark -- --help
+npm run benchmark -- validate --suite benchmarks/research-quality/v1/suite.json
+npm run benchmark -- score --mode model-observation --program-verification <record> --campaign <file> --gold-dir <dir>
+npm run benchmark:strategies -- compare --baseline <campaign> --candidate <campaign>
 ```
 
-| Flag | 说明 |
-|---|---|
-| `--sessions <paths>` | 逗号分隔的 `work_dir` 会话；可用 `adaptive-v2=path` 显式标注 |
-| `--research-ids <ids>` | 从 intel store 加载 |
-| `--run <query>` | 依次执行多种策略后自动对比 |
-| `--strategies <list>` | `--run` 时指定预设，默认 `quick,focused,exploratory` |
-| `--output <file>` | 写入 Markdown/JSON 报告 |
-| `--no-llm` | 官方对比路径：只跑确定性审计。归档 verdict / `--llm` 仅进入文末 **optional / non-official** 语义层，不写入 `status` |
-
-对比报告的官方结果是 **Strategy Audit**，只回答「这次 run 是否满足已发布的确定性证据合同」，不回答「报告好不好 / 真不真」。`--no-llm` 是官方 compare 路径。`status` 是硬门槛，三轮都可以同为 `not_ready`；要比模式差别看 **Observable counts**、**Slot matrix** 和 **Where strategies differ**，不要只看第一列状态。
-
-审计输出 `status`：`ready` / `not_ready` / `invalid`。没有加权总分、没有 A/B/good 评级。五组硬检查：
-
-| 组 | 含义 |
-|---|---|
-| `processContract` | 按策略检查过程（quick 必须 snippet-only 且 `sourceReads=0`；focused 必须有真实正文/摘要并完成所有 `required` slot；exploratory 必须达到探索 token 下限或留下 hard stop，且 `critical` slot 不得 `missing`） |
-| `reportIntegrity` | 标题、非空 Summary/Key Findings、无空列表项、叙事不低于 200 字符 |
-| `citationIntegrity` | `[n.m]` / `citedSourceId` 必须能解析到 findings/sources |
-| `evidenceProvenance` | 真实抓取正文；WAF/Cloudflare/过短壳页不算 body |
-| `requiredSlotCompletion` | 由 `scripts/benchmark/query-battery.mjs` 的 slot catalog 决定，不是主体×方面笛卡尔积 |
-
-Battery 用 **required slots** 替代旧的 subject×aspect 格子。官方 host 写在每个 battery 的 `sourcePolicies` 里（精确 hostname + 可选 `pathPrefix`），不再使用全局 Apple-only 列表。Query 未命中 battery 时，slot 组为 `not_applicable`，不因此判 focused/exploratory 覆盖失败；过程、引用、报告检查仍生效。
-
-`quality.json` / `claims.json` 里的 `supported` / `partially_supported`、规则重叠率、LLM entailment **不得**喂给 `processContract.pass`、`status` 或官方 delta。Markdown 里的 Supported rate 表标为 **optional / non-official semantic analysis**。成本拆出 `explorationTokens` / `reportTokens` / `evaluationTokens`（能拆时），官方效率 **不**除以 supported claim 数。
-
-同一道题的离线对比：
+已有的会话路径、归档 ID 和策略对比参数继续可用，默认只做离线产物诊断，不读取模型设置或调用模型。`--no-llm` 保留为兼容别名。原关键词匹配、历史主张裁决和旧模型 Judge 不再生成新语义分数；缺标准答案不能以空 rubric 或运行时 `supported` 代替。
 
 ```bash
-npm run benchmark:strategies -- \
-  --sessions quick=work_dir/quick/<timestamp>,focused=work_dir/focused/<timestamp>,exploratory=work_dir/exploratory/<timestamp> \
-  --no-llm --output tmp/strategy-audit.md
+npm run benchmark -- <session-dir> --json
+npm run benchmark -- --research-id <id> --json
+npm run benchmark -- --compare <id1>,<id2> --json
+npm run benchmark:strategies -- --sessions focused=<dir1>,exploratory=<dir2> --json
+npm run benchmark:strategies -- --research-ids <id1>,<id2> --output <file>
 ```
 
-耗时取自 `--run` 墙钟时间，或从 `trace.json` 时间戳/`durationMs` 推算；成本取自 `quality.json` 的 `budget.usage`，并尽量按 `trace.json` 的 `llm_call` purpose 拆分。
+检查输出 schemaVersion=2，`artifactVerification` 与 `modelAssessment` 独立。v2 按固定 manifest/revision 复用新版正文、引用注册表和已声明绑定校验；损坏不能回退根目录或 findings。归档 ID 使用已提交 revision，并与归档快照证据核对，不跟随更新的磁盘指针。旧四件套、裸 JSON 或不能确认的归档证据标记 `incomplete`。命令成功返回诊断结果不等于产物状态为 `passed`。
+
+离线输出的 `modelAssessment.observed=false`、`modelThresholdsMet=null`。它可以展示来源字段、正文版本和引用解析等计数，不展示旧 supported rate，也不证明语义真实性和提取完整性。`--strict-platform <id>` 只产生指定搜索平台的来源字段诊断。
+
+### 策略与抽取模式比较
+
+策略比较保留耗时、已记录 token/搜索/阅读/rerank 成本和旧运行诊断。`runtimeDiagnostics`（兼容字段 `audit` / `effectiveness`）标记为 `legacy_heuristic_diagnostics`、`authoritative=false`：旧 query battery 的正则槽位和 `ready/not_ready/invalid` 不属于新版程序验收或独立质量评分。新版质量比较显式使用 `compare --baseline / --candidate`。
+
+`--run` 仍可显式采集同题的多策略样本，必须先提供当前程序验收记录；它不是冻结 Google 题库 campaign，不自动启动模型评分。要求完整冻结实验和逐项评分时使用新版 `plan / run / score`。
+
+```bash
+npm run benchmark:strategies -- --run "你的问题" --strategies quick,focused,exploratory --program-verification <record> --json
+```
+
+抽取比较接受一个 summary 会话目录和一个 extract 结果 JSON；按各自实际记录统计，不虚构 query、创建时间、节省比例或质量结论。裸 JSON 不具备 manifest 证明，保持 `incomplete`。
+
+成本缺失显示 `null/n/a`，明确零值保留；主张/叙事校验计入 evaluation，不补探索。未知用量和下界保留，差值只有两端已知才计算，不能把缺失记录当零成本。
 
 ---
 
