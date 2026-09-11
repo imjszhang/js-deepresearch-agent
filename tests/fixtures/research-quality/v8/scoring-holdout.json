@@ -1,0 +1,1377 @@
+{
+  "cases": [
+    {
+      "id": "v5-s01a",
+      "family": "kestrel",
+      "mode": "score",
+      "report": "# Queue behavior\n\nKestrel v2 retries are disabled by default. [1.1]\n\nKestrel v2 cannot cancel running jobs. [1.1]",
+      "sources": [
+        {
+          "id": "kestrel",
+          "text": "Kestrel is a fictional queue scheduler. In Kestrel v1, each queue permits exactly one dispatcher and leases expire after 30 seconds. In Kestrel v2, leases expire after 60 seconds. Kestrel v2 permits two dispatchers only if each owns a different queue partition; two dispatchers on the same partition are forbidden. Retries in Kestrel v2 are disabled by default and can be enabled explicitly. Kestrel v2 can cancel queued jobs but cannot cancel a running job. Kestrel v2 accepts jobs in JSON, with an optional priority field; an example is {\"priority\":2}. This handbook supplies no throughput measurements or power-loss guarantees.",
+          "version": "Kestrel v1 and v2, explicitly distinguished",
+          "url": "https://example.test/kestrel/manual",
+          "bodyHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "retry",
+          "expectedAnswer": "Kestrel v2 retries are disabled by default.",
+          "qualifiers": [
+            "Kestrel v2",
+            "disabled by default"
+          ],
+          "commonErrors": [],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "kestrel",
+              "span": [
+                0,
+                630
+              ],
+              "textHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+            }
+          ]
+        },
+        {
+          "id": "cancel",
+          "expectedAnswer": "Kestrel v2 cannot cancel running jobs.",
+          "qualifiers": [
+            "Kestrel v2",
+            "running jobs"
+          ],
+          "commonErrors": [],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "kestrel",
+              "span": [
+                0,
+                630
+              ],
+              "textHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "kestrel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            29,
+            60
+          ],
+          "allowedSpan": [
+            0,
+            113
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact"
+          ],
+          "truth": "correct",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "supported"
+            }
+          ],
+          "critical": true
+        },
+        {
+          "id": "assertion-2",
+          "span": [
+            80,
+            106
+          ],
+          "allowedSpan": [
+            0,
+            113
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact"
+          ],
+          "truth": "correct",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "supported"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [],
+      "designReview": "Agent-verified before calls. Uses explicit version/condition evidence; unaddressed properties are not negated by manual silence.",
+      "expectedCriteria": [
+        {
+          "id": "retry",
+          "verdict": "correct",
+          "points": 1,
+          "evidencePoints": 1,
+          "conflict": null
+        },
+        {
+          "id": "cancel",
+          "verdict": "correct",
+          "points": 1,
+          "evidencePoints": 1,
+          "conflict": null
+        }
+      ],
+      "expectedMetrics": {
+        "pendingReview": false,
+        "correctCoverage": 1,
+        "evidenceCoverage": 1,
+        "strictFactAccuracy": 1
+      }
+    },
+    {
+      "id": "v5-s01b",
+      "family": "kestrel",
+      "mode": "score",
+      "report": "# Short queue behavior\n\nKestrel v2 retries are disabled by default. [1.1]",
+      "sources": [
+        {
+          "id": "kestrel",
+          "text": "Kestrel is a fictional queue scheduler. In Kestrel v1, each queue permits exactly one dispatcher and leases expire after 30 seconds. In Kestrel v2, leases expire after 60 seconds. Kestrel v2 permits two dispatchers only if each owns a different queue partition; two dispatchers on the same partition are forbidden. Retries in Kestrel v2 are disabled by default and can be enabled explicitly. Kestrel v2 can cancel queued jobs but cannot cancel a running job. Kestrel v2 accepts jobs in JSON, with an optional priority field; an example is {\"priority\":2}. This handbook supplies no throughput measurements or power-loss guarantees.",
+          "version": "Kestrel v1 and v2, explicitly distinguished",
+          "url": "https://example.test/kestrel/manual",
+          "bodyHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "retry",
+          "expectedAnswer": "Kestrel v2 retries are disabled by default.",
+          "qualifiers": [
+            "Kestrel v2",
+            "disabled by default"
+          ],
+          "commonErrors": [],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "kestrel",
+              "span": [
+                0,
+                630
+              ],
+              "textHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+            }
+          ]
+        },
+        {
+          "id": "cancel",
+          "expectedAnswer": "Kestrel v2 cannot cancel running jobs.",
+          "qualifiers": [
+            "Kestrel v2",
+            "running jobs"
+          ],
+          "commonErrors": [],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "kestrel",
+              "span": [
+                0,
+                630
+              ],
+              "textHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "kestrel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            35,
+            66
+          ],
+          "allowedSpan": [
+            0,
+            73
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact"
+          ],
+          "truth": "correct",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "supported"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [],
+      "designReview": "Agent-verified before calls. Uses explicit version/condition evidence; unaddressed properties are not negated by manual silence.",
+      "expectedCriteria": [
+        {
+          "id": "retry",
+          "verdict": "correct",
+          "points": 1,
+          "evidencePoints": 1,
+          "conflict": null
+        },
+        {
+          "id": "cancel",
+          "verdict": "missing",
+          "points": 0,
+          "evidencePoints": 0,
+          "conflict": null
+        }
+      ],
+      "expectedMetrics": {
+        "pendingReview": false,
+        "correctCoverage": 0.5,
+        "evidenceCoverage": 0.5,
+        "strictFactAccuracy": 1
+      }
+    },
+    {
+      "id": "v5-s02a",
+      "family": "kestrel",
+      "mode": "score",
+      "report": "# Dispatch constraints\n\nKestrel v2 permits two dispatchers only if they own different queue partitions. [1.1]",
+      "sources": [
+        {
+          "id": "kestrel",
+          "text": "Kestrel is a fictional queue scheduler. In Kestrel v1, each queue permits exactly one dispatcher and leases expire after 30 seconds. In Kestrel v2, leases expire after 60 seconds. Kestrel v2 permits two dispatchers only if each owns a different queue partition; two dispatchers on the same partition are forbidden. Retries in Kestrel v2 are disabled by default and can be enabled explicitly. Kestrel v2 can cancel queued jobs but cannot cancel a running job. Kestrel v2 accepts jobs in JSON, with an optional priority field; an example is {\"priority\":2}. This handbook supplies no throughput measurements or power-loss guarantees.",
+          "version": "Kestrel v1 and v2, explicitly distinguished",
+          "url": "https://example.test/kestrel/manual",
+          "bodyHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "dispatch",
+          "expectedAnswer": "Kestrel v2 permits two dispatchers only on different queue partitions.",
+          "qualifiers": [
+            "Kestrel v2",
+            "different partitions only"
+          ],
+          "commonErrors": [],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "kestrel",
+              "span": [
+                0,
+                630
+              ],
+              "textHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "kestrel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            76,
+            102
+          ],
+          "allowedSpan": [
+            0,
+            109
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact"
+          ],
+          "truth": "correct",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "supported"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [],
+      "designReview": "Agent-verified before calls. Uses explicit version/condition evidence; unaddressed properties are not negated by manual silence.",
+      "expectedCriteria": [
+        {
+          "id": "dispatch",
+          "verdict": "correct",
+          "points": 1,
+          "evidencePoints": 1,
+          "conflict": null
+        }
+      ],
+      "expectedMetrics": {
+        "pendingReview": false,
+        "correctCoverage": 1,
+        "majorErrorCount": 0
+      }
+    },
+    {
+      "id": "v5-s02b",
+      "family": "kestrel",
+      "mode": "score",
+      "report": "# Shared partition\n\nKestrel v2 permits two dispatchers on the same queue partition. [1.1]",
+      "sources": [
+        {
+          "id": "kestrel",
+          "text": "Kestrel is a fictional queue scheduler. In Kestrel v1, each queue permits exactly one dispatcher and leases expire after 30 seconds. In Kestrel v2, leases expire after 60 seconds. Kestrel v2 permits two dispatchers only if each owns a different queue partition; two dispatchers on the same partition are forbidden. Retries in Kestrel v2 are disabled by default and can be enabled explicitly. Kestrel v2 can cancel queued jobs but cannot cancel a running job. Kestrel v2 accepts jobs in JSON, with an optional priority field; an example is {\"priority\":2}. This handbook supplies no throughput measurements or power-loss guarantees.",
+          "version": "Kestrel v1 and v2, explicitly distinguished",
+          "url": "https://example.test/kestrel/manual",
+          "bodyHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "dispatch",
+          "expectedAnswer": "Kestrel v2 permits two dispatchers only on different queue partitions.",
+          "qualifiers": [
+            "Kestrel v2",
+            "different partitions only"
+          ],
+          "commonErrors": [],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "kestrel",
+              "span": [
+                0,
+                630
+              ],
+              "textHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "kestrel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            62,
+            82
+          ],
+          "allowedSpan": [
+            0,
+            89
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact"
+          ],
+          "truth": "incorrect",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "unsupported"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [],
+      "designReview": "Agent-verified before calls. Uses explicit version/condition evidence; unaddressed properties are not negated by manual silence.",
+      "expectedCriteria": [
+        {
+          "id": "dispatch",
+          "verdict": "incorrect",
+          "points": 0,
+          "evidencePoints": 0,
+          "conflict": null
+        }
+      ],
+      "expectedMetrics": {
+        "pendingReview": false,
+        "correctCoverage": 0,
+        "majorErrorCount": 1
+      }
+    },
+    {
+      "id": "v5-s03a",
+      "family": "morrow",
+      "mode": "score",
+      "report": "# Export prerequisite\n\nMorrow v2 exports recordings only while online. [1.1]",
+      "sources": [
+        {
+          "id": "morrow",
+          "text": "Morrow is a fictional sensor recorder. Morrow v1 retains the latest 24 samples in volatile memory and timestamps them in UTC. Morrow v2 retains the latest 48 samples and timestamps them in UTC. In Morrow v2, durable storage requires explicitly enabling the durable flag; the flag is off by default. Both Morrow v1 and Morrow v2 export recordings only while online; offline export is unavailable. Morrow v2 exports CSV. This manual provides no battery-life specification or sensor-accuracy measurement.",
+          "version": "Morrow v1 and v2, explicitly distinguished",
+          "url": "https://example.test/morrow/manual",
+          "bodyHash": "9f450f66bac559e0a12c3a23022a8a8a3f6414a3efd981ff0597a90c4f9173cf"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "export",
+          "expectedAnswer": "Morrow v2 exports recordings only while online.",
+          "qualifiers": [
+            "Morrow v2",
+            "online required"
+          ],
+          "commonErrors": [],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "morrow",
+              "span": [
+                0,
+                501
+              ],
+              "textHash": "9f450f66bac559e0a12c3a23022a8a8a3f6414a3efd981ff0597a90c4f9173cf"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "morrow"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            52,
+            69
+          ],
+          "allowedSpan": [
+            0,
+            76
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact"
+          ],
+          "truth": "correct",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "supported"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [],
+      "designReview": "Agent-verified before calls. Uses explicit version/condition evidence; unaddressed properties are not negated by manual silence.",
+      "expectedCriteria": [
+        {
+          "id": "export",
+          "verdict": "correct",
+          "points": 1,
+          "evidencePoints": 1,
+          "conflict": null
+        }
+      ],
+      "expectedMetrics": {
+        "pendingReview": false,
+        "correctCoverage": 1,
+        "evidenceCoverage": 1,
+        "strictFactAccuracy": 1
+      }
+    },
+    {
+      "id": "v5-s03b",
+      "family": "morrow",
+      "mode": "score",
+      "report": "# Export source check\n\nMorrow v2 exports recordings only while online. [2.1]",
+      "sources": [
+        {
+          "id": "morrow",
+          "text": "Morrow is a fictional sensor recorder. Morrow v1 retains the latest 24 samples in volatile memory and timestamps them in UTC. Morrow v2 retains the latest 48 samples and timestamps them in UTC. In Morrow v2, durable storage requires explicitly enabling the durable flag; the flag is off by default. Both Morrow v1 and Morrow v2 export recordings only while online; offline export is unavailable. Morrow v2 exports CSV. This manual provides no battery-life specification or sensor-accuracy measurement.",
+          "version": "Morrow v1 and v2, explicitly distinguished",
+          "url": "https://example.test/morrow/manual",
+          "bodyHash": "9f450f66bac559e0a12c3a23022a8a8a3f6414a3efd981ff0597a90c4f9173cf"
+        },
+        {
+          "id": "kestrel",
+          "text": "Kestrel is a fictional queue scheduler. In Kestrel v1, each queue permits exactly one dispatcher and leases expire after 30 seconds. In Kestrel v2, leases expire after 60 seconds. Kestrel v2 permits two dispatchers only if each owns a different queue partition; two dispatchers on the same partition are forbidden. Retries in Kestrel v2 are disabled by default and can be enabled explicitly. Kestrel v2 can cancel queued jobs but cannot cancel a running job. Kestrel v2 accepts jobs in JSON, with an optional priority field; an example is {\"priority\":2}. This handbook supplies no throughput measurements or power-loss guarantees.",
+          "version": "Kestrel v1 and v2, explicitly distinguished",
+          "url": "https://example.test/kestrel/manual",
+          "bodyHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "export",
+          "expectedAnswer": "Morrow v2 exports recordings only while online.",
+          "qualifiers": [
+            "Morrow v2",
+            "online required"
+          ],
+          "commonErrors": [],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "morrow",
+              "span": [
+                0,
+                501
+              ],
+              "textHash": "9f450f66bac559e0a12c3a23022a8a8a3f6414a3efd981ff0597a90c4f9173cf"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "2.1",
+          "sourceId": "kestrel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            52,
+            69
+          ],
+          "allowedSpan": [
+            0,
+            76
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact"
+          ],
+          "truth": "correct",
+          "citations": [
+            {
+              "key": "2.1",
+              "verdict": "unsupported"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [],
+      "designReview": "Agent-verified before calls. Uses explicit version/condition evidence; unaddressed properties are not negated by manual silence.",
+      "expectedCriteria": [
+        {
+          "id": "export",
+          "verdict": "correct",
+          "points": 1,
+          "evidencePoints": 0,
+          "conflict": null
+        }
+      ],
+      "expectedMetrics": {
+        "pendingReview": false,
+        "correctCoverage": 1,
+        "evidenceCoverage": 0,
+        "strictFactAccuracy": 1
+      }
+    },
+    {
+      "id": "v5-s04a",
+      "family": "kestrel",
+      "mode": "score",
+      "report": "# Retry summary\n\nKestrel v2 retries start in the disabled state. [1.1]",
+      "sources": [
+        {
+          "id": "kestrel",
+          "text": "Kestrel is a fictional queue scheduler. In Kestrel v1, each queue permits exactly one dispatcher and leases expire after 30 seconds. In Kestrel v2, leases expire after 60 seconds. Kestrel v2 permits two dispatchers only if each owns a different queue partition; two dispatchers on the same partition are forbidden. Retries in Kestrel v2 are disabled by default and can be enabled explicitly. Kestrel v2 can cancel queued jobs but cannot cancel a running job. Kestrel v2 accepts jobs in JSON, with an optional priority field; an example is {\"priority\":2}. This handbook supplies no throughput measurements or power-loss guarantees.",
+          "version": "Kestrel v1 and v2, explicitly distinguished",
+          "url": "https://example.test/kestrel/manual",
+          "bodyHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "retry",
+          "expectedAnswer": "Kestrel v2 retries are disabled by default.",
+          "qualifiers": [
+            "Kestrel v2",
+            "disabled by default"
+          ],
+          "commonErrors": [],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "kestrel",
+              "span": [
+                0,
+                630
+              ],
+              "textHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "kestrel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            28,
+            63
+          ],
+          "allowedSpan": [
+            0,
+            70
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact"
+          ],
+          "truth": "correct",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "supported"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [],
+      "designReview": "Agent-verified before calls. Uses explicit version/condition evidence; unaddressed properties are not negated by manual silence.",
+      "expectedCriteria": [
+        {
+          "id": "retry",
+          "verdict": "correct",
+          "points": 1,
+          "evidencePoints": 1,
+          "conflict": null
+        }
+      ],
+      "expectedMetrics": {
+        "pendingReview": false,
+        "correctCoverage": 1,
+        "strictFactAccuracy": 1,
+        "factVerificationCoverage": 1
+      }
+    },
+    {
+      "id": "v5-s04b",
+      "family": "kestrel",
+      "mode": "score",
+      "report": "# Retry and speed summary\n\nKestrel v2 retries start in the disabled state. [1.1]\n\nKestrel v2 processes 7,500 jobs per second.",
+      "sources": [
+        {
+          "id": "kestrel",
+          "text": "Kestrel is a fictional queue scheduler. In Kestrel v1, each queue permits exactly one dispatcher and leases expire after 30 seconds. In Kestrel v2, leases expire after 60 seconds. Kestrel v2 permits two dispatchers only if each owns a different queue partition; two dispatchers on the same partition are forbidden. Retries in Kestrel v2 are disabled by default and can be enabled explicitly. Kestrel v2 can cancel queued jobs but cannot cancel a running job. Kestrel v2 accepts jobs in JSON, with an optional priority field; an example is {\"priority\":2}. This handbook supplies no throughput measurements or power-loss guarantees.",
+          "version": "Kestrel v1 and v2, explicitly distinguished",
+          "url": "https://example.test/kestrel/manual",
+          "bodyHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "retry",
+          "expectedAnswer": "Kestrel v2 retries are disabled by default.",
+          "qualifiers": [
+            "Kestrel v2",
+            "disabled by default"
+          ],
+          "commonErrors": [],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "kestrel",
+              "span": [
+                0,
+                630
+              ],
+              "textHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "kestrel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            38,
+            73
+          ],
+          "allowedSpan": [
+            0,
+            125
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact"
+          ],
+          "truth": "correct",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "supported"
+            }
+          ],
+          "critical": true
+        },
+        {
+          "id": "assertion-2",
+          "span": [
+            103,
+            124
+          ],
+          "allowedSpan": [
+            0,
+            125
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact"
+          ],
+          "truth": "unverifiable",
+          "citations": [],
+          "critical": true
+        }
+      ],
+      "tags": [],
+      "designReview": "Agent-verified before calls. Uses explicit version/condition evidence; unaddressed properties are not negated by manual silence.",
+      "expectedCriteria": [
+        {
+          "id": "retry",
+          "verdict": "correct",
+          "points": 1,
+          "evidencePoints": 1,
+          "conflict": null
+        }
+      ],
+      "expectedMetrics": {
+        "pendingReview": false,
+        "correctCoverage": 1,
+        "strictFactAccuracy": 0.5,
+        "factVerificationCoverage": 0.5
+      }
+    },
+    {
+      "id": "v5-s05a",
+      "family": "kestrel",
+      "mode": "score",
+      "report": "# Main answer\n\nRetries are disabled by default in Kestrel v2. [1.1]",
+      "sources": [
+        {
+          "id": "kestrel",
+          "text": "Kestrel is a fictional queue scheduler. In Kestrel v1, each queue permits exactly one dispatcher and leases expire after 30 seconds. In Kestrel v2, leases expire after 60 seconds. Kestrel v2 permits two dispatchers only if each owns a different queue partition; two dispatchers on the same partition are forbidden. Retries in Kestrel v2 are disabled by default and can be enabled explicitly. Kestrel v2 can cancel queued jobs but cannot cancel a running job. Kestrel v2 accepts jobs in JSON, with an optional priority field; an example is {\"priority\":2}. This handbook supplies no throughput measurements or power-loss guarantees.",
+          "version": "Kestrel v1 and v2, explicitly distinguished",
+          "url": "https://example.test/kestrel/manual",
+          "bodyHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "retry",
+          "expectedAnswer": "Kestrel v2 retries are disabled by default.",
+          "qualifiers": [
+            "Kestrel v2",
+            "disabled by default"
+          ],
+          "commonErrors": [],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "kestrel",
+              "span": [
+                0,
+                630
+              ],
+              "textHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "kestrel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            15,
+            46
+          ],
+          "allowedSpan": [
+            0,
+            67
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact"
+          ],
+          "truth": "correct",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "supported"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [],
+      "designReview": "Agent-verified before calls. Uses explicit version/condition evidence; unaddressed properties are not negated by manual silence.",
+      "expectedCriteria": [
+        {
+          "id": "retry",
+          "verdict": "correct",
+          "points": 1,
+          "evidencePoints": 1,
+          "conflict": null
+        }
+      ],
+      "expectedMetrics": {
+        "pendingReview": false,
+        "correctCoverage": 1,
+        "factCount": 1
+      }
+    },
+    {
+      "id": "v5-s05b",
+      "family": "kestrel",
+      "mode": "score",
+      "report": "# Run status\n\nThis run's recorded completion status is incomplete.",
+      "sources": [
+        {
+          "id": "kestrel",
+          "text": "Kestrel is a fictional queue scheduler. In Kestrel v1, each queue permits exactly one dispatcher and leases expire after 30 seconds. In Kestrel v2, leases expire after 60 seconds. Kestrel v2 permits two dispatchers only if each owns a different queue partition; two dispatchers on the same partition are forbidden. Retries in Kestrel v2 are disabled by default and can be enabled explicitly. Kestrel v2 can cancel queued jobs but cannot cancel a running job. Kestrel v2 accepts jobs in JSON, with an optional priority field; an example is {\"priority\":2}. This handbook supplies no throughput measurements or power-loss guarantees.",
+          "version": "Kestrel v1 and v2, explicitly distinguished",
+          "url": "https://example.test/kestrel/manual",
+          "bodyHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "retry",
+          "expectedAnswer": "Kestrel v2 retries are disabled by default.",
+          "qualifiers": [
+            "Kestrel v2",
+            "disabled by default"
+          ],
+          "commonErrors": [],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "kestrel",
+              "span": [
+                0,
+                630
+              ],
+              "textHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "kestrel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            34,
+            65
+          ],
+          "allowedSpan": [
+            0,
+            66
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "execution_status"
+          ],
+          "truth": "correct",
+          "citations": [],
+          "critical": true
+        }
+      ],
+      "tags": [],
+      "designReview": "Agent-verified before calls. Uses explicit version/condition evidence; unaddressed properties are not negated by manual silence.",
+      "execution": {
+        "completionStatus": "incomplete"
+      },
+      "appendix": "Kestrel v2 retries are disabled by default. [1.1]",
+      "expectedCriteria": [
+        {
+          "id": "retry",
+          "verdict": "missing",
+          "points": 0,
+          "evidencePoints": 0,
+          "conflict": null
+        }
+      ],
+      "expectedMetrics": {
+        "pendingReview": false,
+        "correctCoverage": 0,
+        "factCount": 0,
+        "strictFactAccuracy": null
+      }
+    },
+    {
+      "id": "v5-s06a",
+      "family": "kestrel",
+      "mode": "score",
+      "report": "# Versioned leases\n\nKestrel v1 leases expire after 30 seconds. [1.1]\n\nKestrel v2 leases expire after 60 seconds. [1.1]",
+      "sources": [
+        {
+          "id": "kestrel",
+          "text": "Kestrel is a fictional queue scheduler. In Kestrel v1, each queue permits exactly one dispatcher and leases expire after 30 seconds. In Kestrel v2, leases expire after 60 seconds. Kestrel v2 permits two dispatchers only if each owns a different queue partition; two dispatchers on the same partition are forbidden. Retries in Kestrel v2 are disabled by default and can be enabled explicitly. Kestrel v2 can cancel queued jobs but cannot cancel a running job. Kestrel v2 accepts jobs in JSON, with an optional priority field; an example is {\"priority\":2}. This handbook supplies no throughput measurements or power-loss guarantees.",
+          "version": "Kestrel v1 and v2, explicitly distinguished",
+          "url": "https://example.test/kestrel/manual",
+          "bodyHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "leases",
+          "expectedAnswer": "Kestrel v1 leases expire after 30 seconds; v2 leases expire after 60 seconds. The apparent conflict is a version change.",
+          "qualifiers": [
+            "identify v1 as 30 seconds and v2 as 60 seconds"
+          ],
+          "commonErrors": [],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "kestrel",
+              "span": [
+                0,
+                630
+              ],
+              "textHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+            }
+          ],
+          "conflictCase": "The manual lists 30 and 60 seconds: explain which version uses each duration."
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "kestrel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            45,
+            61
+          ],
+          "allowedSpan": [
+            0,
+            118
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact"
+          ],
+          "truth": "correct",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "supported"
+            }
+          ],
+          "critical": true
+        },
+        {
+          "id": "assertion-2",
+          "span": [
+            95,
+            111
+          ],
+          "allowedSpan": [
+            0,
+            118
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact"
+          ],
+          "truth": "correct",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "supported"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [],
+      "designReview": "Agent-verified before calls. Uses explicit version/condition evidence; unaddressed properties are not negated by manual silence.",
+      "expectedCriteria": [
+        {
+          "id": "leases",
+          "verdict": "correct",
+          "points": 1,
+          "evidencePoints": 1,
+          "conflict": "resolved"
+        }
+      ],
+      "expectedMetrics": {
+        "pendingReview": false,
+        "correctCoverage": 1,
+        "conflictResolutionRate": 1
+      }
+    },
+    {
+      "id": "v5-s06b",
+      "family": "kestrel",
+      "mode": "score",
+      "report": "# Lease values\n\nThe Kestrel handbook lists lease durations of both 30 seconds and 60 seconds. [1.1]",
+      "sources": [
+        {
+          "id": "kestrel",
+          "text": "Kestrel is a fictional queue scheduler. In Kestrel v1, each queue permits exactly one dispatcher and leases expire after 30 seconds. In Kestrel v2, leases expire after 60 seconds. Kestrel v2 permits two dispatchers only if each owns a different queue partition; two dispatchers on the same partition are forbidden. Retries in Kestrel v2 are disabled by default and can be enabled explicitly. Kestrel v2 can cancel queued jobs but cannot cancel a running job. Kestrel v2 accepts jobs in JSON, with an optional priority field; an example is {\"priority\":2}. This handbook supplies no throughput measurements or power-loss guarantees.",
+          "version": "Kestrel v1 and v2, explicitly distinguished",
+          "url": "https://example.test/kestrel/manual",
+          "bodyHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "leases",
+          "expectedAnswer": "Kestrel v1 leases expire after 30 seconds; v2 leases expire after 60 seconds. The apparent conflict is a version change.",
+          "qualifiers": [
+            "identify v1 as 30 seconds and v2 as 60 seconds"
+          ],
+          "commonErrors": [],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "kestrel",
+              "span": [
+                0,
+                630
+              ],
+              "textHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+            }
+          ],
+          "conflictCase": "The manual lists 30 and 60 seconds: explain which version uses each duration."
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "kestrel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            67,
+            92
+          ],
+          "allowedSpan": [
+            0,
+            99
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "attribution"
+          ],
+          "truth": "correct",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "supported"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [],
+      "designReview": "Agent-verified before calls. Uses explicit version/condition evidence; unaddressed properties are not negated by manual silence.",
+      "expectedCriteria": [
+        {
+          "id": "leases",
+          "verdict": "incorrect",
+          "points": 0,
+          "evidencePoints": 0,
+          "conflict": "missing"
+        }
+      ],
+      "expectedMetrics": {
+        "pendingReview": false,
+        "correctCoverage": 0,
+        "conflictResolutionRate": 0,
+        "strictFactAccuracy": 1
+      }
+    },
+    {
+      "id": "v5-s07a",
+      "family": "kestrel",
+      "mode": "score",
+      "report": "# Format with optional example\n\nKestrel v2 accepts jobs in JSON. [1.1]",
+      "sources": [
+        {
+          "id": "kestrel",
+          "text": "Kestrel is a fictional queue scheduler. In Kestrel v1, each queue permits exactly one dispatcher and leases expire after 30 seconds. In Kestrel v2, leases expire after 60 seconds. Kestrel v2 permits two dispatchers only if each owns a different queue partition; two dispatchers on the same partition are forbidden. Retries in Kestrel v2 are disabled by default and can be enabled explicitly. Kestrel v2 can cancel queued jobs but cannot cancel a running job. Kestrel v2 accepts jobs in JSON, with an optional priority field; an example is {\"priority\":2}. This handbook supplies no throughput measurements or power-loss guarantees.",
+          "version": "Kestrel v1 and v2, explicitly distinguished",
+          "url": "https://example.test/kestrel/manual",
+          "bodyHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "format",
+          "expectedAnswer": "Kestrel v2 accepts jobs in JSON; include a priority-field example such as {\"priority\":2}.",
+          "qualifiers": [
+            "Kestrel v2",
+            "JSON"
+          ],
+          "commonErrors": [],
+          "weight": 2,
+          "core": true,
+          "critical": false,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "kestrel",
+              "span": [
+                0,
+                630
+              ],
+              "textHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+            }
+          ],
+          "partialCredit": "Omitting only the priority-field example is a predefined minor omission worth half credit."
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "kestrel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            43,
+            63
+          ],
+          "allowedSpan": [
+            0,
+            70
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact"
+          ],
+          "truth": "correct",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "supported"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [],
+      "designReview": "Agent-verified before calls. Uses explicit version/condition evidence; unaddressed properties are not negated by manual silence.",
+      "expectedCriteria": [
+        {
+          "id": "format",
+          "verdict": "partial",
+          "points": 0.5,
+          "evidencePoints": 0.5,
+          "conflict": null
+        }
+      ],
+      "expectedMetrics": {
+        "pendingReview": false,
+        "correctCoverage": 0.5,
+        "strictFactAccuracy": 1
+      }
+    },
+    {
+      "id": "v5-s07b",
+      "family": "kestrel",
+      "mode": "score",
+      "report": "# Format with required example\n\nKestrel version 2 accepts job submissions encoded as JSON. [1.1]",
+      "sources": [
+        {
+          "id": "kestrel",
+          "text": "Kestrel is a fictional queue scheduler. In Kestrel v1, each queue permits exactly one dispatcher and leases expire after 30 seconds. In Kestrel v2, leases expire after 60 seconds. Kestrel v2 permits two dispatchers only if each owns a different queue partition; two dispatchers on the same partition are forbidden. Retries in Kestrel v2 are disabled by default and can be enabled explicitly. Kestrel v2 can cancel queued jobs but cannot cancel a running job. Kestrel v2 accepts jobs in JSON, with an optional priority field; an example is {\"priority\":2}. This handbook supplies no throughput measurements or power-loss guarantees.",
+          "version": "Kestrel v1 and v2, explicitly distinguished",
+          "url": "https://example.test/kestrel/manual",
+          "bodyHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "format",
+          "expectedAnswer": "Kestrel v2 accepts jobs in JSON; include a priority-field example such as {\"priority\":2}.",
+          "qualifiers": [
+            "Kestrel v2",
+            "JSON"
+          ],
+          "commonErrors": [],
+          "weight": 2,
+          "core": true,
+          "critical": false,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "kestrel",
+              "span": [
+                0,
+                630
+              ],
+              "textHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "kestrel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            58,
+            89
+          ],
+          "allowedSpan": [
+            0,
+            96
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact"
+          ],
+          "truth": "correct",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "supported"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [],
+      "designReview": "Agent-verified before calls. Uses explicit version/condition evidence; unaddressed properties are not negated by manual silence.",
+      "expectedCriteria": [
+        {
+          "id": "format",
+          "verdict": "incorrect",
+          "points": 0,
+          "evidencePoints": 0,
+          "conflict": null
+        }
+      ],
+      "expectedMetrics": {
+        "pendingReview": false,
+        "correctCoverage": 0,
+        "strictFactAccuracy": 1
+      }
+    }
+  ]
+}

@@ -4,8 +4,9 @@ import crypto from 'node:crypto';
 import { atomicWriteResultFile } from '../../../packages/js-deepresearch-engine/src/research/result-artifacts.mjs';
 
 export const SCHEMA_VERSION = 1;
-export const JUDGE_VERSION = 'quality-judge-4';
-export const EVALUATION_SCHEMA_VERSION = 2;
+export const JUDGE_VERSION = 'quality-judge-9';
+export const EVALUATION_SCHEMA_VERSION = 7;
+export const CALIBRATION_SCHEMA_VERSION = 5;
 export const SCORING_VERSION = 'quality-scoring-2';
 export const hash = (value) => crypto.createHash('sha256').update(typeof value === 'string' || Buffer.isBuffer(value) ? value : JSON.stringify(value)).digest('hex');
 export const readJson = (file) => JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -14,14 +15,40 @@ export function writeJson(file, value) {
   atomicWriteResultFile(file, JSON.stringify(value, null, 2) + '\n');
 }
 export function invariant(condition, message) { if (!condition) throw new Error(message); }
-export function exactIds(items, ids, key = 'id') {
-  invariant(Array.isArray(items) && items.length === ids.length && new Set(items.map(x => x?.[key])).size === ids.length
-    && items.every(x => ids.includes(x?.[key])), `Invalid exact ${key} set`);
+export class ExactIdSetError extends Error {
+  constructor(items, ids, key, field) {
+    super(`Invalid exact ${key} set`); this.name = 'ExactIdSetError'; this.code = 'id_set_invalid';
+    const known = new Set(ids), received = Array.isArray(items) ? items.map(item => item?.[key]) : [];
+    const counts = new Map();
+    for (const id of received) if (known.has(id)) counts.set(id, (counts.get(id) || 0) + 1);
+    // Only identifiers from the program's expected set may enter feedback. An
+    // unknown provider identifier can contain arbitrary text and is counted only.
+    const safeIds = values => values.filter(id => typeof id === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9_.:/-]{0,159}$/.test(id)).slice(0, 200);
+    this.details = { field, allowedIds: safeIds([...known]), missingIds: safeIds([...known].filter(id => !counts.has(id))),
+      duplicateIds: safeIds([...counts].filter(([, count]) => count > 1).map(([id]) => id)),
+      unknownIdCount: received.filter(id => !known.has(id)).length, receivedCount: received.length,
+      expectedCount: ids.length, arrayProvided: Array.isArray(items) };
+  }
+}
+export function exactIds(items, ids, key = 'id', field = key) {
+  if (!Array.isArray(items) || items.length !== ids.length || new Set(items.map(x => x?.[key])).size !== ids.length
+    || !items.every(x => ids.includes(x?.[key]))) throw new ExactIdSetError(items, ids, key, field);
 }
 export function span(text, range) {
   invariant(Array.isArray(range) && range.length === 2 && range.every(Number.isInteger)
     && range[0] >= 0 && range[1] > range[0] && range[1] <= text.length, 'Invalid UTF-16 span');
   return text.slice(...range);
+}
+// Callers have already validated each span against its single source owner.
+// Merge overlaps and adjacent ranges without changing UTF-16 coordinates.
+export function unionSpans(ranges) {
+  const result = [];
+  for (const range of ranges.map(r => [...r]).sort((a, b) => a[0] - b[0] || a[1] - b[1])) {
+    const last = result.at(-1);
+    if (last && range[0] <= last[1]) last[1] = Math.max(last[1], range[1]);
+    else result.push(range);
+  }
+  return result;
 }
 export function within(root, relative) {
   const file = path.resolve(root, relative);

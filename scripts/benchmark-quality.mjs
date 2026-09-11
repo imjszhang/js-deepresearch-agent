@@ -1,14 +1,13 @@
 #!/usr/bin/env node
+import { calibrationBudgetPlan } from './benchmark/quality/calibration-budget.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import '../src/config/bootstrap-env.mjs';
-import { createServices } from '../src/bootstrap.mjs';
-import { getDb, closeDb } from '../src/storage/db.mjs';
 import { parseArgs, applyResearchFlags } from '../src/cli-utils.mjs';
 import { createLlmProvider, createRunExecutionConfig, resolveRunExecutionSettings, selectResearchResumePlan } from 'js-deepresearch-engine';
-import { loadSuite, loadGold, validateGoldForCase, readJson, writeJson, hash, invariant, JUDGE_VERSION } from './benchmark/quality/schema.mjs';
-import { createCampaign, fingerprint, runCampaign, publicSettings, inspectGoogleTrust } from './benchmark/quality/campaign.mjs';
+import { loadSuite, loadGold, validateGoldForCase, readJson, writeJson, hash, invariant, JUDGE_VERSION, EVALUATION_SCHEMA_VERSION, SCORING_VERSION } from './benchmark/quality/schema.mjs';
+import { acquireSessionLock } from '../src/session-lock.mjs';
+import { createCampaign, fingerprint, runCampaign, inspectGoogleTrust } from './benchmark/quality/campaign.mjs';
 import { loadResult } from './benchmark/quality/load-result.mjs';
 import { Judge } from './benchmark/quality/judge.mjs';
 import { evaluate } from './benchmark/quality/evaluate.mjs';
@@ -17,6 +16,10 @@ import { summarizeCampaign, compareCampaigns, compareSummaries, formatSummary } 
 import { calibrate } from './benchmark/quality/calibrate.mjs';
 import { runArtifactRebuilds } from './benchmark/quality/rebuild.mjs';
 import { readImprovementGate } from './benchmark/quality/improvement-gate.mjs';
+import { assessProgramExecutionGate, readProgramExecutionGate } from './benchmark/quality/improvement-gate.mjs';
+import { runProgramVerification, requireProgramVerification } from './benchmark/quality/program-verification.mjs';
+import { verifyArtifact, verifyCampaignArtifacts, assertIsolatedOutput } from './benchmark/quality/artifact-verification.mjs';
+import { loadCalibrationSuite, requireCalibration, evaluationModelIdentity } from './benchmark/quality/calibration-suite.mjs';
 
 function effectiveSettings(settings, protocol, cliPath) {
   return applyResearchFlags(settings, { strategy: 'exploratory', search: 'js-eyes', 'search-skills': protocol.skill,
@@ -26,23 +29,80 @@ function effectiveSettings(settings, protocol, cliPath) {
     'max-total-llm-tokens': protocol.totalTokens, 'report-max-output-tokens': protocol.reportMaxOutputTokens });
 }
 
+export function benchmarkExecutionMode(flags) {
+  if (flags.mode === 'model-observation') {
+    invariant(flags['program-verification'] && !flags.calibration, 'Model observation requires program verification and cannot mix legacy calibration');
+    return 'model-observation';
+  }
+  invariant(!flags.mode && flags.calibration && !flags['program-verification'], 'Choose --mode model-observation with --program-verification, or legacy --calibration');
+  return 'legacy-calibrated';
+}
+
+export function validateCachedObservation(score, { gold, artifact, identity, calibrationHash, mode }) {
+  const hasFixture = value => value && typeof value === 'object' && (value.origin === 'scripted_fixture' || Object.values(value).some(hasFixture));
+  invariant(score.goldHash === gold.goldHash && score.reportHash === artifact.reportHash && score.judgeVersion === JUDGE_VERSION
+    && score.schemaVersion === EVALUATION_SCHEMA_VERSION && score.scoringVersion === SCORING_VERSION && hash(score.resultPin) === hash(artifact.pin)
+    && hash(score.judgeIdentity) === hash(identity) && (score.calibrationHash || null) === calibrationHash
+    && score.origin === 'model_assessment' && score.modelAssessment?.origin === 'model_assessment'
+    && score.evaluationMode === mode && !hasFixture(score), 'Cached score input changed; use a new evaluation directory');
+}
+
 export async function main(argv) {
   const { args, flags } = parseArgs(argv);
   const command = args[0];
   if (flags.help || !command) {
     console.log(`Research quality benchmark (independent, revision-pinned)
+  verify-program --output-dir <dir>
+  verify-artifacts --campaign <file> --output-dir <dir>
   validate --suite <file> [--gold-dir <dir>]
   plan --suite <file> --output-dir <dir> --search-cli <executable> --skill-dir <dir>
-  run --campaign <file> [--resume-run <id>]
-  score --campaign <file> --gold-dir <dir> --calibration <file> [--evaluation-dir <dir>] [--run-id <id>] [--diagnose]
+  run --campaign <file> [--program-verification <file>] [--resume-run <id>]
+  score --mode model-observation --program-verification <file> --campaign <file> --gold-dir <dir> [--evaluation-dir <dir>] [--run-id <id>] [--diagnose]
+  score --calibration <file> --campaign <file> --gold-dir <dir> (legacy calibrated mode)
   summary --campaign <file> [--evaluation-dir <dir>]
   compare --baseline <file> --candidate <file>
-  calibrate --output-dir <dir> --holdout-file <fresh versioned fixture>
-  rebuild --campaign <baseline> --baseline-evaluation-dir <dir> --calibration <file> --output-dir <dir>
+  calibrate --suite <current-version suite> --output-dir <dir> --plan-file <file> --validation-file <file>
+  calibration-validate --suite <current-version suite>
+  calibration-summary --output-dir <dir>
+  calibration-budget --suite <current-version suite>
+  rebuild --campaign <baseline> --program-verification <file> --output-dir <dir>
+  rebuild --campaign <baseline> --baseline-evaluation-dir <dir> --calibration <file> --output-dir <dir> (legacy)
   improvement-gate --gate-config <file>
+  program-execution-gate --gate-config <file>
+Program/artifact verification never loads credentials or calls external services. Program checks do not establish semantic accuracy.
 Run never loads gold answers. Plan/validate do not call search or LLM.
 Explicit run/score/calibrate/rebuild commands may call external services; rebuild calls only the LLM, never search or fetch. Raw artifacts remain local.`);
     return;
+  }
+  if (command === 'verify-program') {
+    invariant(flags['output-dir'], 'verify-program requires output-dir');
+    const record = await runProgramVerification({ outputDir: path.resolve(flags['output-dir']) });
+    console.log(JSON.stringify({ status: record.status, verificationVersion: record.verificationVersion,
+      implementationIdentity: record.implementationIdentity, file: path.join(path.resolve(flags['output-dir']), 'program-verification.json') }));
+    if (record.status !== 'passed') process.exitCode = 1;
+    return;
+  }
+  if (command === 'verify-artifacts') {
+    invariant(flags.campaign && flags['output-dir'], 'verify-artifacts requires campaign and output-dir');
+    const record = verifyCampaignArtifacts({ campaign: readJson(flags.campaign), campaignFile: path.resolve(flags.campaign), outputDir: flags['output-dir'] });
+    console.log(JSON.stringify({ status: record.status, plannedRuns: record.plannedRuns, checkedRuns: record.checkedRuns }));
+    if (record.status !== 'passed') process.exitCode = 1;
+    return;
+  }
+  if (command === 'program-execution-gate') {
+    invariant(flags['gate-config'], 'Gate config required');
+    console.log(JSON.stringify(readProgramExecutionGate(path.resolve(flags['gate-config'])), null, 2)); return;
+  }
+  if (command === 'calibration-budget') {
+    console.log(JSON.stringify(calibrationBudgetPlan(loadCalibrationSuite(flags.suite)))); return;
+  }
+  if (command === 'calibration-validate') {
+    const suite = loadCalibrationSuite(path.resolve(flags.suite));
+    console.log(JSON.stringify({ suiteHash: suite.suiteHash, stages: suite.stages.map(s => ({ id: s.id, count: s.cases.length, tokens: s.tokens })) })); return;
+  }
+  if (command === 'calibration-summary') {
+    const s = readJson(path.join(flags['output-dir'], 'calibration.json'));
+    console.log(JSON.stringify({ status: s.status, stopReason: s.stopReason, qualification: s.qualification, usage: s.usage, notExecuted: s.notExecuted.length })); return;
   }
   if (command === 'improvement-gate') {
     invariant(flags['gate-config'], 'Gate config required');
@@ -63,30 +123,39 @@ Explicit run/score/calibrate/rebuild commands may call external services; rebuil
       const comparison = compareCampaigns(a, b);
       const baseline = summarizeCampaign(a, path.dirname(flags.baseline), { evaluationDirectory: flags['baseline-evaluation-dir'] }),
         candidate = summarizeCampaign(b, path.dirname(flags.candidate), { evaluationDirectory: flags['candidate-evaluation-dir'] });
-      const av = [...new Set(baseline.runs.filter(r => r.score).map(r => `${r.score.goldHash}:${r.score.judgeVersion}:${hash(r.score.judgeIdentity)}`))].sort();
-      const bv = [...new Set(candidate.runs.filter(r => r.score).map(r => `${r.score.goldHash}:${r.score.judgeVersion}:${hash(r.score.judgeIdentity)}`))].sort();
-      if (hash(av) !== hash(bv)) { comparison.comparable = false; comparison.warnings.push('Different or incomplete gold/judge versions'); }
       console.log(JSON.stringify({ ...comparison, delivery: { baseline: baseline.deliverySuccessRate, candidate: candidate.deliverySuccessRate },
         cases: compareSummaries(baseline, candidate) }, null, 2));
     }
     return;
   }
+  invariant(['calibrate', 'plan', 'run', 'score', 'rebuild'].includes(command), 'Unknown quality benchmark command');
+  if (command === 'score') benchmarkExecutionMode(flags);
+  if (command === 'rebuild') invariant(Boolean(flags['program-verification']) !== Boolean(flags.calibration), 'Choose program verification or legacy calibration for rebuild');
+  await import('../src/config/bootstrap-env.mjs');
+  const { createServices } = await import('../src/bootstrap.mjs');
+  const { getDb, closeDb } = await import('../src/storage/db.mjs');
   const settings = createServices(getDb()).settingsStore.get();
   closeDb();
   if (command === 'calibrate') {
-    invariant(flags['output-dir'] && flags['holdout-file'], 'calibrate requires output-dir and a fresh holdout-file');
-    const identity = publicSettings({ provider: settings.llm.provider, model: settings.llm.model, baseUrl: settings.llm.baseUrl });
-    const summary = await calibrate({ llm: createLlmProvider(settings), identity, directory: flags['output-dir'], holdoutFile: flags['holdout-file'] });
-    console.log(JSON.stringify({ agreement: summary.agreement, holdoutAgreement: summary.holdoutAgreement, criticalMisses: summary.criticalMisses,
+    invariant(flags['output-dir'] && flags.suite && !flags['holdout-file'], 'calibrate requires output-dir and a versioned suite');
+    const identity = evaluationModelIdentity(settings);
+    const summary = await calibrate({ llm: createLlmProvider(settings), identity, directory: flags['output-dir'], suiteFile: flags.suite, planFile: flags['plan-file'], validationFile: flags['validation-file'] });
+    console.log(JSON.stringify({ status: summary.status, qualification: summary.qualification,
       passed: summary.machineCalibrationPassed, humanReviewed: false })); return;
   }
   if (command === 'plan') {
     invariant(flags['output-dir'] && flags['search-cli'] && flags['skill-dir'], 'plan requires output-dir, search-cli, skill-dir');
+    invariant(!(flags['program-verification'] && flags['improvement-gate-config']), 'Cannot mix program and legacy gate');
     const suite = loadSuite(path.resolve(flags.suite));
     const campaign = createCampaign({ suite, directory: path.resolve(flags['output-dir']),
       identity: fingerprint(effectiveSettings(settings, suite.protocol, path.resolve(flags['search-cli'])), flags['skill-dir']), cliPath: path.resolve(flags['search-cli']), skillDir: path.resolve(flags['skill-dir']) });
     if (flags['improvement-gate-config']) {
       campaign.validationGate = path.resolve(flags['improvement-gate-config']);
+      writeJson(path.join(flags['output-dir'], 'campaign.json'), campaign);
+    }
+    if (flags['program-verification']) {
+      requireProgramVerification(flags['program-verification']);
+      campaign.programGate = { schemaVersion: 2, programVerification: path.resolve(flags['program-verification']) };
       writeJson(path.join(flags['output-dir'], 'campaign.json'), campaign);
     }
     console.log(JSON.stringify({ campaign: path.join(flags['output-dir'], 'campaign.json'), plannedRuns: campaign.runs.length,
@@ -96,16 +165,29 @@ Explicit run/score/calibrate/rebuild commands may call external services; rebuil
   invariant(flags.campaign, 'Missing campaign');
   const file = path.resolve(flags.campaign), directory = path.dirname(file), campaign = readJson(file);
   if (command === 'rebuild') {
-    invariant(!flags['gold-dir'] && flags.calibration && flags['baseline-evaluation-dir'] && flags['output-dir'], 'Rebuild requires frozen baseline scores and calibration, and cannot load gold');
-    const calibration = readJson(flags.calibration);
-    const identity = publicSettings({ provider: settings.llm.provider, model: settings.llm.model, baseUrl: settings.llm.baseUrl });
-    invariant(['provider', 'model', 'baseUrl'].every(k => calibration.identity[k] === identity[k]), 'Calibration differs from current model');
+    invariant(!flags['gold-dir'] && flags['output-dir'], 'Rebuild requires output-dir and cannot load gold');
+    assertIsolatedOutput(flags['output-dir'], [file]);
+    const calibration = flags.calibration ? readJson(flags.calibration) : null;
+    if (calibration) {
+      invariant(flags['baseline-evaluation-dir'], 'Legacy rebuild requires frozen baseline scores');
+      requireCalibration(calibration, evaluationModelIdentity(settings));
+    }
+    else {
+      const gate = assessProgramExecutionGate({ programVerificationFile: flags['program-verification'], campaign, operation: 'rebuild', outputDir: flags['output-dir'] });
+      invariant(gate.eligible, 'Program rebuild gate not met');
+    }
     await runArtifactRebuilds({ campaign, directory: flags['output-dir'], evaluationDirectory: flags['baseline-evaluation-dir'], calibration,
-      settings, llm: createLlmProvider(settings) });
+      programVerificationFile: flags['program-verification'], settings, llm: createLlmProvider(settings) });
     return;
   }
   if (command === 'run') {
+    invariant(!(campaign.validationGate && (campaign.programGate || flags['program-verification'])), 'Cannot mix program and legacy campaign gates');
     if (campaign.validationGate) invariant(readImprovementGate(campaign.validationGate).canLaunchLive, 'Improvement gate not met; live campaign remains queued');
+    else {
+      invariant(!campaign.programGate || campaign.programGate.schemaVersion === 2, 'PROGRAM_GATE_SCHEMA_INVALID');
+      const gate = assessProgramExecutionGate({ programVerificationFile: flags['program-verification'] || campaign.programGate?.programVerification, campaign, operation: 'run' });
+      invariant(gate.eligible, 'Program execution gate not met; live campaign remains queued');
+    }
     invariant(!flags['gold-dir'], 'run cannot load gold');
     const preflight = inspectGoogleTrust(campaign.cliPath, campaign.protocol.skill);
     writeJson(path.join(directory, `preflight-${Date.now()}.json`), preflight);
@@ -127,22 +209,28 @@ Explicit run/score/calibrate/rebuild commands may call external services; rebuil
   }
   if (command === 'score') {
     invariant(flags['gold-dir'], 'score requires gold-dir');
-    const identity = publicSettings({ provider: settings.llm.provider, model: settings.llm.model, baseUrl: settings.llm.baseUrl, temperature: 0,
-      sameModelAsResearch: settings.llm.model === (campaign.identity.settings?.llm?.model || settings.llm.model) });
-    const llm = createLlmProvider(settings);
+    invariant(campaign.origin !== 'scripted_fixture', 'Scripted fixtures cannot be scored as live observations');
+    const mode = benchmarkExecutionMode(flags);
+    const identity = evaluationModelIdentity(settings);
     const calibration = flags.calibration ? readJson(flags.calibration) : null;
-    invariant(calibration?.machineCalibrationPassed === true, 'A passing frozen calibration is required before formal scoring');
-    if (calibration) invariant(calibration.judgeVersion === JUDGE_VERSION
-      && ['provider', 'model', 'baseUrl'].every(k => calibration.identity[k] === identity[k]), 'Calibration differs from current judge');
+    let verification = null;
+    if (mode === 'legacy-calibrated') requireCalibration(calibration, identity);
+    else verification = requireProgramVerification(flags['program-verification']);
     const calibrationHash = calibration ? hash(calibration) : null;
-    identity.calibrationHash = calibrationHash;
-    const evaluationDirectory = path.resolve(flags['evaluation-dir'] || path.join(directory, 'evaluations', JUDGE_VERSION));
-    invariant(evaluationDirectory !== directory, 'Use a separate evaluation revision directory');
+    if (calibration) identity.calibrationHash = calibrationHash;
+    const evaluationDirectory = path.resolve(flags['evaluation-dir'] || path.join(directory, 'evaluations', `${JUDGE_VERSION}-${mode}`));
+    assertIsolatedOutput(evaluationDirectory, [file, ...campaign.runs.map(r => r.pin?.sessionDir)]);
+    if (verification) invariant(assessProgramExecutionGate({ programVerificationFile: flags['program-verification'], campaign, operation: 'score', outputDir: evaluationDirectory }).eligible, 'Program scoring gate not met');
+    const llm = createLlmProvider(settings);
     for (const run of campaign.runs.filter(r => r.status === 'research_complete' && (!flags['run-id'] || r.id === flags['run-id']))) {
       const out = path.join(evaluationDirectory, run.id), scoreFile = path.join(out, 'score.json');
       const gold = loadGold(flags['gold-dir'], run.case.topicId);
       validateGoldForCase(gold, run.case);
       const artifact = loadResult(run.pin);
+      invariant(artifact.result.benchmarkOrigin !== 'scripted_fixture', 'Scripted artifact cannot be scored as a live observation');
+      fs.mkdirSync(out, { recursive: true });
+      const releaseScore = acquireSessionLock(out);
+      try {
       const judge = new Judge({ llm, directory: path.join(out, 'judge'), limit: campaign.protocol.judgeTokens, identity });
       const stateFile = path.join(out, 'evaluation-state.json');
       const updateState = status => writeJson(stateFile, { status, judgeVersion: JUDGE_VERSION, updatedAt: new Date().toISOString(),
@@ -153,17 +241,18 @@ Explicit run/score/calibrate/rebuild commands may call external services; rebuil
         let score;
         if (fs.existsSync(scoreFile)) {
           score = readJson(scoreFile);
-          invariant(score.goldHash === gold.goldHash && score.reportHash === artifact.reportHash && score.judgeVersion === JUDGE_VERSION
-            && hash(score.judgeIdentity) === hash(identity) && (score.calibrationHash || null) === calibrationHash, 'Cached score input changed; use a new evaluation directory');
-        } else {
+          validateCachedObservation(score, { gold, artifact, identity, calibrationHash, mode });
+        }
+        if (!score || score.metrics.pendingReview || !score.extractionComplete) {
           score = await evaluate({ artifact, gold, caseDefinition: run.case, judge });
           score.calibrationHash = calibrationHash;
-          score.calibration = calibration ? { judgeVersion: calibration.judgeVersion, agreement: calibration.agreement,
-            criticalMisses: calibration.criticalMisses, machineCalibrationPassed: calibration.machineCalibrationPassed,
+          score.calibration = calibration ? { judgeVersion: calibration.judgeVersion, suiteHash: calibration.freeze.suiteHash,
+            qualification: calibration.qualification, machineCalibrationPassed: calibration.machineCalibrationPassed,
             humanReviewed: calibration.humanReviewed } : null;
-          score.machineThresholdsMet = score.qualityTargetMet;
-          score.qualityTargetMet = score.machineThresholdsMet && calibration?.machineCalibrationPassed === true;
-          if (!calibration?.machineCalibrationPassed) score.reviewStatus = 'pending_review';
+          score.evaluationMode = mode;
+          score.programVerification = verification ? { verificationVersion: verification.verificationVersion,
+            implementationIdentity: verification.implementationIdentity } : null;
+          score.artifactVerification = verifyArtifact(run.pin);
           writeJson(scoreFile, score);
         }
         writeJson(path.join(out, 'review-items.json'), { reviewStatus: score.reviewStatus,
@@ -173,7 +262,7 @@ Explicit run/score/calibrate/rebuild commands may call external services; rebuil
         phase = 'diagnose';
         updateState(flags.diagnose ? 'diagnosing' : 'evaluated');
         if (flags.diagnose && !fs.existsSync(path.join(out, 'diagnostics.json'))) writeJson(path.join(out, 'diagnostics.json'), await diagnose({ score, artifact, gold, judge }));
-        const status = score.extractionComplete && !score.rows.some(r => r.pending) ? 'evaluated' : 'evaluation_pending';
+        const status = score.extractionComplete && !score.metrics.pendingReview ? 'evaluated' : 'evaluation_pending';
         updateState(status);
         console.log(JSON.stringify({ id: run.id, status, metrics: score.metrics, judgeUsage: judge.usage() }));
       } catch (error) {
@@ -185,6 +274,7 @@ Explicit run/score/calibrate/rebuild commands may call external services; rebuil
         updateState(phase === 'diagnose' ? 'diagnostics_pending' : 'evaluation_pending');
         console.log(JSON.stringify({ id: run.id, status: phase === 'diagnose' ? 'diagnostics_pending' : 'evaluation_pending', error: `See local ${failureFile}` }));
       }
+      } finally { releaseScore(); }
     }
     const summary = summarizeCampaign(campaign, directory, { evaluationDirectory });
     fs.mkdirSync(evaluationDirectory, { recursive: true });

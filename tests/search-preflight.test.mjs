@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import net from 'node:net';
+import { EventEmitter } from 'node:events';
+import { syncBuiltinESMExports } from 'node:module';
 import { probeSearchProvider } from '../src/search-preflight.mjs';
 
 describe('search preflight', () => {
@@ -17,7 +20,17 @@ describe('search preflight', () => {
     );
   });
 
-  it('points at js-eyes doctor when the server and CLI are down', async () => {
+  it('points at js-eyes doctor when the server and CLI are down', async t => {
+    let tcpCalls = 0, doctorCalls = 0;
+    t.mock.method(net, 'createConnection', () => {
+      tcpCalls++;
+      const socket = new EventEmitter();
+      socket.destroy = () => {};
+      process.nextTick(() => socket.emit('error', new Error('fixture connection refused')));
+      return socket;
+    });
+    syncBuiltinESMExports();
+    t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
     await assert.rejects(
       () => probeSearchProvider({
         search: {
@@ -27,11 +40,14 @@ describe('search preflight', () => {
       }, {
         timeoutMs: 50,
         spawnImpl() {
+          doctorCalls++;
           throw new Error('spawn failed');
         },
       }),
       /js-eyes doctor --json/,
     );
+    assert.equal(tcpCalls, 1);
+    assert.equal(doctorCalls, 1);
   });
 
   it('skips probe for local corpus search', async () => {

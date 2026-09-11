@@ -1,98 +1,58 @@
 #!/usr/bin/env node
 import { pathToFileURL } from 'node:url';
-import '../src/config/bootstrap-env.mjs';
-import { createLlmProvider } from 'js-deepresearch-engine';
 import { parseArgs } from '../src/cli-utils.mjs';
-import { createServices } from '../src/bootstrap.mjs';
-import { getDb } from '../src/storage/db.mjs';
 import { runBenchmark } from './benchmark/run-benchmark.mjs';
 import { formatJsonSummary, formatMarkdownSummary } from './benchmark/format-output.mjs';
 import { resolveBenchmarkTarget } from './benchmark/resolve-target.mjs';
+import { QUALITY_COMMANDS, requireInspectionMode, routeQualityCommand } from './benchmark/quality-command-router.mjs';
 
-const isCliEntry = process.argv[1]
-  && pathToFileURL(process.argv[1]).href === import.meta.url;
-
-if (isCliEntry) {
-  main(process.argv.slice(2)).catch((error) => {
-    console.error(error.message);
-    process.exitCode = 1;
-  });
-}
-
-async function main(argv) {
+export async function main(argv) {
+  if (await routeQualityCommand(argv)) return;
   const { args, flags } = parseArgs(argv);
-
-  if (flags.help) {
-    printHelp();
-    return;
-  }
+  if (flags.help || !argv.length) { printHelp(); return; }
+  requireInspectionMode(flags);
 
   if (flags.compare) {
-    const ids = String(flags.compare).split(',').map((id) => id.trim()).filter(Boolean);
-    if (ids.length < 2) throw new Error('--compare requires at least two comma-separated research IDs');
-    const results = [];
-    for (const id of ids) {
-      results.push(await runBenchmark({ researchId: id, strictPlatform: flags['strict-platform'] || null, llm: null, llmEnabled: false }));
-    }
-    const queries = [...new Set(results.map((result) => result.query).filter(Boolean))];
-    const metricVersions = [...new Set(results.map((result) => result.metrics.metricsVersion))];
-    const extractionVersions = [...new Set(results.map((result) => result.metrics.claimExtractionVersion))];
-    const evaluationOrigins = [...new Set(results.flatMap((result) => result.claims.map((claim) => claim.evaluationOrigin)))];
-    const warnings = [];
-    if (queries.length > 1) warnings.push('Compared runs have different queries.');
-    if (metricVersions.length > 1) warnings.push('Compared runs use different quality metrics versions.');
-    if (extractionVersions.length > 1) warnings.push('Compared runs use different claim extraction versions.');
-    if (evaluationOrigins.length > 1) warnings.push('Compared runs use different evaluation methods or origins.');
-    const comparison = { query: queries.length === 1 ? queries[0] : null, warnings, runs: results.map((result) => ({ researchId: result.researchId, strategy: result.strategy, evaluation: result.evaluation, metrics: result.metrics, artifactsHealth: result.artifactsHealth })) };
-    console.log(flags.json ? JSON.stringify(comparison, null, 2) : comparison.runs.map((run) => `- ${run.researchId} (${run.strategy}): ${JSON.stringify(run.metrics)}`).join('\n'));
+    if (args.length || flags['research-id']) throw new Error('Use --compare without another inspection target.');
+    const ids = String(flags.compare).split(',').map(id => id.trim()).filter(Boolean);
+    if (ids.length < 2 || new Set(ids).size !== ids.length) throw new Error('--compare requires at least two distinct research IDs');
+    const runs = [];
+    for (const researchId of ids) runs.push(await runBenchmark({ researchId, strictPlatform: flags['strict-platform'] || null }));
+    const queries = new Set(runs.map(run => run.query));
+    const comparison = { schemaVersion: 2, origin: 'program_check', scope: 'declared_artifact_integrity',
+      query: queries.size === 1 ? runs[0].query : null,
+      warnings: queries.size === 1 ? [] : ['Compared runs have different queries; no semantic quality comparison was performed.'],
+      plannedRuns: runs.length, verifiedRuns: runs.filter(run => run.artifactVerification.status === 'passed').length,
+      modelObservedRuns: 0, runs };
+    console.log(flags.json ? JSON.stringify(comparison, null, 2)
+      : runs.map(run => formatMarkdownSummary(run)).join('\n'));
     return;
   }
-
-  const { workDir, researchId } = resolveBenchmarkTarget({ args, flags });
-
-  const llmEnabled = !flags['no-llm'];
-  let llm = null;
-
-  if (llmEnabled) {
-    const settings = createServices(getDb()).settingsStore.get();
-    if (settings.llm?.apiKey || settings.llm?.provider === 'ollama') {
-      llm = createLlmProvider(settings);
-    }
-  }
-
-  const result = await runBenchmark({
-    workDir,
-    researchId,
-    strictPlatform: flags['strict-platform'] || null,
-    llm,
-    llmEnabled,
-  });
-
-  if (flags.json) {
-    console.log(formatJsonSummary(result));
-  } else {
-    console.log(formatMarkdownSummary(result));
-  }
+  if (args.length > 1) throw new Error('Provide one work directory, or use a quality subcommand.');
+  const target = resolveBenchmarkTarget({ args, flags });
+  const result = await runBenchmark({ ...target, strictPlatform: flags['strict-platform'] || null });
+  console.log(flags.json ? formatJsonSummary(result) : formatMarkdownSummary(result));
 }
 
 function printHelp() {
-  console.log(`
-Research source-matching benchmark
+  console.log(`Research benchmark (shared quality pipeline)
 
-Usage:
-  node scripts/benchmark-research.mjs <work-dir> [options]
-  node scripts/benchmark-research.mjs --research-id <id> [options]
+Existing-result inspection, offline by default:
+  npm run benchmark -- <work-dir> [--json] [--strict-platform <id>]
+  npm run benchmark -- --research-id <id> [--json]
+  npm run benchmark -- --compare <id1,id2> [--json]
+  --no-llm remains a compatibility alias; inspection never invokes a model.
 
-Options:
-  --research-id <id>       Load artifacts from js-intel-store by researchId
-  --compare <id1,id2>      Compare archived runs without re-running research
-  --json                   JSON output
-  --no-llm                 Disable LLM judge
-  --strict-platform <id>   e.g. js-eyes:zhihu
+Quality subcommands (identical to benchmark:quality):
+  ${QUALITY_COMMANDS.join(', ')}
+  npm run benchmark -- score --mode model-observation --program-verification <file> --campaign <file> --gold-dir <dir>
+  npm run benchmark -- compare --baseline <campaign> --candidate <campaign>
 
-Examples:
-  node scripts/benchmark-research.mjs work_dir/focused/2026-05-26_043125
-  node scripts/benchmark-research.mjs --research-id imported__source-based__2026-05-26_065414 --no-llm
-  node scripts/benchmark-research.mjs work_dir/focused/2026-05-26_043125 --no-llm --json
-`);
+Inspection verifies declared versioned evidence and reports observable counts.
+Missing legacy evidence stays incomplete. Stored verdicts and keyword overlap
+are not quality scores. Model scoring requires explicit score inputs.`);
+}
+
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  main(process.argv.slice(2)).catch(error => { console.error(error.message); process.exitCode = 1; });
 }

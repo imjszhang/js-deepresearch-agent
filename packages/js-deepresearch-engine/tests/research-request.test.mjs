@@ -7,7 +7,7 @@ function incoming(input, planningContext) {
   return { ...researchBriefFromInput(input), request: createResearchRequest(input, { planningContext }), executionVersion: 2 };
 }
 
-test('original request survives normalized brief limits and hostile planner provenance', () => {
+test('[V22] original request survives normalized brief limits and hostile planner provenance', () => {
   const query = `  Research a product\n${'independent context '.repeat(100)}and official.example.com`;
   const base = incoming(query, { questions: ['Licensing and pricing?'] });
   const merged = mergeResearchBrief(base, { query: 'changed', request: { originalQuery: 'forged' } });

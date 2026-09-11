@@ -1,106 +1,41 @@
-function formatPercent(value) {
-  return value === null || value === undefined ? 'n/a' : `${Math.round(value * 100)}%`;
+function count(value) {
+  return value === null || value === undefined ? 'unavailable' : String(value);
 }
 
 export function formatMarkdownSummary(result) {
-  const { metrics, artifactsHealth, riskExamples } = result;
+  const { metrics, artifactVerification, modelAssessment } = result;
   const lines = [
-    '# Research Benchmark',
-    '',
+    '# Research Artifact Verification', '',
     `- Query: ${result.query || '(unknown)'}`,
     `- Strategy: ${result.strategy || '(unknown)'}`,
-    `- LLM judge invoked: ${result.evaluation?.llmInvoked ? 'yes' : 'no'}`,
-    `- Evaluation origin: ${[
-      result.evaluation?.usedStoredRule ? 'stored_rule' : null,
-      result.evaluation?.usedStoredLlm ? 'stored_llm' : null,
-      result.evaluation?.usedRuntimeRule ? 'runtime_rule' : null,
-      result.evaluation?.usedRuntimeLlm ? 'runtime_llm' : null,
-    ].filter(Boolean).join(', ') || 'n/a'}`,
-    `- Engine evaluation version: ${result.evaluation?.claimEvaluationVersion ?? 'n/a'}`,
-    `- Stored evaluation versions: ${(result.evaluation?.storedEvaluationVersions || []).join(', ') || 'n/a'}`,
-    '',
-    '## Metrics',
-    '',
-    `- Claims: ${metrics.evaluatedClaimCount} evaluated (${metrics.keyClaimCount} key, ${metrics.supportingClaimCount} supporting)`,
-    `- Supported: ${metrics.claims.supported} (${formatPercent(metrics.rates.supportedRate)})`,
-    `- Supported or partial: ${formatPercent(metrics.rates.supportedOrPartialRate)}`,
-    `- Partial: ${metrics.claims.partiallySupported} (${formatPercent(metrics.rates.partiallySupportedRate)})`,
-    `- Unsupported: ${metrics.claims.unsupported} (${formatPercent(metrics.rates.unsupportedRate)})`,
-    `- Unverifiable: ${metrics.claims.unverifiable} (${formatPercent(metrics.rates.unverifiableRate)})`,
-    `- Conflicting: ${metrics.claims.conflicting} (${formatPercent(metrics.rates.conflictingRate)})`,
-    `- Key claims supported: ${formatPercent(metrics.rates.keyClaimSupportedRate)}`,
-    `- Evidence coverage: ${formatPercent(metrics.rates.evidenceCoverageRate)}`,
-    `- Direct evidence coverage: ${formatPercent(metrics.rates.directEvidenceRate)}`,
-    `- claimsWithCitationsRate: ${formatPercent(metrics.claimsWithCitationsRate)}`,
-    `- citationResolutionRate: ${formatPercent(metrics.citationResolutionRate)}`,
-    `- sourcePresenceRate: ${formatPercent(metrics.sourcePresenceRate)}`,
-    `- platformMatchRate: ${formatPercent(metrics.platformMatchRate)}`,
-    `- enrichOkRate: ${formatPercent(metrics.enrichOkRate)}`,
-    `- contentPresenceRate: ${formatPercent(metrics.contentPresenceRate)}`,
+    `- Schema: ${result.schemaVersion}`,
+    `- Origin: ${result.origin}`,
+    `- Artifact verification: ${artifactVerification.status}`,
+    `- Scope: ${artifactVerification.scope}`,
+    `- Revision: ${result.artifactMetadata?.resultRevision || 'unavailable'}`,
+    ...(artifactVerification.reason ? [`- Reason: ${artifactVerification.reason}`] : []),
+    `- Model observation: ${modelAssessment.observed ? 'observed' : 'not requested'}`,
+    '- Semantic truth and extraction completeness: not verified', '',
+    '## Observable Counts', '',
+    `- Sources: ${count(metrics.sourceCount)}`,
+    `- Source hosts: ${count(metrics.sourceHostCount)}`,
+    `- Document versions: ${count(metrics.documentVersionCount)}`,
+    `- Passages: ${count(metrics.passageCount)}`,
+    `- Citation registry entries: ${count(metrics.citationEntryCount)}`,
+    `- Report citation keys: ${count(metrics.reportCitationCount)}`,
+    `- Resolved report citation keys: ${count(metrics.resolvedCitationCount)}`,
+    `- Report characters: ${count(metrics.reportCharacterCount)}`,
   ];
-
-  if (artifactsHealth.enrichment) {
-    const { enrichment } = artifactsHealth;
-    lines.push(
-      '',
-      '## Source Enrichment',
-      '',
-      `- sources: ${artifactsHealth.sourceCount}`,
-      `- withEvidence: ${enrichment.withEvidence}`,
-      `- withContent: ${enrichment.withContent}`,
-      `- enrichOk: ${enrichment.enrichOk}`,
-      `- enrichFailed: ${enrichment.enrichFailed}`,
-    );
-  }
-
-  if (artifactsHealth.flags.length > 0) {
-    lines.push('', '## Artifact Health Flags', '');
-    for (const flag of artifactsHealth.flags) {
-      lines.push(`- ${flag}`);
-    }
-  }
-
-  if (riskExamples.length > 0) {
-    lines.push('', '## Risk Examples', '');
-    for (const example of riskExamples) {
-      lines.push(`- [${example.section}] ${example.text}`);
-      if (example.flags.length > 0) {
-        lines.push(`  - flags: ${example.flags.join(', ')}`);
-      }
-      if (example.unresolvedCitations.length > 0) {
-        lines.push(`  - unresolved: ${example.unresolvedCitations.join(', ')}`);
-      }
-      lines.push(`  - verdict: ${example.effectiveVerdict} (${example.evaluationOrigin})${example.reason ? ` — ${example.reason}` : ''}`);
-    }
-  }
-
+  if (result.artifactsHealth.flags.length) lines.push('', '## Source Field Diagnostics', '', ...result.artifactsHealth.flags.map(flag => `- ${flag}`));
   return `${lines.join('\n')}\n`;
 }
 
 export function formatJsonSummary(result) {
   return JSON.stringify({
-    query: result.query,
-    strategy: result.strategy,
-    researchId: result.researchId,
-    llmEnabled: result.llmEnabled,
-    evaluation: result.evaluation,
-    artifactsHealth: result.artifactsHealth,
-    metrics: result.metrics,
-    riskExamples: result.riskExamples,
-    claims: result.claims.map((entry) => ({
-      section: entry.claim.section,
-      kind: entry.claim.kind,
-      text: entry.claim.text,
-      citationKeys: entry.rule.citationKeys,
-      unresolvedCitations: entry.rule.unresolvedCitations,
-      keywordOverlap: entry.rule.keywordOverlap,
-      flags: entry.rule.flags,
-      ruleVerdict: entry.ruleVerdict,
-      llmVerdict: entry.llmVerdict,
-      effectiveVerdict: entry.effectiveVerdict,
-      evaluationOrigin: entry.evaluationOrigin,
-      evaluationVersion: entry.evaluationVersion || entry.effectiveEvaluation?.evaluationVersion || null,
-      llm: entry.llm || null,
-    })),
+    schemaVersion: result.schemaVersion, origin: result.origin,
+    query: result.query, strategy: result.strategy, researchId: result.researchId,
+    llmEnabled: result.llmEnabled, evaluation: result.evaluation,
+    artifactVerification: result.artifactVerification, modelAssessment: result.modelAssessment,
+    artifactMetadata: result.artifactMetadata, artifactsHealth: result.artifactsHealth, metrics: result.metrics,
   }, null, 2);
 }

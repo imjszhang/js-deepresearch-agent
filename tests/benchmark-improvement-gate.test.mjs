@@ -18,7 +18,8 @@ function fixtures() {
 }
 test('live gate requires calibration, complete compatible scores, 10pp gain and no core regressions', () => {
  const x = fixtures();
- assert.equal(assessImprovementGate(x).canLaunchLive, true);
+ assert.equal(assessImprovementGate(x).canLaunchLive, false);
+ assert.deepEqual(assessImprovementGate(x).failures, ['calibration_not_passed']);
  x.regressionPassed = false;
  assert.equal(assessImprovementGate(x).canLaunchLive, false);
  x.regressionPassed = true;

@@ -1,0 +1,487 @@
+{
+  "schemaVersion": 2,
+  "relationReviewVersion": 2,
+  "relationDecisionVersion": 1,
+  "bindingReviewVersion": 1,
+  "purpose": "Exposed development diagnostics, never calibration holdout. Original fourteen relation oracles are preserved; old auxiliary auditStatus labels are not a v8 target. Presentation variants test relation equivalence here, with extraction and binding tested separately offline.",
+  "cases": [
+    {
+      "id": "relation-boundary-01",
+      "pairId": "measurement",
+      "proposition": "In the recorded Nacre v1 test, every request completed in less than 5 milliseconds.",
+      "quote": "No request latency was measured in the Nacre v1 test.",
+      "sourceText": "Nacre v1 test report. No request latency was measured in the Nacre v1 test. The test only checked output formatting.",
+      "source": {
+        "id": "nacre-v1-test",
+        "version": "v1",
+        "url": "https://fixture.invalid/nacre/v1/test"
+      },
+      "exposure": "previously_exposed_diagnostic",
+      "expected": {
+        "relation": "not_addressed"
+      }
+    },
+    {
+      "id": "relation-boundary-02",
+      "pairId": "measurement",
+      "proposition": "In the recorded Nacre v1 test, every request completed in less than 5 milliseconds.",
+      "quote": "Every request in the Nacre v1 test took at least 8 milliseconds to complete.",
+      "sourceText": "Nacre v1 test report. Every request in the Nacre v1 test took at least 8 milliseconds to complete. Latency was measured from receipt to completion.",
+      "source": {
+        "id": "nacre-v1-test",
+        "version": "v1",
+        "url": "https://fixture.invalid/nacre/v1/test"
+      },
+      "exposure": "previously_exposed_diagnostic",
+      "expected": {
+        "relation": "contradiction"
+      }
+    },
+    {
+      "id": "relation-boundary-03",
+      "pairId": "version",
+      "proposition": "Nacre v2 can write records to disk.",
+      "quote": "Nacre v1 cannot write records to disk.",
+      "sourceText": "This manual describes only Nacre v1. Nacre v1 cannot write records to disk. No information about later versions is supplied.",
+      "source": {
+        "id": "nacre-v1-manual",
+        "version": "v1",
+        "url": "https://fixture.invalid/nacre/v1/manual"
+      },
+      "exposure": "previously_exposed_diagnostic",
+      "expected": {
+        "relation": "not_addressed"
+      }
+    },
+    {
+      "id": "relation-boundary-04",
+      "pairId": "version",
+      "proposition": "Nacre v2 can write records to disk.",
+      "quote": "Nacre v2 cannot write records to disk.",
+      "sourceText": "This manual describes Nacre v2. Nacre v2 cannot write records to disk. All records remain exclusively in memory.",
+      "source": {
+        "id": "nacre-v2-manual",
+        "version": "v2",
+        "url": "https://fixture.invalid/nacre/v2/manual"
+      },
+      "exposure": "previously_exposed_diagnostic",
+      "expected": {
+        "relation": "contradiction"
+      }
+    },
+    {
+      "id": "relation-boundary-05",
+      "pairId": "guarantee-target",
+      "proposition": "The Nacre v1 safety manual explicitly guarantees that Nacre v1 is safe.",
+      "quote": "This manual explicitly makes no guarantee that Nacre v1 is safe.",
+      "sourceText": "Nacre v1 safety manual. This manual explicitly makes no guarantee that Nacre v1 is safe. No safety tests have been performed.",
+      "source": {
+        "id": "nacre-v1-safety",
+        "version": "v1",
+        "url": "https://fixture.invalid/nacre/v1/safety"
+      },
+      "exposure": "previously_exposed_diagnostic",
+      "expected": {
+        "relation": "contradiction"
+      }
+    },
+    {
+      "id": "relation-boundary-06",
+      "pairId": "guarantee-target",
+      "proposition": "Nacre v1 is safe.",
+      "quote": "This manual explicitly makes no guarantee that Nacre v1 is safe.",
+      "sourceText": "Nacre v1 safety manual. This manual explicitly makes no guarantee that Nacre v1 is safe. No safety tests have been performed.",
+      "source": {
+        "id": "nacre-v1-safety",
+        "version": "v1",
+        "url": "https://fixture.invalid/nacre/v1/safety"
+      },
+      "exposure": "previously_exposed_diagnostic",
+      "expected": {
+        "relation": "not_addressed"
+      }
+    },
+    {
+      "id": "relation-boundary-07",
+      "pairId": "same-scope-no-guarantee",
+      "proposition": "Nacre 第一版安全手册明确没有作出安全保证。",
+      "quote": "本手册不对 Nacre 第一版的安全性作出保证。",
+      "sourceText": "Nacre 第一版安全手册。本手册不对 Nacre 第一版的安全性作出保证。该产品尚未经过安全性测试。",
+      "source": {
+        "id": "nacre-v1-safety-zh",
+        "version": "v1",
+        "url": "https://fixture.invalid/nacre/v1/safety-zh"
+      },
+      "exposure": "previously_exposed_diagnostic",
+      "expected": {
+        "relation": "full_support"
+      }
+    },
+    {
+      "id": "relation-boundary-08",
+      "pairId": "same-scope-no-guarantee",
+      "proposition": "Nacre 第一版是不安全的。",
+      "quote": "本手册不对 Nacre 第一版的安全性作出保证。",
+      "sourceText": "Nacre 第一版安全手册。本手册不对 Nacre 第一版的安全性作出保证。该产品尚未经过安全性测试。",
+      "source": {
+        "id": "nacre-v1-safety-zh",
+        "version": "v1",
+        "url": "https://fixture.invalid/nacre/v1/safety-zh"
+      },
+      "exposure": "previously_exposed_diagnostic",
+      "expected": {
+        "relation": "not_addressed"
+      }
+    },
+    {
+      "id": "relation-boundary-09",
+      "pairId": "conditions",
+      "proposition": "Nacre v2 can export records while connected to its server.",
+      "quote": "When disconnected from its server, Nacre v2 cannot export records.",
+      "sourceText": "Nacre v2 disconnected operation. When disconnected from its server, Nacre v2 cannot export records. Connected export operation is outside the scope of this document.",
+      "source": {
+        "id": "nacre-v2-disconnected",
+        "version": "v2",
+        "url": "https://fixture.invalid/nacre/v2/disconnected"
+      },
+      "exposure": "previously_exposed_diagnostic",
+      "expected": {
+        "relation": "not_addressed"
+      }
+    },
+    {
+      "id": "relation-boundary-10",
+      "pairId": "conditions",
+      "proposition": "Nacre v2 can export records while disconnected from its server.",
+      "quote": "When disconnected from its server, Nacre v2 cannot export records.",
+      "sourceText": "Nacre v2 disconnected operation. When disconnected from its server, Nacre v2 cannot export records. Connected export operation is outside the scope of this document.",
+      "source": {
+        "id": "nacre-v2-disconnected",
+        "version": "v2",
+        "url": "https://fixture.invalid/nacre/v2/disconnected"
+      },
+      "exposure": "previously_exposed_diagnostic",
+      "expected": {
+        "relation": "contradiction"
+      }
+    },
+    {
+      "id": "relation-boundary-11",
+      "pairId": "support-extent",
+      "proposition": "Nacre v2 exports records as JSON.",
+      "quote": "Nacre v2 exports records as JSON.",
+      "sourceText": "Nacre v2 export reference. Nacre v2 exports records as JSON. The manual contains no information about CSV export.",
+      "source": {
+        "id": "nacre-v2-export",
+        "version": "v2",
+        "url": "https://fixture.invalid/nacre/v2/export"
+      },
+      "exposure": "previously_exposed_diagnostic",
+      "expected": {
+        "relation": "full_support"
+      }
+    },
+    {
+      "id": "relation-boundary-12",
+      "pairId": "support-extent",
+      "proposition": "Nacre v2 exports records as both JSON and CSV.",
+      "quote": "Nacre v2 exports records as JSON.",
+      "sourceText": "Nacre v2 export reference. Nacre v2 exports records as JSON. The manual contains no information about CSV export.",
+      "source": {
+        "id": "nacre-v2-export",
+        "version": "v2",
+        "url": "https://fixture.invalid/nacre/v2/export"
+      },
+      "exposure": "previously_exposed_diagnostic",
+      "expected": {
+        "relation": "partial_support"
+      }
+    },
+    {
+      "id": "relation-boundary-13",
+      "pairId": "attribution",
+      "proposition": "The Nacre v2 export manual states that records can be exported as JSON.",
+      "quote": "Nacre v2 exports records as JSON.",
+      "sourceText": "Nacre v2 export manual. Nacre v2 exports records as JSON. Only this manual is supplied; no independent implementation measurements are available.",
+      "source": {
+        "id": "nacre-v2-export",
+        "title": "Nacre v2 export manual",
+        "version": "v2",
+        "url": "https://fixture.invalid/nacre/v2/export"
+      },
+      "exposure": "previously_exposed_diagnostic",
+      "expected": {
+        "relation": "full_support"
+      }
+    },
+    {
+      "id": "relation-boundary-14",
+      "pairId": "attribution",
+      "proposition": "An independent implementation test established that Nacre v2 exports records as JSON.",
+      "quote": "Only this manual is supplied; no independent implementation measurements are available.",
+      "sourceText": "Nacre v2 export manual. Nacre v2 exports records as JSON. Only this manual is supplied; no independent implementation measurements are available.",
+      "source": {
+        "id": "nacre-v2-export",
+        "title": "Nacre v2 export manual",
+        "version": "v2",
+        "url": "https://fixture.invalid/nacre/v2/export"
+      },
+      "exposure": "previously_exposed_diagnostic",
+      "expected": {
+        "relation": "not_addressed"
+      }
+    },
+    {
+      "id": "v8-relation-boundary-15",
+      "pairId": "empty-candidates",
+      "proposition": "When connected to its server, Nacre v2 can export records as JSON.",
+      "quote": "When connected to its server, Nacre v2 can export records as JSON.",
+      "sourceText": "Nacre v2 export reference. When connected to its server, Nacre v2 can export records as JSON.",
+      "source": {
+        "id": "nacre-v2-json",
+        "version": "v2",
+        "title": "nacre-v2-json",
+        "url": "https://fixture.invalid/nacre/v2/nacre-v2-json"
+      },
+      "exposure": "exposed_development_diagnostic",
+      "expected": {
+        "relation": "full_support"
+      },
+      "initialCandidates": []
+    },
+    {
+      "id": "v8-relation-boundary-16",
+      "pairId": "empty-candidates",
+      "proposition": "Nacre v2 can export records while disconnected from its server.",
+      "quote": "When disconnected from its server, Nacre v2 cannot export records.",
+      "sourceText": "Nacre v2 export reference. When disconnected from its server, Nacre v2 cannot export records.",
+      "source": {
+        "id": "nacre-v2-offline",
+        "version": "v2",
+        "title": "nacre-v2-offline",
+        "url": "https://fixture.invalid/nacre/v2/nacre-v2-offline"
+      },
+      "exposure": "exposed_development_diagnostic",
+      "expected": {
+        "relation": "contradiction"
+      },
+      "initialCandidates": []
+    },
+    {
+      "id": "v8-relation-boundary-17",
+      "pairId": "publisher",
+      "proposition": "The Nacre Foundation states that Nacre v1 supports only one concurrent writer.",
+      "quote": "The Nacre Foundation states: Nacre v1 supports only one concurrent writer.",
+      "sourceText": "Nacre Foundation compatibility note. The Nacre Foundation states: Nacre v1 supports only one concurrent writer.",
+      "source": {
+        "id": "nacre-foundation-note",
+        "version": "v1",
+        "title": "nacre-foundation-note",
+        "url": "https://fixture.invalid/nacre/v1/nacre-foundation-note",
+        "publisher": "Nacre Foundation"
+      },
+      "exposure": "exposed_development_diagnostic",
+      "expected": {
+        "relation": "full_support"
+      },
+      "kind": "attribution"
+    },
+    {
+      "id": "v8-relation-boundary-18",
+      "pairId": "publisher",
+      "proposition": "The Nacre Foundation states that Nacre v1 supports only one concurrent writer.",
+      "quote": "Independent Review Lab states: Nacre v1 supports only one concurrent writer.",
+      "sourceText": "This compatibility note was authored by Independent Review Lab, which is independent of the Nacre Foundation. Independent Review Lab states: Nacre v1 supports only one concurrent writer. This note does not describe any statement issued by the Nacre Foundation.",
+      "source": {
+        "id": "independent-lab-note",
+        "version": "v1",
+        "title": "independent-lab-note",
+        "url": "https://fixture.invalid/nacre/v1/independent-lab-note",
+        "publisher": "Independent Review Lab"
+      },
+      "exposure": "exposed_development_diagnostic",
+      "expected": {
+        "relation": "not_addressed"
+      },
+      "kind": "attribution"
+    },
+    {
+      "id": "v8-relation-boundary-19",
+      "pairId": "presentation-support",
+      "proposition": "Nacre v2 exports records as JSON while connected to its server.",
+      "quote": "Nacre v2 exports records as JSON while connected to its server.",
+      "sourceText": "Nacre v2 export reference. Nacre v2 exports records as JSON while connected to its server. Disconnected export is not supported.",
+      "source": {
+        "id": "nacre-v2-json-layout",
+        "version": "v2",
+        "title": "nacre-v2-json-layout",
+        "url": "https://fixture.invalid/nacre/v2/nacre-v2-json-layout"
+      },
+      "exposure": "exposed_development_diagnostic",
+      "expected": {
+        "relation": "full_support"
+      },
+      "presentation": {
+        "report": "Nacre v2 exports records as JSON while connected to its server. [1.1]",
+        "assertionSpan": [
+          0,
+          63
+        ],
+        "requiredContextSpans": [],
+        "citationKey": "1.1"
+      },
+      "metamorphicGroup": "support-presentation",
+      "validationScope": "relation_equivalence_only; extraction_and_binding_are_offline_checks"
+    },
+    {
+      "id": "v8-relation-boundary-20",
+      "pairId": "presentation-support",
+      "proposition": "Nacre v2 exports records as JSON while connected to its server.",
+      "quote": "Nacre v2 exports records as JSON while connected to its server.",
+      "sourceText": "Nacre v2 export reference. Nacre v2 exports records as JSON while connected to its server. Disconnected export is not supported.",
+      "source": {
+        "id": "nacre-v2-json-layout",
+        "version": "v2",
+        "title": "nacre-v2-json-layout",
+        "url": "https://fixture.invalid/nacre/v2/nacre-v2-json-layout"
+      },
+      "exposure": "exposed_development_diagnostic",
+      "expected": {
+        "relation": "full_support"
+      },
+      "presentation": {
+        "report": "## Nacre v2 exports records as JSON while connected to its server. [4.2]",
+        "assertionSpan": [
+          3,
+          66
+        ],
+        "requiredContextSpans": [],
+        "citationKey": "4.2"
+      },
+      "metamorphicGroup": "support-presentation",
+      "validationScope": "relation_equivalence_only; extraction_and_binding_are_offline_checks"
+    },
+    {
+      "id": "v8-relation-boundary-21",
+      "pairId": "presentation-support",
+      "proposition": "Nacre v2 exports records as JSON while connected to its server.",
+      "quote": "Nacre v2 exports records as JSON while connected to its server.",
+      "sourceText": "Nacre v2 export reference. Nacre v2 exports records as JSON while connected to its server. Disconnected export is not supported.",
+      "source": {
+        "id": "nacre-v2-json-layout",
+        "version": "v2",
+        "title": "nacre-v2-json-layout",
+        "url": "https://fixture.invalid/nacre/v2/nacre-v2-json-layout"
+      },
+      "exposure": "exposed_development_diagnostic",
+      "expected": {
+        "relation": "full_support"
+      },
+      "presentation": {
+        "report": "| Product | Connection | Export format |\n| Nacre v2 | Connected to its server | JSON [9.3] |",
+        "assertionSpan": [
+          41,
+          92
+        ],
+        "requiredContextSpans": [
+          [
+            0,
+            40
+          ]
+        ],
+        "citationKey": "9.3"
+      },
+      "metamorphicGroup": "support-presentation",
+      "validationScope": "relation_equivalence_only; extraction_and_binding_are_offline_checks"
+    },
+    {
+      "id": "v8-relation-boundary-22",
+      "pairId": "presentation-absence",
+      "proposition": "Nacre v2 survives every power failure without losing any record.",
+      "quote": "No power failure tests have been conducted.",
+      "sourceText": "Nacre v2 persistence note. No power failure tests have been conducted. This note supplies no measurements of record survival during a power failure.",
+      "source": {
+        "id": "nacre-v2-persistence-layout",
+        "version": "v2",
+        "title": "nacre-v2-persistence-layout",
+        "url": "https://fixture.invalid/nacre/v2/nacre-v2-persistence-layout"
+      },
+      "exposure": "exposed_development_diagnostic",
+      "expected": {
+        "relation": "not_addressed"
+      },
+      "presentation": {
+        "report": "Nacre v2 survives every power failure without losing any record. [2.1]",
+        "assertionSpan": [
+          0,
+          64
+        ],
+        "requiredContextSpans": [],
+        "citationKey": "2.1"
+      },
+      "metamorphicGroup": "absence-presentation",
+      "validationScope": "relation_equivalence_only; extraction_and_binding_are_offline_checks"
+    },
+    {
+      "id": "v8-relation-boundary-23",
+      "pairId": "presentation-absence",
+      "proposition": "Nacre v2 survives every power failure without losing any record.",
+      "quote": "No power failure tests have been conducted.",
+      "sourceText": "Nacre v2 persistence note. No power failure tests have been conducted. This note supplies no measurements of record survival during a power failure.",
+      "source": {
+        "id": "nacre-v2-persistence-layout",
+        "version": "v2",
+        "title": "nacre-v2-persistence-layout",
+        "url": "https://fixture.invalid/nacre/v2/nacre-v2-persistence-layout"
+      },
+      "exposure": "exposed_development_diagnostic",
+      "expected": {
+        "relation": "not_addressed"
+      },
+      "presentation": {
+        "report": "## Nacre v2 survives every power failure without losing any record. [7.4]",
+        "assertionSpan": [
+          3,
+          67
+        ],
+        "requiredContextSpans": [],
+        "citationKey": "7.4"
+      },
+      "metamorphicGroup": "absence-presentation",
+      "validationScope": "relation_equivalence_only; extraction_and_binding_are_offline_checks"
+    },
+    {
+      "id": "v8-relation-boundary-24",
+      "pairId": "presentation-absence",
+      "proposition": "Nacre v2 survives every power failure without losing any record.",
+      "quote": "No power failure tests have been conducted.",
+      "sourceText": "Nacre v2 persistence note. No power failure tests have been conducted. This note supplies no measurements of record survival during a power failure.",
+      "source": {
+        "id": "nacre-v2-persistence-layout",
+        "version": "v2",
+        "title": "nacre-v2-persistence-layout",
+        "url": "https://fixture.invalid/nacre/v2/nacre-v2-persistence-layout"
+      },
+      "exposure": "exposed_development_diagnostic",
+      "expected": {
+        "relation": "not_addressed"
+      },
+      "presentation": {
+        "report": "| Product | Failure condition | Record outcome |\n| Nacre v2 | Every power failure | No record loss [12.5] |",
+        "assertionSpan": [
+          49,
+          107
+        ],
+        "requiredContextSpans": [
+          [
+            0,
+            48
+          ]
+        ],
+        "citationKey": "12.5"
+      },
+      "metamorphicGroup": "absence-presentation",
+      "validationScope": "relation_equivalence_only; extraction_and_binding_are_offline_checks"
+    }
+  ]
+}

@@ -55,26 +55,31 @@ export function countLlmPurposeCalls(trace = []) {
 }
 
 function llmCallTokens(entry = {}) {
-  return Number(entry.tokens ?? entry.totalTokens ?? entry.usage?.totalTokens ?? entry.usage?.total_tokens);
+  return recordedNumber(entry.tokens ?? entry.totalTokens ?? entry.usage?.totalTokens ?? entry.usage?.total_tokens);
 }
 
 function isEvaluationPurpose(purpose = '') {
-  return purpose === 'claim_entailment' || /entailment|evaluat/i.test(purpose);
+  return ['claim_entailment', 'claim_validation', 'narrative_validation'].includes(purpose)
+    || /entailment|evaluat/i.test(purpose);
 }
 
-export function splitLlmCost({ usage = {}, trace = [] } = {}) {
-  const llmTokens = Number(usage.llmTokens) || 0;
-  const searchRequests = Number(usage.searchRequests) || 0;
-  const sourceReads = Number(usage.sourceReads) || 0;
-  const usageExploration = Number(usage.explorationTokens);
-  const usageReport = Number(usage.reportTokens);
-  const usageEvaluation = Number(usage.evaluationTokens);
+function recordedNumber(value) {
+  return Number.isFinite(value) && value >= 0 ? value : null;
+}
 
-  if ([usageExploration, usageReport, usageEvaluation].some((value) => Number.isFinite(value) && value > 0)) {
+export function splitLlmCost({ usage = {}, trace = [], unknown = {} } = {}) {
+  const llmTokens = recordedNumber(usage.llmTokens);
+  const searchRequests = recordedNumber(usage.searchRequests);
+  const sourceReads = recordedNumber(usage.sourceReads);
+  const usageExploration = recordedNumber(usage.explorationTokens);
+  const usageReport = recordedNumber(usage.reportTokens);
+  const usageEvaluation = recordedNumber(usage.evaluationTokens);
+
+  if ([usageExploration, usageReport, usageEvaluation].some((value) => value !== null)) {
     return {
-      explorationTokens: Number.isFinite(usageExploration) ? usageExploration : 0,
-      reportTokens: Number.isFinite(usageReport) ? usageReport : 0,
-      evaluationTokens: Number.isFinite(usageEvaluation) ? usageEvaluation : 0,
+      explorationTokens: usageExploration,
+      reportTokens: usageReport,
+      evaluationTokens: usageEvaluation,
       llmTokens,
       searchRequests,
       sourceReads,
@@ -99,7 +104,7 @@ export function splitLlmCost({ usage = {}, trace = [] } = {}) {
     purpose: String(entry.purpose || entry.reasonCode || ''),
     tokens: llmCallTokens(entry),
   }));
-  if (amounts.some((item) => !Number.isFinite(item.tokens))) {
+  if (amounts.some((item) => item.tokens === null || !item.purpose)) {
     return {
       explorationTokens: null,
       reportTokens: null,
@@ -110,20 +115,24 @@ export function splitLlmCost({ usage = {}, trace = [] } = {}) {
     };
   }
 
-  let reportTokens = 0;
-  let evaluationTokens = 0;
-  let explorationTokens = 0;
+  // Trace-derived values describe recorded completed calls. An absent bucket is
+  // known to be zero only when the ledger confirms that these are all calls.
+  const completeCalls = recordedNumber(usage.llmRequests) === completed.length
+    && unknown.llmTokens !== true;
+  let reportTokens = completeCalls ? 0 : null;
+  let evaluationTokens = completeCalls ? 0 : null;
+  let explorationTokens = completeCalls ? 0 : null;
   for (const item of amounts) {
-    if (item.purpose === 'report') reportTokens += item.tokens;
-    else if (isEvaluationPurpose(item.purpose)) evaluationTokens += item.tokens;
-    else explorationTokens += item.tokens;
+    if (item.purpose === 'report') reportTokens = (reportTokens ?? 0) + item.tokens;
+    else if (isEvaluationPurpose(item.purpose)) evaluationTokens = (evaluationTokens ?? 0) + item.tokens;
+    else explorationTokens = (explorationTokens ?? 0) + item.tokens;
   }
 
   return {
     explorationTokens,
     reportTokens,
     evaluationTokens,
-    llmTokens: llmTokens || (explorationTokens + reportTokens + evaluationTokens),
+    llmTokens,
     searchRequests,
     sourceReads,
   };
@@ -136,7 +145,7 @@ export function extractRunStats(artifacts, { wallClockDurationMs = null } = {}) 
   const traceDurationMs = durationFromTrace(artifacts.trace);
   const durationMs = Number.isFinite(wallClockDurationMs) ? wallClockDurationMs : traceDurationMs;
   const llmPurposes = countLlmPurposeCalls(artifacts.trace);
-  const tokenSplit = splitLlmCost({ usage, trace: artifacts.trace });
+  const tokenSplit = splitLlmCost({ usage, trace: artifacts.trace, unknown: budget.unknown });
   const expectedSlots = artifacts.brief?.requiredAnswerSlots || [];
   const materializedSlotIds = new Set((artifacts.gaps || []).map((gap) => gap.contractSlotId).filter(Boolean));
   const dedupTraces = (artifacts.trace || []).filter((entry) => (
@@ -177,11 +186,12 @@ export function extractRunStats(artifacts, { wallClockDurationMs = null } = {}) 
     || (entry.action === 'search' && (Number(entry.newUrlCount) > 0 || Number(entry.resultCount) > 0))
   ));
   const lastEvidenceTokens = successfulEvidenceEntries.length
-    ? Number(successfulEvidenceEntries.at(-1)?.budgetAfter?.usage?.llmTokens) || 0
-    : 0;
-  const zeroEvidenceTailTokens = tokenSplit.explorationTokens == null
+    ? recordedNumber(successfulEvidenceEntries.at(-1)?.budgetAfter?.usage?.explorationTokens)
+    : null;
+  const zeroEvidenceTailTokens = tokenSplit.explorationTokens == null || lastEvidenceTokens == null
+    || budget.unknown?.explorationTokens === true
     ? null
-    : Math.max(0, Number(tokenSplit.explorationTokens) - lastEvidenceTokens);
+    : Math.max(0, tokenSplit.explorationTokens - lastEvidenceTokens);
   const relevanceFunnel = {
     returnedCandidates: Number(relevance.returnedCandidates) || 0,
     siteRejected: Number(relevance.siteRejected) || 0,
@@ -208,7 +218,7 @@ export function extractRunStats(artifacts, { wallClockDurationMs = null } = {}) 
     stopDetail: quality.stopDetail || budget.controllerStopDetail || null,
     minLlmTokens: budget.minLlmTokens || budget.targetLlmTokens || null,
     targetLlmTokens: budget.minLlmTokens || budget.targetLlmTokens || null,
-    actualLlmTokens: usage.llmTokens ?? 0,
+    actualLlmTokens: recordedNumber(usage.llmTokens),
     unusedFloorTokens: budget.unusedMinTokens ?? null,
     unusedHardCapTokens: budget.unusedHardCapTokens ?? null,
     unusedBudgetTokens: budget.unusedBudgetTokens
@@ -218,18 +228,20 @@ export function extractRunStats(artifacts, { wallClockDurationMs = null } = {}) 
           ? Math.max(0, budget.limits.llmTokens - usage.llmTokens)
           : null)),
     cost: {
-      llmRequests: usage.llmRequests ?? 0,
-      llmTokens: usage.llmTokens ?? 0,
+      llmRequests: recordedNumber(usage.llmRequests),
+      llmTokens: recordedNumber(usage.llmTokens),
       explorationTokens: tokenSplit.explorationTokens,
       reportTokens: tokenSplit.reportTokens,
       evaluationTokens: tokenSplit.evaluationTokens,
-      searchRequests: usage.searchRequests ?? 0,
-      sourceReads: usage.sourceReads ?? 0,
-      rerankRequests: usage.rerankRequests ?? 0,
-      rerankTokens: usage.rerankTokens ?? 0,
-      rerankTokensUnknown: budget.unknown?.rerankTokens ?? false,
-      estimatedCost: usage.estimatedCost ?? null,
-      estimatedCostUnknown: budget.unknown?.estimatedCost ?? true,
+      searchRequests: recordedNumber(usage.searchRequests),
+      sourceReads: recordedNumber(usage.sourceReads),
+      rerankRequests: recordedNumber(usage.rerankRequests),
+      rerankTokens: recordedNumber(usage.rerankTokens),
+      rerankTokensUnknown: budget.unknown?.rerankTokens === true || recordedNumber(usage.rerankTokens) === null,
+      estimatedCost: budget.unknown?.estimatedCost === true ? null : recordedNumber(usage.estimatedCost),
+      estimatedCostUnknown: budget.unknown?.estimatedCost === true || recordedNumber(usage.estimatedCost) === null,
+      unknownUsage: { ...(budget.unknown || {}) },
+      costIsLowerBound: budget.unknown?.llmTokens === true || (budget.reservations || []).length > 0,
     },
     slotMaterialization: {
       expected: expectedSlots.length,

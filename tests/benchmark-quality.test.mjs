@@ -1,3 +1,4 @@
+import { bindingResponse } from './helpers/quality-relations.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -34,14 +35,14 @@ test('gold evidence IDs identify exact anchors, independently of criterion IDs',
   assert.equal(context[0].criterionId, 'criterion');
   assert.deepEqual(context[0].evidence.map(e => [e.id, e.text]), [['G1', 'ab'], ['G2', 'def']]);
 });
-test('calibration refuses cached judgments from a different identity or fixture', async t => {
+test('legacy calibration entry cannot bypass the full suite contract', async t => {
   const dir = temp(t), fixture = JSON.parse(fs.readFileSync('tests/fixtures/research-quality/calibration.json'));
   const holdoutFile = path.join(dir, 'holdout.json');
   writeJson(holdoutFile, { judgeVersion: JUDGE_VERSION, cases: Array.from({ length: 20 }, (_, i) => ({
     id: 'new-' + i, split: 'holdout', report: 'Uncalled cache validation fixture ' + i, expectedTruth: 'unverifiable',
   })) });
   writeJson(path.join(dir, `${fixture.cases[0].id}.json`), { calibrationIdentity: { judgeVersion: 'old' } });
-  await assert.rejects(calibrate({ directory: dir, identity: {}, holdoutFile, llm: { completeWithMetadata() { throw Error('must not call'); } } }), /inputs changed/);
+  await assert.rejects(calibrate({ directory: dir, identity: {}, holdoutFile, llm: { completeWithMetadata() { throw Error('must not call'); } } }), /versioned suite/);
 });
 test('multiple diagnosis stages require body and claim observations individually', () => {
   const failures = ['adjudication_error', 'render_semantic_error'].map(stage => ({ stage, contextIds: ['body'], claimIds: ['claim'], confidence: 'medium' }));
@@ -78,12 +79,12 @@ function scoring() {
     facts: ['a', 'b'].map(id => ({ id, truth: 'correct', majorError: false, citations: [{ key: '1.1', verdict: 'supported' }] })) };
   return { gold, facts, judgments, requirements: [{ id: 'req' }] };
 }
-test('fully correct independent evidence reaches quality target but is not human reviewed', () => {
-  const s = aggregateScore(scoring()); assert.equal(s.metrics.correctCoverage, 1); assert.equal(s.qualityTargetMet, true); assert.equal(s.reviewStatus, 'machine_draft');
+test('controlled correct judgments reach model thresholds but are not human reviewed', () => {
+  const s = aggregateScore(scoring()); assert.equal(s.metrics.correctCoverage, 1); assert.equal(s.modelThresholdsMet, true); assert.equal(s.reviewStatus, 'machine_draft');
 });
 test('deleting half the answer reduces coverage even with perfect citations', () => {
   const x = scoring(); x.facts.pop(); x.judgments.facts.pop(); Object.assign(x.judgments.criteria[1], { verdict: 'missing', factIds: [] });
-  const s = aggregateScore(x); assert.equal(s.metrics.correctCoverage, 0.5); assert.equal(s.metrics.citationSupportRate, 1); assert.equal(s.qualityTargetMet, false);
+  const s = aggregateScore(x); assert.equal(s.metrics.correctCoverage, 0.5); assert.equal(s.metrics.citationSupportRate, 1); assert.equal(s.modelThresholdsMet, false);
 });
 test('adding an unverifiable uncited assertion reduces strict fact accuracy', () => {
   const x = scoring(); x.facts.push({ id: 'extra', citationKeys: [] }); x.judgments.facts.push({ id: 'extra', truth: 'unverifiable', citations: [], majorError: false });
@@ -91,7 +92,7 @@ test('adding an unverifiable uncited assertion reduces strict fact accuracy', ()
 });
 test('empty report has zero coverage and N/A accuracy, never passes', () => {
   const x = scoring(); x.facts = []; x.judgments.facts = []; x.judgments.criteria.forEach(c => Object.assign(c, { verdict: 'missing', factIds: [] }));
-  const s = aggregateScore(x); assert.equal(s.metrics.correctCoverage, 0); assert.equal(s.metrics.strictFactAccuracy, null); assert.equal(s.metrics.citationSupportRate, null); assert.equal(s.qualityTargetMet, false);
+  const s = aggregateScore(x); assert.equal(s.metrics.correctCoverage, 0); assert.equal(s.metrics.strictFactAccuracy, null); assert.equal(s.metrics.citationSupportRate, null); assert.equal(s.modelThresholdsMet, false);
 });
 test('wrong version/decisive condition overrides an optimistic criterion matcher', () => {
   const x = scoring(); x.judgments.facts[0].truth = 'incorrect'; x.judgments.facts[0].majorError = true;
@@ -114,7 +115,7 @@ test('pending evaluator verdict produces bounds and no final pass', () => {
 });
 test('undiscussed conflicts remain unresolved', () => {
   const x = scoring(); x.gold.criteria[0].conflictCase = 'historical versus current'; x.judgments.criteria[0].conflict = 'missing';
-  assert.equal(aggregateScore(x).metrics.conflictResolutionRate, 0); assert.equal(aggregateScore(x).qualityTargetMet, false);
+  assert.equal(aggregateScore(x).metrics.conflictResolutionRate, 0); assert.equal(aggregateScore(x).modelThresholdsMet, false);
 });
 test('resolved version distinction is accepted without treating all differing texts as false', () => {
   const x = scoring(); x.gold.criteria[0].conflictCase = 'historical versus current'; x.judgments.criteria[0].conflict = 'resolved';
@@ -213,9 +214,10 @@ test('changed manifest hash and result revision fail closed', t => {
 test('full report extraction includes uncited table/summary and checks every block', async () => {
   const report = '# Title\n\nA is one.\n\n| B | two |';
   const judge = { ask: async (purpose, instruction, input, validate) => {
+    if (purpose === 'audit_bindings') { const result = bindingResponse(input); validate(result); return result; }
     const result = purpose === 'audit_extraction' ? { blocks: input.blocks.map(b => ({ id: b.id,
-      checks: b.units.map(u => ({ id: u.id, status: b.facts.length ? 'covered' : 'non_assertion', factIndexes: b.facts.length ? [0] : [] })) })) }
-      : { blocks: input.blocks.map(b => ({ id: b.id, classification: b.text.startsWith('#') ? 'heading' : 'content', facts: b.text.startsWith('#') ? [] : [{ quote: b.text, proposition: b.text, kind: 'fact', citationKeys: [] }] })) };
+      checks: b.units.map(u => ({ id: u.id, status: b.facts.length ? 'covered' : 'non_assertion', factIds: b.facts.map(f => f.id) })) })) }
+      : { blocks: input.blocks.map(b => ({ id: b.id, classification: b.text.startsWith('#') ? 'heading' : 'content', facts: b.text.startsWith('#') ? [] : [{ quote: b.text, unitId: b.locator.units[0].id, proposition: b.text, kind: 'fact', citationKeys: [] }] })) };
     validate(result); return result;
   } };
   const result = await extractReportFacts(report, judge); assert.equal(result.extraction.length, reportBlocks(report).length); assert.equal(result.facts.length, 2); assert.deepEqual(result.facts[1].citationKeys, []);

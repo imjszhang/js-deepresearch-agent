@@ -141,7 +141,7 @@ test('literal quotes do not certify candidates; an unsupported half cannot be de
  assert.equal(graph.bindings.every(b => b.adequacy === 'verified'), false);
  assert.throws(() => normalizeClaimCandidates([{ proposition: 'invented', kind: 'source_attributed', conditions: [], quote: 'invented', supportingPassageIds: ['missing'] }], []), /Unanchored/);
 });
-test('partial task renders its verified atomic conclusion and keeps the unresolved facet', async () => {
+test('[V22] partial task renders its verified atomic conclusion and keeps the unresolved facet', async () => {
  const { store, gaps } = fixture();
  const budget = new BudgetManager({ research: { report: { maxOutputTokens: 16000 } } });
  const result = await finalizeCanonicalReport({ llm: checker(), emit() {}, recorder: recorderOrNoop(), budget,
@@ -171,7 +171,7 @@ test('unchanged dependencies and irrelevant bodies cause zero new semantic valid
  query: 'Atlas license and memory', llm, cache, validationProtocolVersion: 999 });
  assert.equal(calls, 3);
 });
-test('new related counter-evidence invalidates cached judgments and cannot coexist with supported', async () => {
+test('[V22] new related counter-evidence invalidates cached judgments and cannot coexist with supported', async () => {
  const { store, gaps } = fixture(); const cache = {};
  await validateResearchClaims({ graph: buildClaimGraph({ gaps, passages: [...store.passages.values()] }), store, gaps, query: 'Atlas license', llm: checker(), cache });
  const other = store.register({ url: 'https://atlas.test/correction', content: 'Atlas version 1 does not use license MIT; the previous license statement is wrong.', fetchStatus: 'ok' }, 'g1');

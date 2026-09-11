@@ -1,0 +1,166 @@
+{
+  "schemaVersion": 3,
+  "judgeVersion": "quality-judge-6",
+  "evaluationSchemaVersion": 4,
+  "scoringVersion": "quality-scoring-2",
+  "roundId": "quality-v6-round-1",
+  "totalTokens": 220000,
+  "wallClockMs": 3600000,
+  "timeoutMs": 180000,
+  "exposureRegistry": {
+    "file": "exposure-registry.json",
+    "hash": "d5fb72e76bf56f10b2d4b1b88c80c5d294876500750cffecfc4fc4a1e12db77c"
+  },
+  "stages": [
+    {
+      "id": "development",
+      "count": 20,
+      "tokens": 60000,
+      "wallClockMs": 900000,
+      "requiredMatches": 20,
+      "mode": "assertions",
+      "fixture": {
+        "file": "development.json",
+        "hash": "04b4e189b542b86fc516e6d7964b3fb8ad75dc88e9149ca001486171e779ec2e"
+      }
+    },
+    {
+      "id": "assertion_holdout",
+      "count": 20,
+      "tokens": 70000,
+      "wallClockMs": 1200000,
+      "requiredMatches": 18,
+      "mode": "assertions",
+      "fixture": {
+        "file": "assertion-holdout.json",
+        "hash": "ecdd4fb3fcd407376561ef3ee47c13dfab7f7d8ed24cee9234f1b535c90b24fd"
+      }
+    },
+    {
+      "id": "scoring_holdout",
+      "count": 14,
+      "tokens": 90000,
+      "wallClockMs": 1500000,
+      "requiredMatches": 14,
+      "mode": "score",
+      "fixture": {
+        "file": "scoring-holdout.json",
+        "hash": "18ba9a8b2ec0289cac06e28ca314a154b1ab3d38a598e9272e9878eb3b43b560"
+      }
+    }
+  ],
+  "pairs": [
+    {
+      "id": "coverage-deletion",
+      "a": "v5-s01a",
+      "b": "v5-s01b",
+      "relations": [
+        {
+          "metric": "correctCoverage",
+          "operator": "gt"
+        },
+        {
+          "metric": "strictFactAccuracy",
+          "operator": "eq"
+        }
+      ]
+    },
+    {
+      "id": "decisive-condition",
+      "a": "v5-s02a",
+      "b": "v5-s02b",
+      "relations": [
+        {
+          "metric": "correctCoverage",
+          "operator": "gt"
+        },
+        {
+          "metric": "majorErrorCount",
+          "operator": "lt"
+        }
+      ]
+    },
+    {
+      "id": "wrong-citation",
+      "a": "v5-s03a",
+      "b": "v5-s03b",
+      "relations": [
+        {
+          "metric": "correctCoverage",
+          "operator": "eq"
+        },
+        {
+          "metric": "evidenceCoverage",
+          "operator": "gt"
+        }
+      ]
+    },
+    {
+      "id": "unsupported-addition",
+      "a": "v5-s04a",
+      "b": "v5-s04b",
+      "relations": [
+        {
+          "metric": "correctCoverage",
+          "operator": "eq"
+        },
+        {
+          "metric": "strictFactAccuracy",
+          "operator": "gt"
+        },
+        {
+          "metric": "factVerificationCoverage",
+          "operator": "gt"
+        }
+      ]
+    },
+    {
+      "id": "main-vs-appendix",
+      "a": "v5-s05a",
+      "b": "v5-s05b",
+      "relations": [
+        {
+          "metric": "correctCoverage",
+          "operator": "gt"
+        },
+        {
+          "metric": "factCount",
+          "operator": "gt"
+        }
+      ]
+    },
+    {
+      "id": "unexplained-version-conflict",
+      "a": "v5-s06a",
+      "b": "v5-s06b",
+      "relations": [
+        {
+          "metric": "correctCoverage",
+          "operator": "gt"
+        },
+        {
+          "metric": "conflictResolutionRate",
+          "operator": "gt"
+        }
+      ]
+    },
+    {
+      "id": "predefined-partial-credit",
+      "a": "v5-s07a",
+      "b": "v5-s07b",
+      "relations": [
+        {
+          "metric": "correctCoverage",
+          "operator": "gt"
+        },
+        {
+          "metric": "strictFactAccuracy",
+          "operator": "eq"
+        }
+      ]
+    }
+  ],
+  "limitations": "Agent-authored and agent-verified, not human blind review. New domains and proposition families avoid direct report reuse; lexical difference alone is not statistical independence.",
+  "locatorVersion": 1,
+  "executionMetricsVersion": 1
+}

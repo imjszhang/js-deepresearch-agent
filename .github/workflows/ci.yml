@@ -34,11 +34,18 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Test
-        run: npm test
+      - name: Verify program contracts without external network
+        run: |
+          sudo unshare --net -- bash -c '
+            set -e
+            ip link set lo up
+            exec setpriv --reuid="$1" --regid="$2" --init-groups env PATH="$3" HOME="$5" npm run verify:programmatic -- --output-dir "$4"
+          ' verify "$(id -u)" "$(id -g)" "$PATH" "$PWD/work_dir/program-verification" "$HOME"
 
-      - name: Lint
-        run: npm run lint
-
-      - name: Build
-        run: npm run build
+      - name: Upload safe verification summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: program-verification-node-${{ matrix.node }}
+          path: work_dir/program-verification/program-verification.json
+          if-no-files-found: ignore

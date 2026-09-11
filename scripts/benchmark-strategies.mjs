@@ -1,17 +1,16 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import '../src/config/bootstrap-env.mjs';
 import {
   FileRunRecorder,
   ResearchRunner,
-  createLlmProvider,
   createWorkSessionDir,
   saveResearchArtifacts,
 } from 'js-deepresearch-engine';
 import { parseArgs, applyResearchFlags } from '../src/cli-utils.mjs';
-import { createServices } from '../src/bootstrap.mjs';
-import { getDb } from '../src/storage/db.mjs';
+import { requireProgramVerification } from './benchmark/quality/program-verification.mjs';
+import { assertIsolatedOutput } from './benchmark/quality/artifact-verification.mjs';
+import { QUALITY_COMMANDS, requireInspectionMode, routeQualityCommand } from './benchmark/quality-command-router.mjs';
 import { compareStrategySessions } from './benchmark/compare-strategies.mjs';
 import {
   DEFAULT_STRATEGY_COMPARE_ORDER,
@@ -34,16 +33,19 @@ if (isCliEntry) {
 }
 
 export async function main(argv) {
+  if (await routeQualityCommand(argv)) return;
   const { args, flags } = parseArgs(argv);
 
-  if (flags.help) {
+  if (flags.help || !argv.length) {
     printHelp();
     return;
   }
+  requireInspectionMode(flags);
 
   if (flags.run) {
-    const query = String(flags.run).trim();
-    if (!query) throw new Error('--run requires a non-empty query string.');
+    if (typeof flags.run !== 'string' || !flags.run.trim()) throw new Error('--run requires a non-empty query string.');
+    if (args.length || flags.sessions || flags['work-dirs'] || flags['research-ids']) throw new Error('--run cannot be combined with existing-result targets.');
+    const query = flags.run.trim();
 
     const presets = parseStrategyList(flags.strategies);
     const { sessions, wallClockByWorkDir } = await runStrategyBenchmark({
@@ -85,22 +87,10 @@ async function buildComparison({
   wallClockByWorkDir = new Map(),
   flags,
 }) {
-  const llmEnabled = !flags['no-llm'];
-  let llm = null;
-
-  if (llmEnabled) {
-    const settings = createServices(getDb()).settingsStore.get();
-    if (settings.llm?.apiKey || settings.llm?.provider === 'ollama') {
-      llm = createLlmProvider(settings);
-    }
-  }
-
   return compareStrategySessions({
     sessions,
     researchIds,
     strictPlatform: flags['strict-platform'] || null,
-    llm,
-    llmEnabled,
     wallClockByWorkDir,
   });
 }
@@ -116,8 +106,14 @@ export async function runStrategyBenchmark({
   if (flags['no-work-dir']) {
     throw new Error('--run mode requires work_dir artifacts. Remove --no-work-dir.');
   }
+  if (!flags['program-verification']) throw new Error('STRATEGY_RUN_REQUIRES_PROGRAM_VERIFICATION');
+  requireProgramVerification(flags['program-verification']);
+  await import('../src/config/bootstrap-env.mjs');
+  const { createServices } = await import('../src/bootstrap.mjs');
+  const { getDb, closeDb } = await import('../src/storage/db.mjs');
   const services = createServices(getDb());
-  let baseSettings = applyResearchFlags(services.settingsStore.get(), flags);
+  const baseSettings = applyResearchFlags(services.settingsStore.get(), flags);
+  closeDb();
   const sessions = [];
   const wallClockByWorkDir = new Map();
 
@@ -188,6 +184,7 @@ function outputComparison(comparison, flags) {
     : formatStrategyCompareMarkdown(comparison);
 
   if (flags.output) {
+    assertIsolatedOutput(flags.output, comparison.runs.map(run => run.benchmark?.artifactVerification?.resultPin?.sessionDir || run.workDir));
     fs.writeFileSync(flags.output, output, 'utf8');
     if (!flags.json) {
       console.error(`Comparison written to ${flags.output}`);
@@ -199,7 +196,7 @@ function outputComparison(comparison, flags) {
 
 function printHelp() {
   console.log(`
-Strategy benchmark comparison (quality, time, cost, strategy contract)
+Strategy comparison (versioned artifacts, recorded cost, runtime diagnostics)
 
 Usage:
   node scripts/benchmark-strategies.mjs --sessions <dir1,dir2,...> [options]
@@ -210,7 +207,12 @@ Modes:
   --sessions <paths>       Compare existing work_dir sessions (comma-separated)
                            Optional label prefix: exploratory=work_dir/exploratory/...
   --research-ids <ids>     Compare archived intel store runs
-  --run <query>            Run multiple strategies on the same query, then compare
+  --run <query>            Run multiple strategies, then inspect; requires --program-verification
+
+Shared quality subcommands:
+  ${QUALITY_COMMANDS.join(', ')}
+  Use score --mode model-observation with a campaign, gold and program verification
+  for independent quality observations, or compare --baseline / --candidate for paired scores.
 
 Strategy presets (--strategies, for --run only):
   quick, focused, exploratory
@@ -219,7 +221,8 @@ Strategy presets (--strategies, for --run only):
 Options:
   --json                   JSON output
   --output <file>          Write report to file
-  --no-llm                 Use stored/schema-v3 evaluations only
+  --no-llm                 Compatibility alias; existing-result comparison is always offline
+  --program-verification  Current verification record required before --run
   --strict-platform <id>   e.g. js-eyes:zhihu
   --strategies <list>      Comma-separated presets for --run mode
 
@@ -234,6 +237,6 @@ Examples:
   node scripts/benchmark-strategies.mjs \\
     --run "Ollama vs llama.cpp for local LLM deployment" \\
     --strategies quick,focused,exploratory \\
-    --no-llm --json
+    --program-verification <record> --json
 `);
 }

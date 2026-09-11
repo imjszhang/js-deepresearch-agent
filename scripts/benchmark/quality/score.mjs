@@ -1,12 +1,13 @@
 import { exactIds, invariant } from './schema.mjs';
 import { isTechnical, isAnswer, isExecutionStatement, STATEMENT_KINDS } from './statements.mjs';
+import { aggregateAssessmentOrigin, modelAssessment } from './verification-contract.mjs';
 
 export const TRUTH = ['correct', 'partial', 'incorrect', 'unverifiable', 'pending_review'];
 export const COVERAGE = ['correct', 'partial', 'incorrect', 'missing', 'pending_review'];
 const points = { correct: 1, partial: 0.5, incorrect: 0, missing: 0, unverifiable: 0, pending_review: 0 };
 const rate = (a, b) => b ? a / b : null;
 
-export function criterionFromChecks(criterion, check) {
+export function criterionFromChecks(criterion, check, source) {
   invariant(['present', 'absent', 'contradicted', 'unknown'].includes(check.answer)
     && typeof check.missingMinor === 'boolean' && Array.isArray(check.factIds), 'Invalid criterion checks');
   const ids = (criterion.qualifiers || []).map((_, index) => `q${index + 1}`);
@@ -20,7 +21,8 @@ export function criterionFromChecks(criterion, check) {
   else if (check.answer === 'contradicted' || check.qualifiers.some(q => q.met === false)) verdict = 'incorrect';
   else verdict = check.missingMinor ? (criterion.partialCredit ? 'partial' : 'incorrect') : 'correct';
   invariant(verdict === 'missing' ? check.factIds.length === 0 : ['pending_review', 'incorrect'].includes(verdict) || check.factIds.length > 0, 'Coverage without facts');
-  return { id: criterion.id, verdict, factIds: check.factIds, conflict, checks: check };
+  return { ...modelAssessment({ id: criterion.id, verdict, factIds: check.factIds, conflict }, source),
+    checks: { ...modelAssessment(check, source), qualifiers: check.qualifiers.map(q => modelAssessment(q, source)) } };
 }
 
 export function validateJudgments(gold, facts, judgments) {
@@ -45,8 +47,10 @@ export function validateJudgments(gold, facts, judgments) {
   }
 }
 
-export function aggregateScore({ gold, facts, judgments, variant = 'explicit', requirements = [], cost = null, humanReview = null, extractionComplete = true }) {
+export function aggregateScore({ gold, facts, judgments, variant = 'explicit', requirements = [], cost = null, humanReview = null, extractionComplete = true,
+  assessmentSource = 'model_assessment', modelObserved = true }) {
   validateJudgments(gold, facts, judgments);
+  const origin = aggregateAssessmentOrigin([...facts, ...judgments.facts, ...judgments.criteria], assessmentSource);
   const factMap = new Map(judgments.facts.map(f => [f.id, f]));
   const rows = gold.criteria.map(c => {
     const j = judgments.criteria.find(j => j.id === c.id);
@@ -55,7 +59,7 @@ export function aggregateScore({ gold, facts, judgments, variant = 'explicit', r
     // A semantic matcher cannot override an independent failed fact verification.
     const value = j.factIds.length && (!c.conflictCase || j.conflict === 'resolved') ? Math.min(points[j.verdict], ...matched.map(f => points[f.truth])) : 0;
     const supported = matched.length > 0 && matched.every(f => f.citations.some(c => c.verdict === 'supported'));
-    return { id: c.id, core: c.core, critical: c.critical, weight: c.weight, verdict: j.verdict,
+    return { origin, id: c.id, core: c.core, critical: c.critical, weight: c.weight, verdict: j.verdict,
       factIds: j.factIds, points: value, evidencePoints: supported ? value : 0, pending,
       conflict: c.conflictCase ? j.conflict : null, requirementIds: c.requirementIds || [] };
   });
@@ -76,14 +80,16 @@ export function aggregateScore({ gold, facts, judgments, variant = 'explicit', r
     || citations.some(c => c.verdict === 'pending_review') || conflict.some(c => c.conflict === 'pending_review');
   const requirementRows = requirements.map(req => {
     const linked = rows.filter(r => r.requirementIds.includes(req.id));
-    return { id: req.id, complete: linked.length > 0 && linked.every(r => r.points === 1 && !r.pending) };
+    return { origin, id: req.id, complete: linked.length > 0 && linked.every(r => r.points === 1 && !r.pending) };
   });
-  const metrics = {
+  const metrics = { origin,
     correctCoverage: coverage(rows, 'points'), evidenceCoverage: coverage(rows, 'evidencePoints'),
     coreCorrectCoverage: coverage(core, 'points'), coreEvidenceCoverage: coverage(core, 'evidencePoints'),
     coverageUpperBound: extractionComplete ? Math.min(1, (rows.reduce((n, r) => n + r.weight * r.points, 0) + pendingWeight) / totalWeight) : 1,
     explicitRequirementCompletion: variant === 'explicit' ? rate(requirementRows.filter(r => r.complete).length, requirementRows.length) : null,
     statementCount: facts.length, statementCountsByKind: Object.fromEntries(STATEMENT_KINDS.map(kind => [kind, facts.filter(f => (f.kind || 'fact') === kind).length])),
+    occurrenceCount: facts.reduce((n, f) => n + (f.occurrences?.length || 1), 0),
+    pendingOccurrenceCount: judgments.facts.reduce((n, f) => n + (f.occurrenceJudgments || [f]).filter(o => o.truth === 'pending_review').length, 0),
     executionStatementErrors: judgments.facts.filter(f => isExecutionStatement(facts.find(x => x.id === f.id)) && f.truth === 'incorrect').length,
     extractionComplete,
     factCount: technical.length, factCounts, strictFactAccuracy: extractionComplete ? rate(factCounts.correct, technical.length) : null,
@@ -96,10 +102,14 @@ export function aggregateScore({ gold, facts, judgments, variant = 'explicit', r
   };
   const coveragePass = variant === 'explicit' ? metrics.correctCoverage >= 0.9 && metrics.evidenceCoverage >= 0.85
     : metrics.coreCorrectCoverage >= 0.8 && metrics.coreEvidenceCoverage >= 0.75;
-  const qualityTargetMet = coveragePass && majorErrors.length === 0 && !pending && metrics.strictFactAccuracy >= 0.95
+  const modelThresholdsMet = !modelObserved ? null : coveragePass && majorErrors.length === 0 && !pending && metrics.strictFactAccuracy >= 0.95
     && metrics.factVerificationCoverage >= 0.95 && metrics.citationSupportRate >= 0.95
     && conflict.every(c => c.conflict === 'resolved') && rows.filter(r => r.critical).every(r => r.evidencePoints === 1);
-  return { metrics, rows, requirementRows, majorErrors, qualityTargetMet,
-    reviewStatus: pending ? 'pending_review' : humanReview?.complete ? 'human_reviewed' : 'machine_draft',
-    humanReview: humanReview || { complete: false, reviewedFactIds: [], reviewedCriterionIds: [] }, cost };
+  const recordedHumanReview = humanReview?.origin === 'human_review' && humanReview.complete === true
+    && typeof humanReview.recordId === 'string' && humanReview.recordId.length > 0
+    && typeof humanReview.reviewerId === 'string' && humanReview.reviewerId.length > 0;
+  return { origin, metrics, rows, requirementRows, majorErrors, modelThresholdsMet,
+    modelAssessment: { origin, observed: modelObserved, modelThresholdsMet, scope: 'scores_given_semantic_judgments' },
+    reviewStatus: pending ? 'pending_review' : recordedHumanReview ? 'human_reviewed' : 'machine_draft',
+    humanReview: recordedHumanReview ? humanReview : { complete: false, reviewedFactIds: [], reviewedCriterionIds: [] }, cost };
 }

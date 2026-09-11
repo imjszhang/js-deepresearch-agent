@@ -8,6 +8,7 @@ import { reviewItems } from '../scripts/benchmark/quality/item-review.mjs';
 import { criterionFromChecks, aggregateScore } from '../scripts/benchmark/quality/score.mjs';
 import { verifyFacts, evaluate } from '../scripts/benchmark/quality/evaluate.mjs';
 import { Judge } from '../scripts/benchmark/quality/judge.mjs';
+import { candidateResponse, decisionResponse, basisAuditResponse, bindingResponse } from './helpers/quality-relations.mjs';
 
 const gold = { goldHash: 'fixture', sources: [{ id: 's', text: 'A supports B.' }], criteria: [
  { id: 'criterion', weight: 1, core: true, critical: true, qualifiers: ['version'], anchors: [{ sourceId: 's', span: [0, 13] }] }] };
@@ -52,43 +53,49 @@ test('duplicate response IDs invalidate the envelope even if a sibling looks val
 
 test('operational facts see execution evidence only, technical facts cannot use those IDs', async () => {
  const inputs = [];
- const judge = { async ask(_, __, input) {
-  inputs.push(input);
-  return { facts: input.facts.map(f => verdict(f.id, input.operational
-   ? { goldEvidenceIds: [], executionEvidenceIds: ['E-execution'] } : {})) };
+ const judge = { async ask(purpose, __, input) {
+  inputs.push({ purpose, input });
+  if (purpose === 'find_evidence') return candidateResponse(input);
+  if (purpose === 'decide_relations') return decisionResponse(input);
+  if (purpose === 'audit_relation_decisions') return basisAuditResponse(input);
+  assert.equal(purpose, 'verify_execution');
+  return { reviews: input.reviews.map(f => ({ id: f.id, mapping: 'exact', fieldId: 'E-execution.completionStatus', assertedValue: 'incomplete' })) };
  } };
  const result = await verifyFacts({ artifact, gold, facts: [fact('tech'), fact('status', 'execution_status')], caseDefinition: {}, judge });
  assert.deepEqual(result.map(f => f.truth), ['correct', 'correct']);
- assert.equal(inputs[0].executionEvidence, undefined); assert.ok(inputs[0].goldEvidence.length);
- assert.equal(inputs[1].goldEvidence, undefined); assert.ok(inputs[1].executionEvidence.length);
+ const technical = inputs.find(i => i.purpose === 'find_evidence').input;
+ const operational = inputs.find(i => i.purpose === 'verify_execution').input;
+ assert.equal(technical.executionEvidence, undefined); assert.ok(technical.materials.length);
+ assert.equal(operational.materials, undefined); assert.ok(operational.executionEvidence.length);
 });
 
 test('correct without checked evidence stays pending after bounded item repair', async () => {
  let calls = 0;
- const judge = { async ask(_, __, input) { calls++; return { facts: input.facts.map(f => verdict(f.id, { goldEvidenceIds: [], executionEvidenceIds: ['E-execution'] })) }; } };
+ const judge = { async ask(_, __, input) { calls++; return { reviews: input.reviews.map(f => ({ id: f.id, mapping: 'exact', fieldId: 'E-execution.completionStatus', assertedValue: 'incomplete' })) }; } };
  const result = await verifyFacts({ artifact, gold, facts: [fact('tech')], caseDefinition: {}, judge });
  assert.equal(calls, 2); assert.equal(result[0].truth, 'pending_review');
 });
 
 test('status-only reports have N/A technical accuracy and zero answer coverage', async () => {
  const judge = { usage: () => ({}), async ask(purpose, _, input) {
+  if (purpose === 'audit_bindings') return bindingResponse(input);
   if (purpose === 'extract') return { blocks: input.blocks.map(b => ({ id: b.id, classification: 'content',
-   facts: [{ quote: b.text, proposition: b.text, kind: 'execution_status', citationKeys: [] }] })) };
+   facts: [{ quote: b.text, unitId: b.locator.units[0].id, proposition: b.text, kind: 'execution_status', citationKeys: [] }] })) };
   if (purpose === 'audit_extraction') return { blocks: input.blocks.map(b => ({ id: b.id,
-   checks: b.units.map(u => ({ id: u.id, status: 'covered', factIndexes: [0] })) })) };
-  assert.equal(purpose, 'verify_facts');
-  return { facts: input.facts.map(f => verdict(f.id, { goldEvidenceIds: [], executionEvidenceIds: ['E-execution'] })) };
+   checks: b.units.map(u => ({ id: u.id, status: 'covered', factIds: [b.facts[0].id] })) })) };
+  assert.equal(purpose, 'verify_execution');
+  return { reviews: input.reviews.map(f => ({ id: f.id, mapping: 'exact', fieldId: 'E-execution.completionStatus', assertedValue: 'incomplete' })) };
  } };
  const score = await evaluate({ artifact, gold, caseDefinition: {}, judge });
  assert.equal(score.metrics.strictFactAccuracy, null); assert.equal(score.metrics.correctCoverage, 0);
- assert.equal(score.qualityTargetMet, false); assert.equal(score.metrics.statementCount, 1);
+ assert.equal(score.modelThresholdsMet, false); assert.equal(score.metrics.statementCount, 1);
 });
 
 test('failed extraction remains visible instead of certifying the extracted subset', () => {
  const score = aggregateScore({ gold, facts: [fact('f')], extractionComplete: false,
  judgments: { facts: [verdict('f')], criteria: [{ id: 'criterion', verdict: 'correct', factIds: ['f'], conflict: 'not_applicable' }] } });
  assert.equal(score.metrics.strictFactAccuracy, null); assert.equal(score.metrics.pendingReview, true);
- assert.equal(score.metrics.coverageUpperBound, 1); assert.equal(score.qualityTargetMet, false);
+ assert.equal(score.metrics.coverageUpperBound, 1); assert.equal(score.modelThresholdsMet, false);
 });
 
 test('judge wall-clock budget survives recovery and blocks new external calls', async t => {

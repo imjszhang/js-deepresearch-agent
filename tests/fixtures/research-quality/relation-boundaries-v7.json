@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "relationAuditVersion": 1,
+  "purpose": "Exposed semantic diagnostics, not a calibration holdout. These explicit cases do not relabel historical calibration oracles.",
+  "cases": [
+    {
+      "id": "relation-boundary-01", "pairId": "measurement",
+      "proposition": "In the recorded Nacre v1 test, every request completed in less than 5 milliseconds.",
+      "quote": "No request latency was measured in the Nacre v1 test.",
+      "sourceText": "Nacre v1 test report. No request latency was measured in the Nacre v1 test. The test only checked output formatting.",
+      "source": { "id": "nacre-v1-test", "version": "v1", "url": "https://fixture.invalid/nacre/v1/test" },
+      "proposedRelation": "contradiction",
+      "expected": { "relation": "not_addressed", "object": "same", "version": "same", "conditions": "compatible", "claimTarget": "property", "evidenceTarget": "document_statement", "coexistence": "can_both_hold", "auditStatus": "pending_review" }
+    },
+    {
+      "id": "relation-boundary-02", "pairId": "measurement",
+      "proposition": "In the recorded Nacre v1 test, every request completed in less than 5 milliseconds.",
+      "quote": "Every request in the Nacre v1 test took at least 8 milliseconds to complete.",
+      "sourceText": "Nacre v1 test report. Every request in the Nacre v1 test took at least 8 milliseconds to complete. Latency was measured from receipt to completion.",
+      "source": { "id": "nacre-v1-test", "version": "v1", "url": "https://fixture.invalid/nacre/v1/test" },
+      "proposedRelation": "contradiction",
+      "expected": { "relation": "contradiction", "object": "same", "version": "same", "conditions": "compatible", "claimTarget": "property", "evidenceTarget": "property", "coexistence": "cannot_both_hold", "auditStatus": "confirmed" }
+    },
+    {
+      "id": "relation-boundary-03", "pairId": "version",
+      "proposition": "Nacre v2 can write records to disk.",
+      "quote": "Nacre v1 cannot write records to disk.",
+      "sourceText": "This manual describes only Nacre v1. Nacre v1 cannot write records to disk. No information about later versions is supplied.",
+      "source": { "id": "nacre-v1-manual", "version": "v1", "url": "https://fixture.invalid/nacre/v1/manual" },
+      "proposedRelation": "contradiction",
+      "expected": { "relation": "not_addressed", "object": "same", "version": "different", "conditions": "compatible", "claimTarget": "property", "evidenceTarget": "property", "coexistence": "can_both_hold", "auditStatus": "pending_review" }
+    },
+    {
+      "id": "relation-boundary-04", "pairId": "version",
+      "proposition": "Nacre v2 can write records to disk.",
+      "quote": "Nacre v2 cannot write records to disk.",
+      "sourceText": "This manual describes Nacre v2. Nacre v2 cannot write records to disk. All records remain exclusively in memory.",
+      "source": { "id": "nacre-v2-manual", "version": "v2", "url": "https://fixture.invalid/nacre/v2/manual" },
+      "proposedRelation": "contradiction",
+      "expected": { "relation": "contradiction", "object": "same", "version": "same", "conditions": "compatible", "claimTarget": "property", "evidenceTarget": "property", "coexistence": "cannot_both_hold", "auditStatus": "confirmed" }
+    },
+    {
+      "id": "relation-boundary-05", "pairId": "guarantee-target",
+      "proposition": "The Nacre v1 safety manual explicitly guarantees that Nacre v1 is safe.",
+      "quote": "This manual explicitly makes no guarantee that Nacre v1 is safe.",
+      "sourceText": "Nacre v1 safety manual. This manual explicitly makes no guarantee that Nacre v1 is safe. No safety tests have been performed.",
+      "source": { "id": "nacre-v1-safety", "version": "v1", "url": "https://fixture.invalid/nacre/v1/safety" },
+      "proposedRelation": "contradiction",
+      "expected": { "relation": "contradiction", "object": "same", "version": "same", "conditions": "compatible", "claimTarget": "document_statement", "evidenceTarget": "document_statement", "coexistence": "cannot_both_hold", "auditStatus": "confirmed" }
+    },
+    {
+      "id": "relation-boundary-06", "pairId": "guarantee-target",
+      "proposition": "Nacre v1 is safe.",
+      "quote": "This manual explicitly makes no guarantee that Nacre v1 is safe.",
+      "sourceText": "Nacre v1 safety manual. This manual explicitly makes no guarantee that Nacre v1 is safe. No safety tests have been performed.",
+      "source": { "id": "nacre-v1-safety", "version": "v1", "url": "https://fixture.invalid/nacre/v1/safety" },
+      "proposedRelation": "contradiction",
+      "expected": { "relation": "not_addressed", "object": "same", "version": "same", "conditions": "compatible", "claimTarget": "property", "evidenceTarget": "document_statement", "coexistence": "can_both_hold", "auditStatus": "pending_review" }
+    },
+    {
+      "id": "relation-boundary-07", "pairId": "same-scope-no-guarantee",
+      "proposition": "Nacre 第一版安全手册明确没有作出安全保证。",
+      "quote": "本手册不对 Nacre 第一版的安全性作出保证。",
+      "sourceText": "Nacre 第一版安全手册。本手册不对 Nacre 第一版的安全性作出保证。该产品尚未经过安全性测试。",
+      "source": { "id": "nacre-v1-safety-zh", "version": "v1", "url": "https://fixture.invalid/nacre/v1/safety-zh" },
+      "proposedRelation": "full_support",
+      "expected": { "relation": "full_support", "object": "same", "version": "same", "conditions": "compatible", "claimTarget": "document_statement", "evidenceTarget": "document_statement", "coexistence": "can_both_hold", "auditStatus": "confirmed" }
+    },
+    {
+      "id": "relation-boundary-08", "pairId": "same-scope-no-guarantee",
+      "proposition": "Nacre 第一版是不安全的。",
+      "quote": "本手册不对 Nacre 第一版的安全性作出保证。",
+      "sourceText": "Nacre 第一版安全手册。本手册不对 Nacre 第一版的安全性作出保证。该产品尚未经过安全性测试。",
+      "source": { "id": "nacre-v1-safety-zh", "version": "v1", "url": "https://fixture.invalid/nacre/v1/safety-zh" },
+      "proposedRelation": "full_support",
+      "expected": { "relation": "not_addressed", "object": "same", "version": "same", "conditions": "compatible", "claimTarget": "property", "evidenceTarget": "document_statement", "coexistence": "can_both_hold", "auditStatus": "pending_review" }
+    },
+    {
+      "id": "relation-boundary-09", "pairId": "conditions",
+      "proposition": "Nacre v2 can export records while connected to its server.",
+      "quote": "When disconnected from its server, Nacre v2 cannot export records.",
+      "sourceText": "Nacre v2 disconnected operation. When disconnected from its server, Nacre v2 cannot export records. Connected export operation is outside the scope of this document.",
+      "source": { "id": "nacre-v2-disconnected", "version": "v2", "url": "https://fixture.invalid/nacre/v2/disconnected" },
+      "proposedRelation": "contradiction",
+      "expected": { "relation": "not_addressed", "object": "same", "version": "same", "conditions": "incompatible", "claimTarget": "property", "evidenceTarget": "property", "coexistence": "can_both_hold", "auditStatus": "pending_review" }
+    },
+    {
+      "id": "relation-boundary-10", "pairId": "conditions",
+      "proposition": "Nacre v2 can export records while disconnected from its server.",
+      "quote": "When disconnected from its server, Nacre v2 cannot export records.",
+      "sourceText": "Nacre v2 disconnected operation. When disconnected from its server, Nacre v2 cannot export records. Connected export operation is outside the scope of this document.",
+      "source": { "id": "nacre-v2-disconnected", "version": "v2", "url": "https://fixture.invalid/nacre/v2/disconnected" },
+      "proposedRelation": "contradiction",
+      "expected": { "relation": "contradiction", "object": "same", "version": "same", "conditions": "compatible", "claimTarget": "property", "evidenceTarget": "property", "coexistence": "cannot_both_hold", "auditStatus": "confirmed" }
+    },
+    {
+      "id": "relation-boundary-11", "pairId": "support-extent",
+      "proposition": "Nacre v2 exports records as JSON.",
+      "quote": "Nacre v2 exports records as JSON.",
+      "sourceText": "Nacre v2 export reference. Nacre v2 exports records as JSON. The manual contains no information about CSV export.",
+      "source": { "id": "nacre-v2-export", "version": "v2", "url": "https://fixture.invalid/nacre/v2/export" },
+      "proposedRelation": "full_support",
+      "expected": { "relation": "full_support", "object": "same", "version": "same", "conditions": "compatible", "claimTarget": "property", "evidenceTarget": "property", "coexistence": "can_both_hold", "auditStatus": "confirmed" }
+    },
+    {
+      "id": "relation-boundary-12", "pairId": "support-extent",
+      "proposition": "Nacre v2 exports records as both JSON and CSV.",
+      "quote": "Nacre v2 exports records as JSON.",
+      "sourceText": "Nacre v2 export reference. Nacre v2 exports records as JSON. The manual contains no information about CSV export.",
+      "source": { "id": "nacre-v2-export", "version": "v2", "url": "https://fixture.invalid/nacre/v2/export" },
+      "proposedRelation": "partial_support",
+      "expected": { "relation": "partial_support", "object": "same", "version": "same", "conditions": "compatible", "claimTarget": "property", "evidenceTarget": "property", "coexistence": "can_both_hold", "auditStatus": "confirmed" }
+    },
+    {
+      "id": "relation-boundary-13", "pairId": "attribution",
+      "proposition": "The Nacre v2 export manual states that records can be exported as JSON.",
+      "quote": "Nacre v2 exports records as JSON.",
+      "sourceText": "Nacre v2 export manual. Nacre v2 exports records as JSON. Only this manual is supplied; no independent implementation measurements are available.",
+      "source": { "id": "nacre-v2-export", "title": "Nacre v2 export manual", "version": "v2", "url": "https://fixture.invalid/nacre/v2/export" },
+      "proposedRelation": "full_support",
+      "expected": { "relation": "full_support", "object": "same", "version": "same", "conditions": "compatible", "claimTarget": "document_statement", "evidenceTarget": "document_statement", "coexistence": "can_both_hold", "auditStatus": "confirmed" }
+    },
+    {
+      "id": "relation-boundary-14", "pairId": "attribution",
+      "proposition": "An independent implementation test established that Nacre v2 exports records as JSON.",
+      "quote": "Only this manual is supplied; no independent implementation measurements are available.",
+      "sourceText": "Nacre v2 export manual. Nacre v2 exports records as JSON. Only this manual is supplied; no independent implementation measurements are available.",
+      "source": { "id": "nacre-v2-export", "title": "Nacre v2 export manual", "version": "v2", "url": "https://fixture.invalid/nacre/v2/export" },
+      "proposedRelation": "full_support",
+      "expected": { "relation": "not_addressed", "object": "same", "version": "same", "conditions": "compatible", "claimTarget": "document_statement", "evidenceTarget": "document_statement", "coexistence": "can_both_hold", "auditStatus": "pending_review" }
+    }
+  ]
+}

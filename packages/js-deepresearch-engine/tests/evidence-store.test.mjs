@@ -5,6 +5,14 @@ import { splitContentForPassages } from '../src/research/passage-utils.mjs';
 const body = 'The package is distributed under a permissive license. '.repeat(10);
 const source = (content = body) => ({ url: 'https://docs.example.org/tool', content, fetchStatus: 'ok' });
 
+test('[V22] snippets and summaries cannot create body anchors despite successful status', () => {
+  const store = new EvidenceStore();
+  for (const contentOrigin of ['metadata', 'snippet', 'summary']) assert.equal(store.register({ ...source(), contentOrigin }), null);
+  assert.equal(store.versions.size, 0); assert.equal(store.passages.size, 0);
+  const version = store.register(source());
+  assert.ok(version); assert.equal(store.chunks(version.documentVersionId)[0].text, body.trim());
+});
+
 test('document versions and range IDs are immutable; associations do not duplicate bodies', () => {
   const store = new EvidenceStore();
   const one = store.register(source(), 'a');

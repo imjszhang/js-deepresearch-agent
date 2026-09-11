@@ -25,7 +25,8 @@
     "intel:inspect": "node scripts/intel/inspect.mjs",
     "wiki:compile": "node scripts/wiki/compile.mjs",
     "lint": "eslint .",
-    "benchmark:quality": "node scripts/benchmark-quality.mjs"
+    "benchmark:quality": "node scripts/benchmark-quality.mjs",
+    "verify:programmatic": "node scripts/benchmark-quality.mjs verify-program"
   },
   "keywords": [
     "deep-research",

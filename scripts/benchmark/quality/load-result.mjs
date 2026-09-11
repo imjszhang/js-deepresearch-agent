@@ -27,7 +27,7 @@ export function citedEvidence(artifact) {
     if (!entry) return { key, resolved: false, passages: [] };
     const ids = entry.passageIds || (entry.passageId ? [entry.passageId] : []);
     const passages = ids.map(id => store.passages.get(id)).filter(Boolean).map(p => ({ id: p.id,
-      documentVersionId: p.documentVersionId, startChar: p.startChar, endChar: p.endChar, text: p.text,
+      documentVersionId: p.documentVersionId, sourceId: store.versions.get(p.documentVersionId)?.sourceId, startChar: p.startChar, endChar: p.endChar, text: p.text,
       url: store.versions.get(p.documentVersionId)?.url }));
     return { key, resolved: ids.length > 0 && passages.length === ids.length, passages };
   });

@@ -1,7 +1,7 @@
 import { ResearchRunner } from './helpers/legacy-research-runner.mjs';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { SearchProviderError } from '../src/index.mjs';
+import { SearchProviderError, registerContentFetchHandler, resetContentFetchHandlers } from '../src/index.mjs';
 import { fallbackAdaptiveAction } from '../src/research/adaptive/agent-policy.mjs';
 import { evaluateReadinessGate } from '../src/research/adaptive/readiness-gate.mjs';
 import { inferResearchProfile } from '../src/research/adaptive/research-profile.mjs';
@@ -743,8 +743,17 @@ describe('exploratory Search-Read-Reason loop', () => {
     assert.ok(result.quality.budget.usage.searchRequests >= 1);
   });
 
-  it('recovers from duplicate queries by reading or stopping instead of numeric suffixes', async () => {
+  it('recovers from duplicate queries by reading or stopping instead of numeric suffixes', async (t) => {
     const queries = [];
+    const bodyReads = [];
+    const body = 'Open topic space evidence from a selected source with enough body text. The source documents the topic so duplicate-query recovery can read it.';
+    // Full mode rereads the selected URL even when the search result carries content.
+    registerContentFetchHandler(async (url) => {
+      bodyReads.push(url);
+      assert.equal(url, 'https://topic.test/page');
+      return { status: 'ok', title: 'Body', content: body, backend: 'fixture' };
+    });
+    t.after(resetContentFetchHandlers);
     const decisions = [
       { action: 'search', query: 'open topic space', gapId: 'gap-1', reasonCode: 'search' },
       { action: 'search', query: 'open topic space', gapId: 'gap-1', reasonCode: 'repeat' },
@@ -767,7 +776,7 @@ describe('exploratory Search-Read-Reason loop', () => {
           return [{
             title: 'Body',
             url: 'https://topic.test/page',
-            content: 'Open topic space evidence from a selected source with enough body text.',
+            content: body,
             fetchStatus: 'ok',
           }];
         },
@@ -779,6 +788,9 @@ describe('exploratory Search-Read-Reason loop', () => {
       entry.status === 'rejected'
       && ['duplicate_query', 'duplicate_results', 'repeat_action'].includes(entry.reasonCode)
     )) || result.trace.some((entry) => entry.action === 'read'));
+    assert.ok(bodyReads.length > 0);
+    assert.ok(bodyReads.every(url => url === 'https://topic.test/page'));
+    assert.ok(result.trace.some(entry => entry.action === 'read' && entry.successfulBodies > 0));
   });
 
   it('stops with repair_exhausted well before the hard cap when recovery cannot produce a valid query', async () => {
