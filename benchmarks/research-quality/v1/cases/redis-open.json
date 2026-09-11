@@ -1,0 +1,9 @@
+{
+  "id": "redis-open",
+  "topicId": "redis",
+  "variant": "open",
+  "query": "截至 2025 年 5 月 31 日，调研 Redis 从 7.2 到 8.0 的许可证演变，以及理解这些变化时容易混淆的地方。",
+  "language": "zh-CN",
+  "scope": "Redis core 7.2.0, 7.4.0, 8.0.0; as of 2025-05-31; licensing facts only",
+  "requirements": []
+}

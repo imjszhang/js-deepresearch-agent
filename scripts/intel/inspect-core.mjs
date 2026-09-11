@@ -1,4 +1,4 @@
-import { getIntelStoreEngine } from '../../src/storage/intel-store.mjs';
+import { getIntelStoreEngine, readArchivedResearch } from '../../src/storage/intel-store.mjs';
 
 function runTimestamp(run) {
   return run.archivedAt || run.last_seen || run.first_seen || '';
@@ -29,14 +29,8 @@ export function showArchivedRun(researchId, engine = getIntelStoreEngine()) {
     throw new Error(`Archived research run not found: ${researchId}`);
   }
 
-  const reportMeta = engine.readSource('research_reports', { name: researchId });
-  const findings = engine.readSource('research_findings', { entity_id: researchId }) || [];
-  const sources = engine.readSource('research_sources', { entity_id: researchId }) || [];
-  const safeCount = (name) => {
-    try { return (engine.readSource(name, { entity_id: researchId }) || []).length; } catch { return 0; }
-  };
-  let quality = null;
-  try { quality = engine.readSource('research_quality', { name: researchId }); } catch { /* v2 */ }
+  const archived = readArchivedResearch(researchId, engine);
+  const { reportMeta, findings, sources, quality } = archived;
 
   return {
     researchId: run.name,
@@ -48,9 +42,9 @@ export function showArchivedRun(researchId, engine = getIntelStoreEngine()) {
     reportLength: reportMeta?.reportLength ?? run.reportLength,
     findingsCount: findings.length,
     sourcesCount: sources.length,
-    gapsCount: safeCount('research_gaps'),
-    passagesCount: safeCount('research_passages'),
-    claimsCount: safeCount('research_claims'),
+    gapsCount: archived.gaps?.length || 0,
+    passagesCount: archived.passages?.length || 0,
+    claimsCount: archived.claims?.length || 0,
     qualityGate: quality?.gate ?? null,
     archiveSchemaVersion: run.archiveSchemaVersion ?? 2,
     archivedAt: run.archivedAt ?? run.last_seen ?? run.first_seen,
@@ -59,7 +53,7 @@ export function showArchivedRun(researchId, engine = getIntelStoreEngine()) {
 }
 
 export function listArchivedSources(researchId, engine = getIntelStoreEngine(), { limit = 20 } = {}) {
-  const sources = engine.readSource('research_sources', { entity_id: researchId }) || [];
+  const sources = readArchivedResearch(researchId, engine).sources || [];
   return sources.slice(0, limit).map((source) => {
     const rest = { ...source };
     for (const key of ['_post_id', '_entity_id', 'dedup_id']) delete rest[key];
@@ -73,7 +67,7 @@ export function listArchivedSources(researchId, engine = getIntelStoreEngine(), 
 }
 
 export function listArchivedFindings(researchId, engine = getIntelStoreEngine(), { limit = 20 } = {}) {
-  const findings = engine.readSource('research_findings', { entity_id: researchId }) || [];
+  const findings = readArchivedResearch(researchId, engine).findings || [];
   return [...findings]
     .sort((a, b) => (a._seq ?? 0) - (b._seq ?? 0))
     .slice(0, limit)

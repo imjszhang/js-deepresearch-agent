@@ -1,165 +1,154 @@
-import {
-  CLAIM_EVALUATION_VERSION,
-  buildClaimEvaluation,
-  normalizeClaim,
-} from 'js-deepresearch-engine';
+import fs from 'node:fs';
+import path from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
+import { EvidenceStore, parseCitations, readArtifactManifest } from 'js-deepresearch-engine';
 import { loadArtifacts, loadArtifactsByResearchId } from './load-artifacts.mjs';
-import { buildCitationMap } from './citations.mjs';
-import { extractClaims } from './claims.mjs';
-import { scoreClaimRule, summarizeFindingsHealth } from './rule-score.mjs';
-import { judgeClaimWithLlm } from './llm-judge.mjs';
-import { aggregateBenchmark } from './aggregate.mjs';
+import { summarizeFindingsHealth } from './rule-score.mjs';
+import { verifyArtifact, ARTIFACT_VERIFICATION_VERSION } from './quality/artifact-verification.mjs';
+import { loadResult, citedEvidence } from './quality/load-result.mjs';
+import { hash } from './quality/schema.mjs';
 
-function schemaV3Rule(claim, artifacts, strictPlatform) {
-  const evidence = Array.isArray(claim.evidence) ? claim.evidence : [];
-  const citationKeys = claim.citationKeys?.length
-    ? claim.citationKeys
-    : evidence.map((entry) => entry.passageId).filter(Boolean);
-  const unresolvedCitations = [
-    ...(claim.unresolvedCitationKeys || []),
-    ...evidence
-      .filter((entry) => entry.passageId && !artifacts.passages?.some((passage) => passage.id === entry.passageId))
-      .map((entry) => entry.passageId),
-  ];
-  const resolvedSources = (claim.citedSourceIds?.length ? claim.citedSourceIds : evidence.map((entry) => entry.sourceId))
-    .filter(Boolean)
-    .map((sourceId) => ({
-      key: sourceId,
-      source: artifacts.sources.find((source) => source.id === sourceId) || {},
-      passage: artifacts.passages?.find((passage) => passage.sourceId === sourceId) || null,
-    }));
-  const borrowedEvidence = evidence.filter((entry) => (
-    claim.citedSourceIds?.length && !claim.citedSourceIds.includes(entry.sourceId)
-  ));
-  const flags = [...new Set([
-    ...(claim.flags || []),
-    ...(unresolvedCitations.length ? ['unresolved_citation'] : []),
-    ...(borrowedEvidence.length ? ['borrowed_uncited_source'] : []),
-  ])];
-  return {
-    claim,
-    flags,
-    hasCitations: citationKeys.length > 0,
-    citationKeys,
-    unresolvedCitations,
-    resolvedSources,
-    platformMatch: !strictPlatform || resolvedSources.every((entry) => !entry.source.engine || entry.source.engine === strictPlatform),
-    keywordOverlap: null,
-  };
+export const BENCHMARK_SCHEMA_VERSION = 2;
+
+function migrationError() {
+  const error = new Error('Legacy live judging has been removed. Use benchmark:quality score --mode model-observation --program-verification <file> for an explicit independent model observation.');
+  error.code = 'BENCHMARK_MODEL_OBSERVATION_REQUIRED';
+  return error;
 }
 
-function evaluationFromLegacyRule(claim, rule) {
-  let verdict = 'unverifiable';
-  if (rule.resolvedSources.length > 0) {
-    verdict = rule.citationsResolved && rule.sourcesComplete && rule.keywordOverlap >= 0.2
-      ? 'supported'
-      : 'partially_supported';
+function integrityError(error) {
+  const failure = new Error('Benchmark artifact integrity verification failed.', { cause: error });
+  failure.code = 'BENCHMARK_ARTIFACT_INTEGRITY_INVALID';
+  return failure;
+}
+
+function incompleteVerification(reason) {
+  return { schemaVersion: ARTIFACT_VERIFICATION_VERSION, origin: 'program_check', status: 'incomplete',
+    scope: 'declared_artifact_integrity', reason, resultPin: null,
+    checks: { manifestAndBodies: null, declaredCitations: null, declaredClaimBindings: null, savedLedgerStructure: null },
+    unavailable: { semanticTruth: true, extractionCompleteness: true, confirmedTokenReceiptSum: true } };
+}
+
+function frozenArtifact(artifacts, archived) {
+  // The archive's committed identity takes precedence over any newer disk pointer.
+  const run = artifacts.run;
+  const paths = artifacts.artifactPaths;
+  const sessionDir = run?.sessionDir || artifacts.workDir || paths?.sessionDir;
+  const manifestPath = run ? run.resultManifestPath : paths?.manifestPath;
+  const resultRevision = run ? run.resultRevision : paths?.resultRevision;
+  if (!sessionDir || !manifestPath || !resultRevision) return {
+    verification: incompleteVerification(archived || run ? 'ARCHIVED_RESULT_PIN_UNAVAILABLE' : 'VERSIONED_MANIFEST_UNAVAILABLE'),
+    loaded: null,
+  };
+  const manifest = readArtifactManifest(sessionDir, manifestPath);
+  if (manifest.resultRevision !== resultRevision) throw new Error('Committed artifact revision mismatch');
+  if (manifest.schemaVersion !== 2) return { verification: incompleteVerification('VERSIONED_EVIDENCE_UNAVAILABLE'), loaded: null };
+  const pin = { sessionDir: path.resolve(sessionDir), manifestPath: path.relative(sessionDir, manifest.manifestPath),
+    manifestHash: hash(fs.readFileSync(manifest.manifestPath)), resultRevision };
+  const loaded = loadResult(pin);
+  if (run) {
+    if (!run.resultSnapshotId || !artifacts.evidenceStore || !artifacts.citationRegistry) return {
+      verification: incompleteVerification('ARCHIVED_SNAPSHOT_EVIDENCE_UNAVAILABLE'), loaded: null,
+    };
+    const arrayFields = ['findings', 'sources', 'gaps', 'passages', 'claims', 'trace'];
+    const projectionFields = [...arrayFields, 'report', 'executionVersion', 'resultRevision', 'quality', 'brief', 'reportContract', 'reportPlan', 'evidenceAppendix'];
+    if (projectionFields.some(field => loaded.result[field] !== undefined && !Object.hasOwn(artifacts, field))) return {
+      verification: incompleteVerification('ARCHIVED_SNAPSHOT_FIELDS_UNAVAILABLE'), loaded: null,
+    };
+    // Compare canonical result fields, not normalized compatibility exports such
+    // as claims.json, brief.json or quality.json. Absent optional empty values
+    // can be normalized legitimately; actual measurements must remain identical.
+    for (const field of projectionFields) {
+      const fallback = arrayFields.includes(field) ? [] : null;
+      if (!isDeepStrictEqual(artifacts[field] ?? fallback, loaded.result[field] ?? fallback)) {
+        throw new Error('Archived result statistics do not match their committed revision');
+      }
+    }
+    if (hash(new EvidenceStore(artifacts.evidenceStore).export()) !== hash(loaded.store.export())
+      || hash(artifacts.citationRegistry) !== hash(loaded.registry)
+      || hash(artifacts.reportPlan ?? null) !== hash(loaded.result.reportPlan ?? null)) {
+      throw new Error('Archived evidence does not match its committed revision');
+    }
   }
-  return {
-    verdict,
-    confidence: verdict === 'supported' ? rule.keywordOverlap : (verdict === 'partially_supported' ? Math.max(0.1, rule.keywordOverlap) : 0),
-    method: 'rules',
-    origin: 'runtime_rule',
-    evaluatedAt: new Date().toISOString(),
-    evaluationVersion: CLAIM_EVALUATION_VERSION,
-    evidenceCounts: {
-      supported: verdict === 'supported' ? 1 : 0,
-      partiallySupported: verdict === 'partially_supported' ? 1 : 0,
-      unsupported: 0,
-      unverifiable: verdict === 'unverifiable' ? 1 : 0,
-    },
-  };
+  // Do not combine an archived/previously loaded report with a different revision.
+  if (typeof artifacts.report === 'string' && artifacts.report !== loaded.report) throw new Error('Loaded report does not match its committed revision');
+  return { verification: verifyArtifact(pin), loaded };
 }
 
-function storedEvaluation(claim) {
-  const evaluation = claim.evaluation || buildClaimEvaluation(claim);
-  return {
-    ...evaluation,
-    origin: evaluation.method === 'llm' ? 'stored_llm' : 'stored_rule',
-    evaluationVersion: evaluation.evaluationVersion,
-  };
-}
-
-function runtimeLlmEvaluation(llmResult, prior) {
-  return {
-    verdict: llmResult.verdict,
-    confidence: llmResult.confidence,
-    method: 'llm',
-    origin: 'runtime_llm',
-    evaluatedAt: new Date().toISOString(),
-    evaluationVersion: CLAIM_EVALUATION_VERSION,
-    evidenceCounts: prior?.evidenceCounts || {},
-  };
-}
-
+/**
+ * Verify observable artifact structure offline. Semantic observation has one
+ * implementation in benchmark:quality; stored verdicts and keyword scores are
+ * deliberately not inputs to this adapter.
+ */
 export async function runBenchmark({
   workDir,
   researchId = null,
   engine = null,
   strictPlatform = null,
+  artifacts: suppliedArtifacts = null,
   llm = null,
-  llmEnabled = true,
-}) {
-  const artifacts = researchId
-    ? loadArtifactsByResearchId(researchId, engine ? { engine } : {})
-    : loadArtifacts(workDir);
-  const citationMap = buildCitationMap(artifacts.findings);
-  const schemaV3 = Array.isArray(artifacts.claims) && artifacts.claims.length > 0;
-  const claims = (schemaV3 ? artifacts.claims : extractClaims(artifacts.report))
-    .map((claim) => normalizeClaim(claim, {
-      origin: schemaV3 ? 'stored_rule' : 'runtime_rule',
-      preserveEvaluation: schemaV3,
-    }));
-  const artifactsHealth = summarizeFindingsHealth(artifacts.findings, artifacts.sources);
-  const claimResults = [];
-  let llmInvoked = false;
-
-  for (const claim of claims) {
-    const rule = schemaV3
-      ? schemaV3Rule(claim, artifacts, strictPlatform)
-      : scoreClaimRule(claim, citationMap, { strictPlatform });
-    const ruleEvaluation = schemaV3 ? storedEvaluation(claim) : evaluationFromLegacyRule(claim, rule);
-    let llmResult = null;
-    let effectiveEvaluation = ruleEvaluation;
-
-    if (llmEnabled && llm && claim.kind === 'key_claim') {
-      llmResult = await judgeClaimWithLlm(claim, rule, llm);
-      if (!llmResult.skipped) {
-        llmInvoked = true;
-        effectiveEvaluation = runtimeLlmEvaluation(llmResult, ruleEvaluation);
-      }
-    }
-
-    claimResults.push({
-      claim,
-      rule,
-      ruleVerdict: ruleEvaluation.verdict,
-      llmVerdict: llmResult?.skipped ? null : (llmResult?.verdict || null),
-      effectiveVerdict: effectiveEvaluation.verdict,
-      evaluationOrigin: effectiveEvaluation.origin,
-      evaluationVersion: effectiveEvaluation.evaluationVersion || CLAIM_EVALUATION_VERSION,
-      effectiveEvaluation,
-      llm: llmResult,
-    });
+  llmEnabled = false,
+} = {}) {
+  if (llmEnabled || llm) throw migrationError();
+  let artifacts, frozen;
+  try {
+    artifacts = suppliedArtifacts || (researchId
+      ? loadArtifactsByResearchId(researchId, engine ? { engine } : {})
+      : loadArtifacts(workDir));
+    frozen = frozenArtifact(artifacts, Boolean(researchId));
+  } catch (error) {
+    throw integrityError(error);
   }
-
-  const result = aggregateBenchmark({
-    meta: artifacts.meta,
-    artifactsHealth,
-    claimResults,
-    llmEnabled: llmEnabled && Boolean(llm),
-    llmInvoked,
-  });
-  const sourceHosts = new Set(artifacts.sources.map((source) => {
-    try { return new URL(source.url).hostname; } catch { return ''; }
+  const result = frozen.loaded?.result || artifacts;
+  const sources = Array.isArray(result.sources) ? result.sources : [];
+  const findings = Array.isArray(result.findings) ? result.findings : [];
+  const report = frozen.loaded?.report ?? artifacts.report ?? '';
+  const observed = field => Boolean(frozen.loaded)
+    || (artifacts.recordedFields?.[field] !== false && result[field] != null);
+  const health = summarizeFindingsHealth(findings, sources);
+  if (!observed('sources')) {
+    health.sourceCount = null;
+    health.enrichment = Object.fromEntries(Object.keys(health.enrichment).map(key => [key, null]));
+    health.flags = health.flags.filter(flag => !['empty_sources', 'enrichment_all_failed', 'no_finding_sources'].includes(flag));
+  }
+  if (!observed('findings')) {
+    for (const field of ['findingCount', 'findingErrors', 'findingsWithSources']) health[field] = null;
+    health.flags = health.flags.filter(flag => !['all_findings_failed', 'no_finding_sources'].includes(flag));
+  }
+  const sourceHosts = new Set(sources.map(source => {
+    try { return new URL(source.url).hostname; } catch { return null; }
   }).filter(Boolean));
-  result.metrics.sourceHostCount = sourceHosts.size;
-  result.metrics.passageCount = artifacts.passages?.length || 0;
-  result.metrics.averageSourcesPerClaim = result.metrics.evaluatedClaimCount
-    ? Number((claims
-      .filter((claim) => claim.kind === 'key_claim')
-      .reduce((sum, claim) => sum + new Set((claim.evidence || []).map((entry) => entry.sourceId)).size, 0)
-      / result.metrics.evaluatedClaimCount).toFixed(4))
-    : null;
-  return result;
+  const citations = frozen.loaded ? citedEvidence(frozen.loaded) : null;
+  const counts = frozen.verification.counts;
+  return {
+    schemaVersion: BENCHMARK_SCHEMA_VERSION,
+    origin: 'program_check',
+    query: artifacts.meta?.query || result.query || null,
+    strategy: artifacts.meta?.strategy || result.strategy || null,
+    researchId: researchId || artifacts.meta?.researchId || null,
+    llmEnabled: false,
+    evaluation: { mode: 'artifact-verification', llmEnabled: false, llmInvoked: false,
+      usedStoredRule: false, usedStoredLlm: false, usedRuntimeRule: false, usedRuntimeLlm: false },
+    artifactVerification: frozen.verification,
+    modelAssessment: { origin: 'model_assessment', observed: false, modelThresholdsMet: null, reason: 'MODEL_OBSERVATION_NOT_REQUESTED' },
+    artifactMetadata: { executionVersion: result.executionVersion ?? artifacts.meta?.executionVersion ?? null,
+      resultRevision: frozen.verification.resultPin?.resultRevision || artifacts.run?.resultRevision || null,
+      inputFormat: frozen.loaded ? 'versioned_manifest' : 'unversioned_artifacts' },
+    artifactsHealth: { ...health, origin: 'program_check', scope: 'source_field_diagnostics' },
+    metrics: {
+      metricsVersion: BENCHMARK_SCHEMA_VERSION,
+      sourceCount: observed('sources') ? sources.length : null,
+      sourceHostCount: observed('sources') ? sourceHosts.size : null,
+      passageCount: counts?.passages ?? (observed('passages') && Array.isArray(result.passages) ? result.passages.length : null),
+      documentVersionCount: counts?.documentVersions ?? null,
+      citationEntryCount: counts?.citationEntries ?? null,
+      reportCitationCount: observed('report') ? parseCitations(report).length : null,
+      resolvedCitationCount: citations ? citations.filter(c => c.resolved).length : null,
+      citationResolutionRate: citations?.length ? citations.filter(c => c.resolved).length / citations.length : null,
+      reportCharacterCount: observed('report') ? report.length : null,
+      enrichOkRate: health.enrichment.enrichAttempted ? health.enrichment.enrichOkRate : null,
+      contentPresenceRate: sources.length ? health.enrichment.contentRate : null,
+      platformMatchRate: observed('sources') && strictPlatform && sources.length ? sources.filter(s => s.engine === strictPlatform).length / sources.length : null,
+    },
+  };
 }

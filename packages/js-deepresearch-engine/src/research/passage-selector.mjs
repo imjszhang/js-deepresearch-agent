@@ -30,11 +30,13 @@ function rankChunksByOverlap({ focus, chunks = [], topK }) {
 }
 
 async function scoreChunksByEmbedding({ focus, chunks = [], embedding, signal }) {
-  const inputs = [focus, ...chunks.map((chunk) => chunkEmbedText(chunk))];
-  const vectors = await embedding.embedDocuments(inputs, { signal, purpose: 'evidence_passages' });
+  const [[queryVector], vectors] = await Promise.all([
+    embedding.embedDocuments([focus], { signal, purpose: 'evidence_question' }),
+    embedding.embedDocuments(chunks.map((chunk) => chunkEmbedText(chunk)), { signal, purpose: 'evidence_passages' }),
+  ]);
   return chunks.map((chunk, index) => ({
     ...chunk,
-    retrievalScore: cosineSimilarity(vectors[0], vectors[index + 1]),
+    retrievalScore: cosineSimilarity(queryVector, vectors[index]),
     rankingMethod: 'embedding',
   }));
 }
@@ -58,7 +60,7 @@ export async function rankPassages({
   if (!chunks.length) return [];
   if (embedding?.embedDocuments) {
     try {
-      const scored = await scoreChunksByEmbedding({ focus, chunks, embedding, signal });
+      const scored = await scoreChunksByEmbedding({ focus: buildQueryText(query, question) || title, chunks, embedding, signal });
       return scored.sort(compareRankedPassages).slice(0, topK);
     } catch (error) {
       if (shouldRethrowRankingError(error)) throw error;

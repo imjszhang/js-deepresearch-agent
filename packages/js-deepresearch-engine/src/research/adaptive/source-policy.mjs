@@ -158,14 +158,19 @@ export function resolveEntityAliases(entities = [], extraAliases = []) {
 export function matchEntityAlias(source = {}, entities = [], extraAliases = []) {
   const aliases = resolveEntityAliases(entities, extraAliases);
   if (!aliases.length) return { match: true, matchedAlias: null };
+  // Product/repository names routinely alternate between hyphens, underscores and
+  // spaces. Preserve the whole phrase instead of matching its individual words.
+  const normalizeName = (value) => String(value).normalize('NFKC').toLowerCase()
+    .replace(/(?<=\p{L})[-_‐‑‒–—]+(?=\p{L})/gu, ' ').replace(/\s+/gu, ' ').trim();
   const haystack = [
     source.title,
     source.snippet,
     source.summary,
     source.content,
     source.publisher,
-  ].filter(Boolean).join('\n').normalize('NFKC').toLowerCase();
-  const matchedAlias = aliases.find((alias) => haystack.includes(alias.normalize('NFKC').toLowerCase())) || null;
+  ].filter(Boolean).join('\n');
+  const normalizedHaystack = normalizeName(haystack);
+  const matchedAlias = aliases.find((alias) => normalizedHaystack.includes(normalizeName(alias))) || null;
   return { match: Boolean(matchedAlias), matchedAlias };
 }
 

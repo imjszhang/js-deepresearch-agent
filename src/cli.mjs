@@ -92,6 +92,7 @@ async function researchCommand(argv) {
   const { args, flags } = parseArgs(argv);
   const query = args.join(' ').trim();
   if (flags.resume) {
+    if (flags['planning-context']) throw new Error('Research --resume cannot change planning context; start a new run.');
     if (flags.resume === true) {
       throw new Error('Usage: js-deepresearch-agent research --resume <sessionDir>');
     }
@@ -100,15 +101,16 @@ async function researchCommand(argv) {
     }
     const settings = settingsFromFlags(flags);
     const resumeExplore = parseResumeExploreFlags(flags);
-    const { result, artifacts } = await runCliResearchResume({
+    const { result, artifacts, delivery, exitCode } = await runCliResearchResume({
       sessionDir: flags.resume,
       settings,
       flags,
       resumeExplore,
       services,
     });
+    process.exitCode = exitCode;
     if (flags.json) {
-      console.log(JSON.stringify({ ...result, artifacts }, null, 2));
+      console.log(JSON.stringify({ ...result, artifacts, delivery }, null, 2));
     } else {
       console.log(result.report);
     }
@@ -117,15 +119,16 @@ async function researchCommand(argv) {
   if (!query) throw new Error('Usage: js-deepresearch-agent research "query" | --resume <sessionDir>');
 
   const settings = settingsFromFlags(flags);
-  const { result, artifacts } = await runCliResearch({
+  const { result, artifacts, delivery, exitCode } = await runCliResearch({
     query,
     settings,
     flags,
     services,
   });
 
+  process.exitCode = exitCode;
   if (flags.json) {
-    console.log(JSON.stringify({ ...result, artifacts }, null, 2));
+    console.log(JSON.stringify({ ...result, artifacts, delivery }, null, 2));
   } else {
     console.log(result.report);
   }
@@ -455,6 +458,7 @@ Commands:
     Report: --report-max-output-tokens 0 (0 = no app cap; --reserve-report-tokens is a deprecated alias)
     Optional total fuse: --max-total-llm-tokens 0 (exploration + report; default unlimited)
     Optional rerank: --rerank-provider rules|disabled|jina|http|local --rerank-model <name> --rerank-base-url <url> --rerank-api-key <key> --rerank-timeout-ms 30000
+    Planning hints: --planning-context <json-file> (questions, identityHints, readingHints; soft suggestions only)
     Relevance gate: --read-relevance-enabled true|false --read-relevance-min-score 0.01 --read-body-relevance true|false --site-query-mode confirmed|always|never
     Read transport: --read-host-circuit-threshold 3 --read-response-headers-timeout-ms 10000 --read-html-timeout-ms 15000 --read-document-timeout-ms 60000
     Content cache: --no-cache --cache-dir data/content-cache

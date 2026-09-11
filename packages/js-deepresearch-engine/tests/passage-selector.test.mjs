@@ -76,7 +76,8 @@ describe('passage selector', () => {
   it('returns structured scores, offsets, and ranking method', async () => {
     const embedding = {
       async embedDocuments(texts) {
-        return texts.map((text) => (String(text).includes('代持') ? [1, 0] : [0, 1]));
+        // The query's semantic vector is independent of the candidate document title.
+        return texts.map((text) => (/代持|房产操作攻略/.test(String(text)) ? [1, 0] : [0, 1]));
       },
     };
     const ranked = await rankPassages({

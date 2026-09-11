@@ -22,6 +22,14 @@ const relevanceFixture = JSON.parse(readFileSync(
 ));
 
 describe('source policy before rerank', () => {
+  it('matches a hyphenated product name as a whole spaced phrase without admitting unrelated words', () => {
+    for (const title of ['Orbit Lab documentation', 'Orbit_Lab pricing', 'Orbit–Lab installation']) {
+      assert.equal(evaluateSourceRelevance({ title }, { entities: ['orbit-lab'] }).accepted, true);
+    }
+    assert.equal(evaluateSourceRelevance({ title: 'Orbit satellite documentation' }, { entities: ['orbit-lab'] }).accepted, false);
+    assert.equal(evaluateSourceRelevance({ title: 'Laboratory equipment overview' }, { entities: ['orbit-lab'] }).accepted, false);
+  });
+
   it('ranks required hosts above media reprints', () => {
     const gap = {
       question: 'controlling shareholder and audited revenue',

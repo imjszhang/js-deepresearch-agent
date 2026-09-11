@@ -262,9 +262,12 @@ export function claimEntailmentPrompt({ claim, passages = [] }) {
 }
 
 export function gapSlotSupportPrompt({ query, slots = [], compact = false } = {}) {
+  const inspectingCanonicalRanges = slots.length > 0
+    && slots.every((slot) => slot.passages?.length && slot.passages.every((passage) => passage.documentVersionId));
   const slotBlock = slots.map(({
     gap,
     passages = [],
+    previousPassages = [],
     slotMode = 'source_fact',
     consequentialClaims = [],
   }, index) => {
@@ -278,6 +281,8 @@ export function gapSlotSupportPrompt({ query, slots = [], compact = false } = {}
       `answerSlot: ${gap.answerSlot || gap.question}`,
       `question: ${gap.question}`,
       `slotMode: ${slotMode}`,
+      gap.slotSupport?.quoteAnchored ? `Previous evaluated answer and anchored excerpt (provisional context): ${JSON.stringify({ verdict: gap.slotSupport.verdict, answer: gap.slotSupport.answer || '', quote: gap.slotSupport.quote, passageIds: gap.slotSupport.supportingPassageIds || [] })}` : '',
+      previousPassages.length ? `Previously anchored context (not newly inspected evidence; never copy the quote field from here):\n${previousPassages.map((passage) => `[id=${passage.id}] ${passage.text}`).join('\n\n')}` : '',
       consequentialClaims.length
         ? `decision alternatives:\n${consequentialClaims.map((claim) => `- ${claim}`).join('\n')}`
         : '',
@@ -289,19 +294,31 @@ export function gapSlotSupportPrompt({ query, slots = [], compact = false } = {}
     ].filter(Boolean).join('\n');
   }).join('\n\n');
   const schema = compact
-    ? '{"judgments":[{"gapId":"...","verdict":"supported|partially_supported|unsupported|unverifiable|conflicting","quote":"...","supportingPassageIds":[],"reason":"..."}]}'
-    : '{"judgments":[{"gapId":"...","answerSlot":"...","verdict":"supported|partially_supported|unsupported|unverifiable|conflicting","quote":"...","supportingPassageIds":[],"contradictingPassageIds":[],"reason":"..."}]}';
+    ? '{"judgments":[{"gapId":"...","answer":"concise answer in query language","missingFacets":[],"verdict":"supported|partially_supported|unsupported|unverifiable|conflicting","quote":"...","supportingPassageIds":[],"reason":"..."}]}'
+    : '{"judgments":[{"gapId":"...","answerSlot":"...","answer":"concise answer in query language","missingFacets":[],"verdict":"supported|partially_supported|unsupported|unverifiable|conflicting","quote":"...","supportingPassageIds":[],"contradictingPassageIds":[],"reason":"..."}]}';
   return [
     {
       role: 'system',
       content: [
-        'Judge whether the successful source-body passages support each required answer slot for THIS query.',
+        inspectingCanonicalRanges
+          ? 'Judge the evidence contribution of the NEW passages for each answer task. The verdict describes this inspection, not whether an earlier answer was supported. Previous context is provided only to detect contradictions and combine genuinely new support.'
+          : 'Judge whether the successful source-body passages support each answer task for THIS query.',
+        inspectingCanonicalRanges
+          ? 'If the new passages add no support and no contradiction, return unsupported with empty quote, answer and supportingPassageIds. The application preserves the previous supported answer automatically. Do not repeat its old quote to mark the new inspection supported.'
+          : '',
+        'Also return answer (a concise answer in the query language) and missingFacets (an array of concrete unanswered facts). Judge only the provided ranges; absent selected evidence does not prove absence from the document or public record.',
+        'missingFacets must concern the current task or a necessary condition of its answer. Do not import other tasks, optional performance experiments or planner wishes as missing requirements.',
+        inspectingCanonicalRanges ? 'Also return claimCandidates for independently checkable atomic propositions that answer THIS task, even when the overall answer is partial. Each: {proposition,kind:"source_attributed"|"derived",entity,version,conditions:[],quote,supportingPassageIds:[],premises:[]}. Preserve negation, versions and prerequisites. quote must be an exact excerpt in the listed supplied body passages. Each proposition states ONE claim. For derived claims, premises must be separate source_attributed candidate objects with their own exact quotes; never use a whole source document as a premise. These are unverified candidates; do not add unrelated observations. Return [] when no candidate is supported by the inspected ranges.' : '',
         `Return JSON only: ${schema}`,
         'supported: a passage clearly answers the slot. partially_supported: only part of the slot is answered.',
         'unsupported: passages do not answer the slot. conflicting: passages disagree. unverifiable: cannot decide.',
         'For slotMode=research_judgment, supported means the passages collectively establish enough quoted factual premises to make a bounded comparative judgment. No source needs to state the analyst conclusion verbatim. Use partially_supported when only one decision alternative or a material premise is evidenced.',
-        'quote must be a verbatim excerpt copied from one provided passage. Do not invent quotes.',
+        'For positive or conflicting support, quote must be a verbatim excerpt copied from one NEW passage in the passages section. Negative inspection may return an empty quote. Do not invent quotes.',
+        'Copy one contiguous excerpt of at least 12 non-whitespace characters in the source language; do not translate it, join separate sentences with ellipses, or omit words inside it. Put your concise translated answer in answer, separately from quote.',
         'For a research judgment, quote one decisive premise and list every passage used for the synthesis in supportingPassageIds.',
+        'When a previous answer is supplied, explicitly check whether the new passages contradict it. A direct contradiction is conflicting, not a replacement supported answer. Quote the new contradictory passage and identify it in contradictingPassageIds. Silence about the old fact is not a contradiction.',
+        'Previously anchored facts may be combined with the new passages to complete an answer; preserve their conditions. A new range that covers only part of an already supported answer does not invalidate the previous evidence. Never describe uninspected material as absent.',
+        'List only the current or previous passage IDs actually used in supportingPassageIds; do not carry forward unrelated old references. The quote field must come from a new passage being inspected in this call.',
         'Do not use search snippets. Embedding scores are only for ranking, not for closing a slot.',
         'If a passage includes source assessment metadata, weigh publisher type and content kind together with the quoted text.',
       ].join(' '),

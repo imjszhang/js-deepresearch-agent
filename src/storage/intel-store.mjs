@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { EvidenceStore } from 'js-deepresearch-engine';
 import {
   DataSourceSpec,
   DataSourceRegistry,
@@ -16,6 +17,7 @@ export function resolveIntelBaseDir(baseDir) {
 
 export function createResearchIntelRegistry() {
   return new DataSourceRegistry().registerAll([
+    new DataSourceSpec({ name: 'research_result_snapshots', storageType: 'entity_json', description: 'Complete result revisions; research_runs publishes the current snapshot' }),
     new DataSourceSpec({
       name: 'research_runs',
       storageType: 'entity_json',
@@ -187,13 +189,17 @@ export function archiveResearchResult({
 
   const archivedAt = new Date().toISOString();
   const findings = Array.isArray(result?.findings) ? result.findings : [];
+  if (result.evidenceStore) new EvidenceStore(result.evidenceStore); // Snapshot carries all bodies, independently of session files.
   const sources = Array.isArray(result?.sources) ? result.sources : [];
   const gaps = Array.isArray(result?.gaps) ? result.gaps : [];
   const passages = Array.isArray(result?.passages) ? result.passages : [];
   const claims = Array.isArray(result?.claims) ? result.claims : [];
   const trace = Array.isArray(result?.trace) ? result.trace : [];
 
-  engine.ingest('research_runs', {
+  const resultRevision = artifacts?.resultRevision ?? result?.resultRevision ?? null;
+  const resultSnapshotId = resultRevision ? crypto.createHash('sha256').update(JSON.stringify([researchId, resultRevision])).digest('hex') : null;
+  const runRecord = {
+    resultSnapshotId,
     name: researchId,
     query,
     strategy,
@@ -203,6 +209,8 @@ export function archiveResearchResult({
     claimExtractionVersion: result?.quality?.claimExtractionVersion ?? result?.quality?.metrics?.claimExtractionVersion ?? 1,
     claimEvaluationVersion: result?.quality?.claimEvaluationVersion ?? result?.quality?.metrics?.claimEvaluationVersion ?? 1,
     sessionDir: artifacts?.sessionDir ?? null,
+    resultRevision: artifacts?.resultRevision ?? result?.resultRevision ?? null,
+    resultManifestPath: artifacts?.manifestPath ?? null,
     reportPath: artifacts?.reportPath ?? null,
     findingsPath: artifacts?.findingsPath ?? null,
     sourcesPath: artifacts?.sourcesPath ?? null,
@@ -222,7 +230,7 @@ export function archiveResearchResult({
       budget: settings?.research?.budget,
     },
     archivedAt,
-  });
+  };
 
   const findingRecords = flattenFindings(findings, researchId);
   if (findingRecords.length > 0) {
@@ -259,12 +267,21 @@ export function archiveResearchResult({
   engine.ingest('research_reports', {
     name: researchId,
     report: result?.report ?? '',
+    resultRevision: artifacts?.resultRevision ?? result?.resultRevision ?? null,
+    resultManifestPath: artifacts?.manifestPath ?? null,
     reportPath: artifacts?.reportPath ?? null,
     reportLength: result?.report?.length ?? 0,
     sessionDir: artifacts?.sessionDir ?? null,
     archivedAt,
   });
 
+  if (resultSnapshotId) {
+    const existing = engine.readSource('research_result_snapshots', { name: resultSnapshotId });
+    if (existing && JSON.stringify(existing.result) !== JSON.stringify(result)) throw new Error('Archive result revision content changed');
+    if (!existing) engine.ingest('research_result_snapshots', { name: resultSnapshotId, result, archivedAt });
+  }
+  // Publish only after all writes succeeded; snapshot readers never combine generations.
+  engine.ingest('research_runs', runRecord);
   return { ok: true, researchId };
 }
 
@@ -276,7 +293,7 @@ export async function archiveResearchResultSafe(params, { onWarning } = {}) {
     return archiveResearchResult(params);
   } catch (error) {
     const message = error?.message || String(error);
-    onWarning?.(message);
+    try { onWarning?.(message); } catch { /* warnings must never fail research */ }
     return { ok: false, error: message };
   }
 }
@@ -285,6 +302,20 @@ export function readArchivedResearch(researchId, engine = getIntelStoreEngine())
   const run = engine.readSource('research_runs', { name: researchId });
   if (!run) {
     throw new Error(`Archived research run not found: ${researchId}`);
+  }
+
+  if (run.resultSnapshotId) {
+    const snapshot = engine.readSource('research_result_snapshots', { name: run.resultSnapshotId });
+    if (!snapshot?.result) throw new Error('Archived result snapshot is missing');
+    if (snapshot.result.evidenceStore) new EvidenceStore(snapshot.result.evidenceStore);
+    return {
+      ...snapshot.result,
+      workDir: run.sessionDir ?? null,
+      meta: { query: run.query, strategy: run.strategy, researchId, createdAt: run.archivedAt,
+        settings: run.settings ?? {}, sessionDir: run.sessionDir ?? null, researchBrief: run.researchBrief ?? null },
+      run, reportMeta: { report: snapshot.result.report, reportPath: run.reportPath, reportLength: run.reportLength },
+      archiveWarnings: [],
+    };
   }
 
   const findingsRaw = engine.readSource('research_findings', { entity_id: researchId });

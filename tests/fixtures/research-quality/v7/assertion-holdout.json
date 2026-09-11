@@ -1,0 +1,1567 @@
+{
+  "cases": [
+    {
+      "id": "v5-a01",
+      "family": "kestrel",
+      "mode": "assertions",
+      "report": "## Kestrel v2 retries start disabled [1.1]",
+      "sources": [
+        {
+          "id": "kestrel",
+          "text": "Kestrel is a fictional queue scheduler. In Kestrel v1, each queue permits exactly one dispatcher and leases expire after 30 seconds. In Kestrel v2, leases expire after 60 seconds. Kestrel v2 permits two dispatchers only if each owns a different queue partition; two dispatchers on the same partition are forbidden. Retries in Kestrel v2 are disabled by default and can be enabled explicitly. Kestrel v2 can cancel queued jobs but cannot cancel a running job. Kestrel v2 accepts jobs in JSON, with an optional priority field; an example is {\"priority\":2}. This handbook supplies no throughput measurements or power-loss guarantees.",
+          "version": "Kestrel v1 and v2, explicitly distinguished",
+          "url": "https://example.test/kestrel/manual",
+          "bodyHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "manual",
+          "expectedAnswer": "Describe the documented behavior for the specified versions.",
+          "qualifiers": [],
+          "commonErrors": [],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "kestrel",
+              "span": [
+                0,
+                630
+              ],
+              "textHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "kestrel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            14,
+            36
+          ],
+          "allowedSpan": [
+            0,
+            42
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact"
+          ],
+          "truth": "correct",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "supported"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [
+        "heading"
+      ],
+      "designReview": "Agent-verified before calls. Uses explicit version/condition evidence; unaddressed properties are not negated by manual silence."
+    },
+    {
+      "id": "v5-a02",
+      "family": "kestrel",
+      "mode": "assertions",
+      "report": "### Kestrel v2 turns retries on by default [1.1]",
+      "sources": [
+        {
+          "id": "kestrel",
+          "text": "Kestrel is a fictional queue scheduler. In Kestrel v1, each queue permits exactly one dispatcher and leases expire after 30 seconds. In Kestrel v2, leases expire after 60 seconds. Kestrel v2 permits two dispatchers only if each owns a different queue partition; two dispatchers on the same partition are forbidden. Retries in Kestrel v2 are disabled by default and can be enabled explicitly. Kestrel v2 can cancel queued jobs but cannot cancel a running job. Kestrel v2 accepts jobs in JSON, with an optional priority field; an example is {\"priority\":2}. This handbook supplies no throughput measurements or power-loss guarantees.",
+          "version": "Kestrel v1 and v2, explicitly distinguished",
+          "url": "https://example.test/kestrel/manual",
+          "bodyHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "manual",
+          "expectedAnswer": "Describe the documented behavior for the specified versions.",
+          "qualifiers": [],
+          "commonErrors": [],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "kestrel",
+              "span": [
+                0,
+                630
+              ],
+              "textHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "kestrel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            21,
+            42
+          ],
+          "allowedSpan": [
+            0,
+            48
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact"
+          ],
+          "truth": "incorrect",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "unsupported"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [
+        "heading"
+      ],
+      "designReview": "Agent-verified before calls. Uses explicit version/condition evidence; unaddressed properties are not negated by manual silence."
+    },
+    {
+      "id": "v5-a03",
+      "family": "morrow",
+      "mode": "assertions",
+      "report": "## Morrow v2 runs for 2,000 hours on one battery",
+      "sources": [
+        {
+          "id": "morrow",
+          "text": "Morrow is a fictional sensor recorder. Morrow v1 retains the latest 24 samples in volatile memory and timestamps them in UTC. Morrow v2 retains the latest 48 samples and timestamps them in UTC. In Morrow v2, durable storage requires explicitly enabling the durable flag; the flag is off by default. Both Morrow v1 and Morrow v2 export recordings only while online; offline export is unavailable. Morrow v2 exports CSV. This manual provides no battery-life specification or sensor-accuracy measurement.",
+          "version": "Morrow v1 and v2, explicitly distinguished",
+          "url": "https://example.test/morrow/manual",
+          "bodyHash": "9f450f66bac559e0a12c3a23022a8a8a3f6414a3efd981ff0597a90c4f9173cf"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "manual",
+          "expectedAnswer": "Describe the documented behavior for the specified versions.",
+          "qualifiers": [],
+          "commonErrors": [],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "morrow",
+              "span": [
+                0,
+                501
+              ],
+              "textHash": "9f450f66bac559e0a12c3a23022a8a8a3f6414a3efd981ff0597a90c4f9173cf"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "morrow"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            22,
+            33
+          ],
+          "allowedSpan": [
+            0,
+            48
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact"
+          ],
+          "truth": "unverifiable",
+          "citations": [],
+          "critical": true
+        }
+      ],
+      "tags": [
+        "heading",
+        "unknown_boundary"
+      ],
+      "designReview": "Agent-verified before calls. Uses explicit version/condition evidence; unaddressed properties are not negated by manual silence."
+    },
+    {
+      "id": "v5-a04",
+      "family": "morrow",
+      "mode": "assertions",
+      "report": "| Recorder | Retained samples |\n|---|---|\n| Morrow v2 | 48 [1.1] |",
+      "sources": [
+        {
+          "id": "morrow",
+          "text": "Morrow is a fictional sensor recorder. Morrow v1 retains the latest 24 samples in volatile memory and timestamps them in UTC. Morrow v2 retains the latest 48 samples and timestamps them in UTC. In Morrow v2, durable storage requires explicitly enabling the durable flag; the flag is off by default. Both Morrow v1 and Morrow v2 export recordings only while online; offline export is unavailable. Morrow v2 exports CSV. This manual provides no battery-life specification or sensor-accuracy measurement.",
+          "version": "Morrow v1 and v2, explicitly distinguished",
+          "url": "https://example.test/morrow/manual",
+          "bodyHash": "9f450f66bac559e0a12c3a23022a8a8a3f6414a3efd981ff0597a90c4f9173cf"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "manual",
+          "expectedAnswer": "Describe the documented behavior for the specified versions.",
+          "qualifiers": [],
+          "commonErrors": [],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "morrow",
+              "span": [
+                0,
+                501
+              ],
+              "textHash": "9f450f66bac559e0a12c3a23022a8a8a3f6414a3efd981ff0597a90c4f9173cf"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "morrow"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            56,
+            58
+          ],
+          "allowedSpan": [
+            0,
+            66
+          ],
+          "requiredSpans": [
+            [
+              13,
+              29
+            ],
+            [
+              44,
+              53
+            ]
+          ],
+          "kinds": [
+            "fact"
+          ],
+          "truth": "correct",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "supported"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [
+        "table"
+      ],
+      "designReview": "Agent-verified before calls. Uses explicit version/condition evidence; unaddressed properties are not negated by manual silence."
+    },
+    {
+      "id": "v5-a05",
+      "family": "kestrel",
+      "mode": "assertions",
+      "report": "Kestrel v2 retries are disabled by default [1.1]; Kestrel v2 can cancel a running job [1.1].",
+      "sources": [
+        {
+          "id": "kestrel",
+          "text": "Kestrel is a fictional queue scheduler. In Kestrel v1, each queue permits exactly one dispatcher and leases expire after 30 seconds. In Kestrel v2, leases expire after 60 seconds. Kestrel v2 permits two dispatchers only if each owns a different queue partition; two dispatchers on the same partition are forbidden. Retries in Kestrel v2 are disabled by default and can be enabled explicitly. Kestrel v2 can cancel queued jobs but cannot cancel a running job. Kestrel v2 accepts jobs in JSON, with an optional priority field; an example is {\"priority\":2}. This handbook supplies no throughput measurements or power-loss guarantees.",
+          "version": "Kestrel v1 and v2, explicitly distinguished",
+          "url": "https://example.test/kestrel/manual",
+          "bodyHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "manual",
+          "expectedAnswer": "Describe the documented behavior for the specified versions.",
+          "qualifiers": [],
+          "commonErrors": [],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "kestrel",
+              "span": [
+                0,
+                630
+              ],
+              "textHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "kestrel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            23,
+            42
+          ],
+          "allowedSpan": [
+            0,
+            49
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact"
+          ],
+          "truth": "correct",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "supported"
+            }
+          ],
+          "critical": true
+        },
+        {
+          "id": "assertion-2",
+          "span": [
+            65,
+            85
+          ],
+          "allowedSpan": [
+            49,
+            92
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact"
+          ],
+          "truth": "incorrect",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "unsupported"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [
+        "mixed"
+      ],
+      "designReview": "Agent-verified before calls. Uses explicit version/condition evidence; unaddressed properties are not negated by manual silence."
+    },
+    {
+      "id": "v5-a06",
+      "family": "morrow",
+      "mode": "assertions",
+      "report": "Morrow v1 timestamps samples in UTC. [1.1]\nMorrow v1 measures temperature to 0.1 degree accuracy. [1.1]",
+      "sources": [
+        {
+          "id": "morrow",
+          "text": "Morrow is a fictional sensor recorder. Morrow v1 retains the latest 24 samples in volatile memory and timestamps them in UTC. Morrow v2 retains the latest 48 samples and timestamps them in UTC. In Morrow v2, durable storage requires explicitly enabling the durable flag; the flag is off by default. Both Morrow v1 and Morrow v2 export recordings only while online; offline export is unavailable. Morrow v2 exports CSV. This manual provides no battery-life specification or sensor-accuracy measurement.",
+          "version": "Morrow v1 and v2, explicitly distinguished",
+          "url": "https://example.test/morrow/manual",
+          "bodyHash": "9f450f66bac559e0a12c3a23022a8a8a3f6414a3efd981ff0597a90c4f9173cf"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "manual",
+          "expectedAnswer": "Describe the documented behavior for the specified versions.",
+          "qualifiers": [],
+          "commonErrors": [],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "morrow",
+              "span": [
+                0,
+                501
+              ],
+              "textHash": "9f450f66bac559e0a12c3a23022a8a8a3f6414a3efd981ff0597a90c4f9173cf"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "morrow"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            10,
+            35
+          ],
+          "allowedSpan": [
+            0,
+            42
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact"
+          ],
+          "truth": "correct",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "supported"
+            }
+          ],
+          "critical": true
+        },
+        {
+          "id": "assertion-2",
+          "span": [
+            77,
+            96
+          ],
+          "allowedSpan": [
+            43,
+            103
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact"
+          ],
+          "truth": "unverifiable",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "unsupported"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [
+        "mixed",
+        "unknown_boundary"
+      ],
+      "designReview": "Agent-verified before calls. Uses explicit version/condition evidence; unaddressed properties are not negated by manual silence."
+    },
+    {
+      "id": "v5-a07",
+      "family": "kestrel",
+      "mode": "assertions",
+      "report": "Kestrel v2 leases expire after 60 seconds. [1.1]\nKestrel v3 leases expire after 90 seconds. [1.1]",
+      "sources": [
+        {
+          "id": "kestrel",
+          "text": "Kestrel is a fictional queue scheduler. In Kestrel v1, each queue permits exactly one dispatcher and leases expire after 30 seconds. In Kestrel v2, leases expire after 60 seconds. Kestrel v2 permits two dispatchers only if each owns a different queue partition; two dispatchers on the same partition are forbidden. Retries in Kestrel v2 are disabled by default and can be enabled explicitly. Kestrel v2 can cancel queued jobs but cannot cancel a running job. Kestrel v2 accepts jobs in JSON, with an optional priority field; an example is {\"priority\":2}. This handbook supplies no throughput measurements or power-loss guarantees.",
+          "version": "Kestrel v1 and v2, explicitly distinguished",
+          "url": "https://example.test/kestrel/manual",
+          "bodyHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "manual",
+          "expectedAnswer": "Describe the documented behavior for the specified versions.",
+          "qualifiers": [],
+          "commonErrors": [],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "kestrel",
+              "span": [
+                0,
+                630
+              ],
+              "textHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "kestrel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            25,
+            41
+          ],
+          "allowedSpan": [
+            0,
+            48
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact"
+          ],
+          "truth": "correct",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "supported"
+            }
+          ],
+          "critical": true
+        },
+        {
+          "id": "assertion-2",
+          "span": [
+            74,
+            90
+          ],
+          "allowedSpan": [
+            49,
+            97
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact"
+          ],
+          "truth": "unverifiable",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "unsupported"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [
+        "mixed",
+        "unknown_boundary"
+      ],
+      "designReview": "Agent-verified before calls. Uses explicit version/condition evidence; unaddressed properties are not negated by manual silence."
+    },
+    {
+      "id": "v5-a08",
+      "family": "morrow",
+      "mode": "assertions",
+      "report": "Keep the recorder online.\nMorrow v2 exports recordings only while online. [1.1]",
+      "sources": [
+        {
+          "id": "morrow",
+          "text": "Morrow is a fictional sensor recorder. Morrow v1 retains the latest 24 samples in volatile memory and timestamps them in UTC. Morrow v2 retains the latest 48 samples and timestamps them in UTC. In Morrow v2, durable storage requires explicitly enabling the durable flag; the flag is off by default. Both Morrow v1 and Morrow v2 export recordings only while online; offline export is unavailable. Morrow v2 exports CSV. This manual provides no battery-life specification or sensor-accuracy measurement.",
+          "version": "Morrow v1 and v2, explicitly distinguished",
+          "url": "https://example.test/morrow/manual",
+          "bodyHash": "9f450f66bac559e0a12c3a23022a8a8a3f6414a3efd981ff0597a90c4f9173cf"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "manual",
+          "expectedAnswer": "Describe the documented behavior for the specified versions.",
+          "qualifiers": [],
+          "commonErrors": [],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "morrow",
+              "span": [
+                0,
+                501
+              ],
+              "textHash": "9f450f66bac559e0a12c3a23022a8a8a3f6414a3efd981ff0597a90c4f9173cf"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "morrow"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            0,
+            24
+          ],
+          "allowedSpan": [
+            0,
+            25
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "recommendation"
+          ],
+          "truth": "unverifiable",
+          "citations": [],
+          "critical": true
+        },
+        {
+          "id": "assertion-2",
+          "span": [
+            36,
+            72
+          ],
+          "allowedSpan": [
+            26,
+            79
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact"
+          ],
+          "truth": "correct",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "supported"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [
+        "mixed",
+        "recommendation"
+      ],
+      "designReview": "Agent-verified before calls. Uses explicit version/condition evidence; unaddressed properties are not negated by manual silence."
+    },
+    {
+      "id": "v5-a09",
+      "family": "morrow",
+      "mode": "assertions",
+      "report": "Morrow v4 retains 96 samples. [1.1]",
+      "sources": [
+        {
+          "id": "morrow",
+          "text": "Morrow is a fictional sensor recorder. Morrow v1 retains the latest 24 samples in volatile memory and timestamps them in UTC. Morrow v2 retains the latest 48 samples and timestamps them in UTC. In Morrow v2, durable storage requires explicitly enabling the durable flag; the flag is off by default. Both Morrow v1 and Morrow v2 export recordings only while online; offline export is unavailable. Morrow v2 exports CSV. This manual provides no battery-life specification or sensor-accuracy measurement.",
+          "version": "Morrow v1 and v2, explicitly distinguished",
+          "url": "https://example.test/morrow/manual",
+          "bodyHash": "9f450f66bac559e0a12c3a23022a8a8a3f6414a3efd981ff0597a90c4f9173cf"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "manual",
+          "expectedAnswer": "Describe the documented behavior for the specified versions.",
+          "qualifiers": [],
+          "commonErrors": [],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "morrow",
+              "span": [
+                0,
+                501
+              ],
+              "textHash": "9f450f66bac559e0a12c3a23022a8a8a3f6414a3efd981ff0597a90c4f9173cf"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "morrow"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            18,
+            28
+          ],
+          "allowedSpan": [
+            0,
+            35
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact"
+          ],
+          "truth": "unverifiable",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "unsupported"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [
+        "unknown_boundary"
+      ],
+      "designReview": "Agent-verified before calls. Uses explicit version/condition evidence; unaddressed properties are not negated by manual silence."
+    },
+    {
+      "id": "v5-a10",
+      "family": "kestrel",
+      "mode": "assertions",
+      "report": "Kestrel v2 processes at least 5,000 jobs each second. [1.1]",
+      "sources": [
+        {
+          "id": "kestrel",
+          "text": "Kestrel is a fictional queue scheduler. In Kestrel v1, each queue permits exactly one dispatcher and leases expire after 30 seconds. In Kestrel v2, leases expire after 60 seconds. Kestrel v2 permits two dispatchers only if each owns a different queue partition; two dispatchers on the same partition are forbidden. Retries in Kestrel v2 are disabled by default and can be enabled explicitly. Kestrel v2 can cancel queued jobs but cannot cancel a running job. Kestrel v2 accepts jobs in JSON, with an optional priority field; an example is {\"priority\":2}. This handbook supplies no throughput measurements or power-loss guarantees.",
+          "version": "Kestrel v1 and v2, explicitly distinguished",
+          "url": "https://example.test/kestrel/manual",
+          "bodyHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "manual",
+          "expectedAnswer": "Describe the documented behavior for the specified versions.",
+          "qualifiers": [],
+          "commonErrors": [],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "kestrel",
+              "span": [
+                0,
+                630
+              ],
+              "textHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "kestrel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            30,
+            40
+          ],
+          "allowedSpan": [
+            0,
+            59
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact"
+          ],
+          "truth": "unverifiable",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "unsupported"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [
+        "unknown_boundary"
+      ],
+      "designReview": "Agent-verified before calls. Uses explicit version/condition evidence; unaddressed properties are not negated by manual silence."
+    },
+    {
+      "id": "v5-a11",
+      "family": "kestrel",
+      "mode": "assertions",
+      "report": "Kestrel v2 guarantees no queued jobs are lost during a sudden power failure. [1.1]",
+      "sources": [
+        {
+          "id": "kestrel",
+          "text": "Kestrel is a fictional queue scheduler. In Kestrel v1, each queue permits exactly one dispatcher and leases expire after 30 seconds. In Kestrel v2, leases expire after 60 seconds. Kestrel v2 permits two dispatchers only if each owns a different queue partition; two dispatchers on the same partition are forbidden. Retries in Kestrel v2 are disabled by default and can be enabled explicitly. Kestrel v2 can cancel queued jobs but cannot cancel a running job. Kestrel v2 accepts jobs in JSON, with an optional priority field; an example is {\"priority\":2}. This handbook supplies no throughput measurements or power-loss guarantees.",
+          "version": "Kestrel v1 and v2, explicitly distinguished",
+          "url": "https://example.test/kestrel/manual",
+          "bodyHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "manual",
+          "expectedAnswer": "Describe the documented behavior for the specified versions.",
+          "qualifiers": [],
+          "commonErrors": [],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "kestrel",
+              "span": [
+                0,
+                630
+              ],
+              "textHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "kestrel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            22,
+            45
+          ],
+          "allowedSpan": [
+            0,
+            82
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact"
+          ],
+          "truth": "unverifiable",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "unsupported"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [
+        "unknown_boundary"
+      ],
+      "designReview": "Agent-verified before calls. Uses explicit version/condition evidence; unaddressed properties are not negated by manual silence."
+    },
+    {
+      "id": "v5-a12",
+      "family": "morrow",
+      "mode": "assertions",
+      "report": "This run performed seven source reads.",
+      "sources": [
+        {
+          "id": "morrow",
+          "text": "Morrow is a fictional sensor recorder. Morrow v1 retains the latest 24 samples in volatile memory and timestamps them in UTC. Morrow v2 retains the latest 48 samples and timestamps them in UTC. In Morrow v2, durable storage requires explicitly enabling the durable flag; the flag is off by default. Both Morrow v1 and Morrow v2 export recordings only while online; offline export is unavailable. Morrow v2 exports CSV. This manual provides no battery-life specification or sensor-accuracy measurement.",
+          "version": "Morrow v1 and v2, explicitly distinguished",
+          "url": "https://example.test/morrow/manual",
+          "bodyHash": "9f450f66bac559e0a12c3a23022a8a8a3f6414a3efd981ff0597a90c4f9173cf"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "manual",
+          "expectedAnswer": "Describe the documented behavior for the specified versions.",
+          "qualifiers": [],
+          "commonErrors": [],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "morrow",
+              "span": [
+                0,
+                501
+              ],
+              "textHash": "9f450f66bac559e0a12c3a23022a8a8a3f6414a3efd981ff0597a90c4f9173cf"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "morrow"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            19,
+            37
+          ],
+          "allowedSpan": [
+            0,
+            38
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "execution_status"
+          ],
+          "truth": "unverifiable",
+          "citations": [],
+          "critical": true
+        }
+      ],
+      "tags": [
+        "missing_execution"
+      ],
+      "designReview": "Agent-verified before calls. Uses explicit version/condition evidence; unaddressed properties are not negated by manual silence.",
+      "execution": {}
+    },
+    {
+      "id": "v5-a13",
+      "family": "kestrel",
+      "mode": "assertions",
+      "report": "This run reached its exploration token floor.",
+      "sources": [
+        {
+          "id": "kestrel",
+          "text": "Kestrel is a fictional queue scheduler. In Kestrel v1, each queue permits exactly one dispatcher and leases expire after 30 seconds. In Kestrel v2, leases expire after 60 seconds. Kestrel v2 permits two dispatchers only if each owns a different queue partition; two dispatchers on the same partition are forbidden. Retries in Kestrel v2 are disabled by default and can be enabled explicitly. Kestrel v2 can cancel queued jobs but cannot cancel a running job. Kestrel v2 accepts jobs in JSON, with an optional priority field; an example is {\"priority\":2}. This handbook supplies no throughput measurements or power-loss guarantees.",
+          "version": "Kestrel v1 and v2, explicitly distinguished",
+          "url": "https://example.test/kestrel/manual",
+          "bodyHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "manual",
+          "expectedAnswer": "Describe the documented behavior for the specified versions.",
+          "qualifiers": [],
+          "commonErrors": [],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "kestrel",
+              "span": [
+                0,
+                630
+              ],
+              "textHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "kestrel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            9,
+            44
+          ],
+          "allowedSpan": [
+            0,
+            45
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "execution_status"
+          ],
+          "truth": "unverifiable",
+          "citations": [],
+          "critical": true
+        }
+      ],
+      "tags": [
+        "missing_execution"
+      ],
+      "designReview": "Agent-verified before calls. Uses explicit version/condition evidence; unaddressed properties are not negated by manual silence.",
+      "execution": {
+        "budget": {}
+      }
+    },
+    {
+      "id": "v5-a14",
+      "family": "morrow",
+      "mode": "assertions",
+      "report": "Morrow v2 timestamps its samples in UTC. [2.1]",
+      "sources": [
+        {
+          "id": "morrow",
+          "text": "Morrow is a fictional sensor recorder. Morrow v1 retains the latest 24 samples in volatile memory and timestamps them in UTC. Morrow v2 retains the latest 48 samples and timestamps them in UTC. In Morrow v2, durable storage requires explicitly enabling the durable flag; the flag is off by default. Both Morrow v1 and Morrow v2 export recordings only while online; offline export is unavailable. Morrow v2 exports CSV. This manual provides no battery-life specification or sensor-accuracy measurement.",
+          "version": "Morrow v1 and v2, explicitly distinguished",
+          "url": "https://example.test/morrow/manual",
+          "bodyHash": "9f450f66bac559e0a12c3a23022a8a8a3f6414a3efd981ff0597a90c4f9173cf"
+        },
+        {
+          "id": "kestrel",
+          "text": "Kestrel is a fictional queue scheduler. In Kestrel v1, each queue permits exactly one dispatcher and leases expire after 30 seconds. In Kestrel v2, leases expire after 60 seconds. Kestrel v2 permits two dispatchers only if each owns a different queue partition; two dispatchers on the same partition are forbidden. Retries in Kestrel v2 are disabled by default and can be enabled explicitly. Kestrel v2 can cancel queued jobs but cannot cancel a running job. Kestrel v2 accepts jobs in JSON, with an optional priority field; an example is {\"priority\":2}. This handbook supplies no throughput measurements or power-loss guarantees.",
+          "version": "Kestrel v1 and v2, explicitly distinguished",
+          "url": "https://example.test/kestrel/manual",
+          "bodyHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "manual",
+          "expectedAnswer": "Describe the documented behavior for the specified versions.",
+          "qualifiers": [],
+          "commonErrors": [],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "morrow",
+              "span": [
+                0,
+                501
+              ],
+              "textHash": "9f450f66bac559e0a12c3a23022a8a8a3f6414a3efd981ff0597a90c4f9173cf"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "2.1",
+          "sourceId": "kestrel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            10,
+            39
+          ],
+          "allowedSpan": [
+            0,
+            46
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact"
+          ],
+          "truth": "correct",
+          "citations": [
+            {
+              "key": "2.1",
+              "verdict": "unsupported"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [
+        "wrong_citation"
+      ],
+      "designReview": "Agent-verified before calls. Uses explicit version/condition evidence; unaddressed properties are not negated by manual silence."
+    },
+    {
+      "id": "v5-a15",
+      "family": "kestrel",
+      "mode": "assertions",
+      "report": "Explicit configuration can enable retries in Kestrel v2. [9.4]",
+      "sources": [
+        {
+          "id": "kestrel",
+          "text": "Kestrel is a fictional queue scheduler. In Kestrel v1, each queue permits exactly one dispatcher and leases expire after 30 seconds. In Kestrel v2, leases expire after 60 seconds. Kestrel v2 permits two dispatchers only if each owns a different queue partition; two dispatchers on the same partition are forbidden. Retries in Kestrel v2 are disabled by default and can be enabled explicitly. Kestrel v2 can cancel queued jobs but cannot cancel a running job. Kestrel v2 accepts jobs in JSON, with an optional priority field; an example is {\"priority\":2}. This handbook supplies no throughput measurements or power-loss guarantees.",
+          "version": "Kestrel v1 and v2, explicitly distinguished",
+          "url": "https://example.test/kestrel/manual",
+          "bodyHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "manual",
+          "expectedAnswer": "Describe the documented behavior for the specified versions.",
+          "qualifiers": [],
+          "commonErrors": [],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "kestrel",
+              "span": [
+                0,
+                630
+              ],
+              "textHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "kestrel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            27,
+            41
+          ],
+          "allowedSpan": [
+            0,
+            62
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact"
+          ],
+          "truth": "correct",
+          "citations": [
+            {
+              "key": "9.4",
+              "verdict": "unresolved"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [
+        "wrong_citation"
+      ],
+      "designReview": "Agent-verified before calls. Uses explicit version/condition evidence; unaddressed properties are not negated by manual silence."
+    },
+    {
+      "id": "v5-a16",
+      "family": "morrow",
+      "mode": "assertions",
+      "report": "Summary: the latest 24 samples in Morrow v1 are held in volatile memory. [1.1]",
+      "sources": [
+        {
+          "id": "morrow",
+          "text": "Morrow is a fictional sensor recorder. Morrow v1 retains the latest 24 samples in volatile memory and timestamps them in UTC. Morrow v2 retains the latest 48 samples and timestamps them in UTC. In Morrow v2, durable storage requires explicitly enabling the durable flag; the flag is off by default. Both Morrow v1 and Morrow v2 export recordings only while online; offline export is unavailable. Morrow v2 exports CSV. This manual provides no battery-life specification or sensor-accuracy measurement.",
+          "version": "Morrow v1 and v2, explicitly distinguished",
+          "url": "https://example.test/morrow/manual",
+          "bodyHash": "9f450f66bac559e0a12c3a23022a8a8a3f6414a3efd981ff0597a90c4f9173cf"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "manual",
+          "expectedAnswer": "Describe the documented behavior for the specified versions.",
+          "qualifiers": [],
+          "commonErrors": [],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "morrow",
+              "span": [
+                0,
+                501
+              ],
+              "textHash": "9f450f66bac559e0a12c3a23022a8a8a3f6414a3efd981ff0597a90c4f9173cf"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "morrow"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            48,
+            71
+          ],
+          "allowedSpan": [
+            0,
+            78
+          ],
+          "requiredSpans": [
+            [
+              34,
+              43
+            ]
+          ],
+          "kinds": [
+            "fact"
+          ],
+          "truth": "correct",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "supported"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [
+        "summary"
+      ],
+      "designReview": "Agent-verified before calls. Uses explicit version/condition evidence; unaddressed properties are not negated by manual silence."
+    },
+    {
+      "id": "v5-a17",
+      "family": "kestrel",
+      "mode": "assertions",
+      "report": "Limitation: Kestrel v2 cannot cancel queued jobs. [1.1]",
+      "sources": [
+        {
+          "id": "kestrel",
+          "text": "Kestrel is a fictional queue scheduler. In Kestrel v1, each queue permits exactly one dispatcher and leases expire after 30 seconds. In Kestrel v2, leases expire after 60 seconds. Kestrel v2 permits two dispatchers only if each owns a different queue partition; two dispatchers on the same partition are forbidden. Retries in Kestrel v2 are disabled by default and can be enabled explicitly. Kestrel v2 can cancel queued jobs but cannot cancel a running job. Kestrel v2 accepts jobs in JSON, with an optional priority field; an example is {\"priority\":2}. This handbook supplies no throughput measurements or power-loss guarantees.",
+          "version": "Kestrel v1 and v2, explicitly distinguished",
+          "url": "https://example.test/kestrel/manual",
+          "bodyHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "manual",
+          "expectedAnswer": "Describe the documented behavior for the specified versions.",
+          "qualifiers": [],
+          "commonErrors": [],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "kestrel",
+              "span": [
+                0,
+                630
+              ],
+              "textHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "kestrel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            23,
+            48
+          ],
+          "allowedSpan": [
+            0,
+            55
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact"
+          ],
+          "truth": "incorrect",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "unsupported"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [
+        "limitation"
+      ],
+      "designReview": "Agent-verified before calls. Uses explicit version/condition evidence; unaddressed properties are not negated by manual silence."
+    },
+    {
+      "id": "v5-a18",
+      "family": "morrow",
+      "mode": "assertions",
+      "report": "Morrow v1 does not support exporting recordings while offline. [1.1]",
+      "sources": [
+        {
+          "id": "morrow",
+          "text": "Morrow is a fictional sensor recorder. Morrow v1 retains the latest 24 samples in volatile memory and timestamps them in UTC. Morrow v2 retains the latest 48 samples and timestamps them in UTC. In Morrow v2, durable storage requires explicitly enabling the durable flag; the flag is off by default. Both Morrow v1 and Morrow v2 export recordings only while online; offline export is unavailable. Morrow v2 exports CSV. This manual provides no battery-life specification or sensor-accuracy measurement.",
+          "version": "Morrow v1 and v2, explicitly distinguished",
+          "url": "https://example.test/morrow/manual",
+          "bodyHash": "9f450f66bac559e0a12c3a23022a8a8a3f6414a3efd981ff0597a90c4f9173cf"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "manual",
+          "expectedAnswer": "Describe the documented behavior for the specified versions.",
+          "qualifiers": [],
+          "commonErrors": [],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "morrow",
+              "span": [
+                0,
+                501
+              ],
+              "textHash": "9f450f66bac559e0a12c3a23022a8a8a3f6414a3efd981ff0597a90c4f9173cf"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "morrow"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            10,
+            36
+          ],
+          "allowedSpan": [
+            0,
+            68
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact"
+          ],
+          "truth": "correct",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "supported"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [
+        "negation"
+      ],
+      "designReview": "Agent-verified before calls. Uses explicit version/condition evidence; unaddressed properties are not negated by manual silence."
+    },
+    {
+      "id": "v5-a19",
+      "family": "kestrel",
+      "mode": "assertions",
+      "report": "Kestrel v1 permits two dispatchers on the same queue. [1.1]",
+      "sources": [
+        {
+          "id": "kestrel",
+          "text": "Kestrel is a fictional queue scheduler. In Kestrel v1, each queue permits exactly one dispatcher and leases expire after 30 seconds. In Kestrel v2, leases expire after 60 seconds. Kestrel v2 permits two dispatchers only if each owns a different queue partition; two dispatchers on the same partition are forbidden. Retries in Kestrel v2 are disabled by default and can be enabled explicitly. Kestrel v2 can cancel queued jobs but cannot cancel a running job. Kestrel v2 accepts jobs in JSON, with an optional priority field; an example is {\"priority\":2}. This handbook supplies no throughput measurements or power-loss guarantees.",
+          "version": "Kestrel v1 and v2, explicitly distinguished",
+          "url": "https://example.test/kestrel/manual",
+          "bodyHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "manual",
+          "expectedAnswer": "Describe the documented behavior for the specified versions.",
+          "qualifiers": [],
+          "commonErrors": [],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "kestrel",
+              "span": [
+                0,
+                630
+              ],
+              "textHash": "397a05284e3de153a277ede7c1f934842200dc33f79e9ab4c46dff95cf31ba2c"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "kestrel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            19,
+            52
+          ],
+          "allowedSpan": [
+            0,
+            59
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact"
+          ],
+          "truth": "incorrect",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "unsupported"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [
+        "version"
+      ],
+      "designReview": "Agent-verified before calls. Uses explicit version/condition evidence; unaddressed properties are not negated by manual silence."
+    },
+    {
+      "id": "v5-a20",
+      "family": "morrow",
+      "mode": "assertions",
+      "report": "This run performed zero source reads.",
+      "sources": [
+        {
+          "id": "morrow",
+          "text": "Morrow is a fictional sensor recorder. Morrow v1 retains the latest 24 samples in volatile memory and timestamps them in UTC. Morrow v2 retains the latest 48 samples and timestamps them in UTC. In Morrow v2, durable storage requires explicitly enabling the durable flag; the flag is off by default. Both Morrow v1 and Morrow v2 export recordings only while online; offline export is unavailable. Morrow v2 exports CSV. This manual provides no battery-life specification or sensor-accuracy measurement.",
+          "version": "Morrow v1 and v2, explicitly distinguished",
+          "url": "https://example.test/morrow/manual",
+          "bodyHash": "9f450f66bac559e0a12c3a23022a8a8a3f6414a3efd981ff0597a90c4f9173cf"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "manual",
+          "expectedAnswer": "Describe the documented behavior for the specified versions.",
+          "qualifiers": [],
+          "commonErrors": [],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "morrow",
+              "span": [
+                0,
+                501
+              ],
+              "textHash": "9f450f66bac559e0a12c3a23022a8a8a3f6414a3efd981ff0597a90c4f9173cf"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "morrow"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            19,
+            36
+          ],
+          "allowedSpan": [
+            0,
+            37
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "execution_status"
+          ],
+          "truth": "correct",
+          "citations": [],
+          "critical": true
+        }
+      ],
+      "tags": [
+        "known_zero"
+      ],
+      "designReview": "Agent-verified before calls. Uses explicit version/condition evidence; unaddressed properties are not negated by manual silence.",
+      "execution": {
+        "budget": {
+          "usage": {
+            "sourceReads": 0
+          }
+        }
+      }
+    }
+  ]
+}

@@ -24,8 +24,10 @@ async function main() {
         <p class="muted">${escapeHtml(record.query)}</p>
         <p>Status: <strong>${record.status}</strong></p>
         <button id="download">Download Markdown</button>
+        ${record.evidenceUrl ? `<a href="${escapeAttr(record.evidenceUrl)}">Download Evidence</a>` : ''}
         ${record.status === 'completed' ? `<a class="wiki-cta" href="/wiki.html?researchId=${encodeURIComponent(record.id)}">Compile Obsidian Wiki</a>` : ''}
       </section>
+      ${(record.delivery?.failures || []).length ? `<section class="card"><p>报告已保存，部分交付步骤需要重试：</p><ul>${record.delivery.failures.map((item) => `<li>${escapeHtml(item.stage)} (${escapeHtml(item.code)})</li>`).join('')}</ul></section>` : ''}
       ${renderQuality(record.quality)}
       <section class="card report">${renderMarkdown(record.report || record.error || 'No report yet.')}</section>
       <section class="card">
@@ -53,7 +55,9 @@ function renderQuality(quality) {
     <section class="card">
       <h2>Research Quality</h2>
       <p>Completion: <strong>${escapeHtml(quality.completionStatus || 'unknown')}</strong></p>
-      <p>Legacy report gate: <strong>${escapeHtml(quality.gate || 'unknown')}</strong></p>
+      <p>Evidence quality: <strong>${escapeHtml(quality.gate || 'unknown')}</strong></p>
+      <p>Stop: ${escapeHtml(quality.stopReason || 'unknown')} · ${escapeHtml(quality.stopDetail || '')}</p>
+      ${quality.budget?.floorStatus ? `<p>Exploration token floor: <strong>${escapeHtml(quality.budget.floorStatus)}</strong> · shortfall ${quality.budget.floorShortfallTokens ?? 'unknown'}</p>` : ''}
       <div class="grid">
         <p>Evaluated claims: <strong>${metrics.evaluatedClaimCount ?? 0}</strong></p>
         <p>Key claim support: <strong>${formatRate(metrics.rates?.keyClaimSupportedRate)}</strong></p>

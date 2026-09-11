@@ -1,0 +1,2690 @@
+{
+  "cases": [
+    {
+      "id": "cal-01",
+      "family": "oriel",
+      "mode": "assertions",
+      "report": "Oriel v1 permits one active writer per database. [1.1]",
+      "sources": [
+        {
+          "id": "oriel",
+          "text": "The fictional Oriel database version 1 permits exactly one active writer per database. Readers can run concurrently with that writer. Oriel version 1 is offered under license A or license B, at the user's choice; accepting both is not required. Encryption is disabled by default in Oriel version 1 and can be enabled explicitly. No throughput measurements or network filesystem guarantees are supplied by this manual.",
+          "version": "Oriel v1",
+          "url": "https://example.test/oriel/manual",
+          "bodyHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "writer",
+          "expectedAnswer": "Oriel v1 permits exactly one active writer per database; readers may run concurrently.",
+          "qualifiers": [
+            "version 1",
+            "one active writer"
+          ],
+          "commonErrors": [
+            "multiple simultaneous writers",
+            "readers cannot overlap writer"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        },
+        {
+          "id": "license",
+          "expectedAnswer": "Oriel v1 permits choosing license A or B, not both mandatory.",
+          "qualifiers": [
+            "version 1",
+            "choice, not conjunction"
+          ],
+          "commonErrors": [
+            "both licenses mandatory",
+            "B not available"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        },
+        {
+          "id": "encryption",
+          "expectedAnswer": "Oriel v1 encryption is off by default and optionally enabled explicitly.",
+          "qualifiers": [
+            "version 1",
+            "default versus optional"
+          ],
+          "commonErrors": [
+            "on by default",
+            "cannot enable"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "oriel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            17,
+            34
+          ],
+          "allowedSpan": [
+            0,
+            54
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact",
+            "inference"
+          ],
+          "truth": "correct",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "supported"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [],
+      "designReview": "Original report and expected truth preserved. Atomic occurrence and citation oracle added before calls; no real v5 output has been observed."
+    },
+    {
+      "id": "cal-02",
+      "family": "oriel",
+      "mode": "assertions",
+      "report": "Oriel v1 allows readers to run concurrently with its writer. [1.1]",
+      "sources": [
+        {
+          "id": "oriel",
+          "text": "The fictional Oriel database version 1 permits exactly one active writer per database. Readers can run concurrently with that writer. Oriel version 1 is offered under license A or license B, at the user's choice; accepting both is not required. Encryption is disabled by default in Oriel version 1 and can be enabled explicitly. No throughput measurements or network filesystem guarantees are supplied by this manual.",
+          "version": "Oriel v1",
+          "url": "https://example.test/oriel/manual",
+          "bodyHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "writer",
+          "expectedAnswer": "Oriel v1 permits exactly one active writer per database; readers may run concurrently.",
+          "qualifiers": [
+            "version 1",
+            "one active writer"
+          ],
+          "commonErrors": [
+            "multiple simultaneous writers",
+            "readers cannot overlap writer"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        },
+        {
+          "id": "license",
+          "expectedAnswer": "Oriel v1 permits choosing license A or B, not both mandatory.",
+          "qualifiers": [
+            "version 1",
+            "choice, not conjunction"
+          ],
+          "commonErrors": [
+            "both licenses mandatory",
+            "B not available"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        },
+        {
+          "id": "encryption",
+          "expectedAnswer": "Oriel v1 encryption is off by default and optionally enabled explicitly.",
+          "qualifiers": [
+            "version 1",
+            "default versus optional"
+          ],
+          "commonErrors": [
+            "on by default",
+            "cannot enable"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "oriel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            16,
+            43
+          ],
+          "allowedSpan": [
+            0,
+            66
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact",
+            "inference"
+          ],
+          "truth": "correct",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "supported"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [],
+      "designReview": "Original report and expected truth preserved. Atomic occurrence and citation oracle added before calls; no real v5 output has been observed."
+    },
+    {
+      "id": "cal-03",
+      "family": "oriel",
+      "mode": "assertions",
+      "report": "Oriel v1 offers a choice of license A or B. [1.1]",
+      "sources": [
+        {
+          "id": "oriel",
+          "text": "The fictional Oriel database version 1 permits exactly one active writer per database. Readers can run concurrently with that writer. Oriel version 1 is offered under license A or license B, at the user's choice; accepting both is not required. Encryption is disabled by default in Oriel version 1 and can be enabled explicitly. No throughput measurements or network filesystem guarantees are supplied by this manual.",
+          "version": "Oriel v1",
+          "url": "https://example.test/oriel/manual",
+          "bodyHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "writer",
+          "expectedAnswer": "Oriel v1 permits exactly one active writer per database; readers may run concurrently.",
+          "qualifiers": [
+            "version 1",
+            "one active writer"
+          ],
+          "commonErrors": [
+            "multiple simultaneous writers",
+            "readers cannot overlap writer"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        },
+        {
+          "id": "license",
+          "expectedAnswer": "Oriel v1 permits choosing license A or B, not both mandatory.",
+          "qualifiers": [
+            "version 1",
+            "choice, not conjunction"
+          ],
+          "commonErrors": [
+            "both licenses mandatory",
+            "B not available"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        },
+        {
+          "id": "encryption",
+          "expectedAnswer": "Oriel v1 encryption is off by default and optionally enabled explicitly.",
+          "qualifiers": [
+            "version 1",
+            "default versus optional"
+          ],
+          "commonErrors": [
+            "on by default",
+            "cannot enable"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "oriel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            18,
+            42
+          ],
+          "allowedSpan": [
+            0,
+            49
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact",
+            "inference"
+          ],
+          "truth": "correct",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "supported"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [],
+      "designReview": "Original report and expected truth preserved. Atomic occurrence and citation oracle added before calls; no real v5 output has been observed."
+    },
+    {
+      "id": "cal-04",
+      "family": "oriel",
+      "mode": "assertions",
+      "report": "Oriel v1 has encryption disabled by default. [1.1]",
+      "sources": [
+        {
+          "id": "oriel",
+          "text": "The fictional Oriel database version 1 permits exactly one active writer per database. Readers can run concurrently with that writer. Oriel version 1 is offered under license A or license B, at the user's choice; accepting both is not required. Encryption is disabled by default in Oriel version 1 and can be enabled explicitly. No throughput measurements or network filesystem guarantees are supplied by this manual.",
+          "version": "Oriel v1",
+          "url": "https://example.test/oriel/manual",
+          "bodyHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "writer",
+          "expectedAnswer": "Oriel v1 permits exactly one active writer per database; readers may run concurrently.",
+          "qualifiers": [
+            "version 1",
+            "one active writer"
+          ],
+          "commonErrors": [
+            "multiple simultaneous writers",
+            "readers cannot overlap writer"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        },
+        {
+          "id": "license",
+          "expectedAnswer": "Oriel v1 permits choosing license A or B, not both mandatory.",
+          "qualifiers": [
+            "version 1",
+            "choice, not conjunction"
+          ],
+          "commonErrors": [
+            "both licenses mandatory",
+            "B not available"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        },
+        {
+          "id": "encryption",
+          "expectedAnswer": "Oriel v1 encryption is off by default and optionally enabled explicitly.",
+          "qualifiers": [
+            "version 1",
+            "default versus optional"
+          ],
+          "commonErrors": [
+            "on by default",
+            "cannot enable"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "oriel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            13,
+            43
+          ],
+          "allowedSpan": [
+            0,
+            50
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact",
+            "inference"
+          ],
+          "truth": "correct",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "supported"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [],
+      "designReview": "Original report and expected truth preserved. Atomic occurrence and citation oracle added before calls; no real v5 output has been observed."
+    },
+    {
+      "id": "cal-08",
+      "family": "oriel",
+      "mode": "assertions",
+      "report": "Oriel v1 allows two simultaneous writers per database. [1.1]",
+      "sources": [
+        {
+          "id": "oriel",
+          "text": "The fictional Oriel database version 1 permits exactly one active writer per database. Readers can run concurrently with that writer. Oriel version 1 is offered under license A or license B, at the user's choice; accepting both is not required. Encryption is disabled by default in Oriel version 1 and can be enabled explicitly. No throughput measurements or network filesystem guarantees are supplied by this manual.",
+          "version": "Oriel v1",
+          "url": "https://example.test/oriel/manual",
+          "bodyHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "writer",
+          "expectedAnswer": "Oriel v1 permits exactly one active writer per database; readers may run concurrently.",
+          "qualifiers": [
+            "version 1",
+            "one active writer"
+          ],
+          "commonErrors": [
+            "multiple simultaneous writers",
+            "readers cannot overlap writer"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        },
+        {
+          "id": "license",
+          "expectedAnswer": "Oriel v1 permits choosing license A or B, not both mandatory.",
+          "qualifiers": [
+            "version 1",
+            "choice, not conjunction"
+          ],
+          "commonErrors": [
+            "both licenses mandatory",
+            "B not available"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        },
+        {
+          "id": "encryption",
+          "expectedAnswer": "Oriel v1 encryption is off by default and optionally enabled explicitly.",
+          "qualifiers": [
+            "version 1",
+            "default versus optional"
+          ],
+          "commonErrors": [
+            "on by default",
+            "cannot enable"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "oriel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            16,
+            40
+          ],
+          "allowedSpan": [
+            0,
+            60
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact",
+            "inference"
+          ],
+          "truth": "incorrect",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "unsupported"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [],
+      "designReview": "Original report and expected truth preserved. Atomic occurrence and citation oracle added before calls; no real v5 output has been observed."
+    },
+    {
+      "id": "cal-10",
+      "family": "oriel",
+      "mode": "assertions",
+      "report": "Oriel v1 enables encryption by default. [1.1]",
+      "sources": [
+        {
+          "id": "oriel",
+          "text": "The fictional Oriel database version 1 permits exactly one active writer per database. Readers can run concurrently with that writer. Oriel version 1 is offered under license A or license B, at the user's choice; accepting both is not required. Encryption is disabled by default in Oriel version 1 and can be enabled explicitly. No throughput measurements or network filesystem guarantees are supplied by this manual.",
+          "version": "Oriel v1",
+          "url": "https://example.test/oriel/manual",
+          "bodyHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "writer",
+          "expectedAnswer": "Oriel v1 permits exactly one active writer per database; readers may run concurrently.",
+          "qualifiers": [
+            "version 1",
+            "one active writer"
+          ],
+          "commonErrors": [
+            "multiple simultaneous writers",
+            "readers cannot overlap writer"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        },
+        {
+          "id": "license",
+          "expectedAnswer": "Oriel v1 permits choosing license A or B, not both mandatory.",
+          "qualifiers": [
+            "version 1",
+            "choice, not conjunction"
+          ],
+          "commonErrors": [
+            "both licenses mandatory",
+            "B not available"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        },
+        {
+          "id": "encryption",
+          "expectedAnswer": "Oriel v1 encryption is off by default and optionally enabled explicitly.",
+          "qualifiers": [
+            "version 1",
+            "default versus optional"
+          ],
+          "commonErrors": [
+            "on by default",
+            "cannot enable"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "oriel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            17,
+            38
+          ],
+          "allowedSpan": [
+            0,
+            45
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact",
+            "inference"
+          ],
+          "truth": "incorrect",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "unsupported"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [],
+      "designReview": "Original report and expected truth preserved. Atomic occurrence and citation oracle added before calls; no real v5 output has been observed."
+    },
+    {
+      "id": "cal-15",
+      "family": "oriel",
+      "mode": "assertions",
+      "report": "Oriel v1 guarantees one million writes per second. [1.1]",
+      "sources": [
+        {
+          "id": "oriel",
+          "text": "The fictional Oriel database version 1 permits exactly one active writer per database. Readers can run concurrently with that writer. Oriel version 1 is offered under license A or license B, at the user's choice; accepting both is not required. Encryption is disabled by default in Oriel version 1 and can be enabled explicitly. No throughput measurements or network filesystem guarantees are supplied by this manual.",
+          "version": "Oriel v1",
+          "url": "https://example.test/oriel/manual",
+          "bodyHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "writer",
+          "expectedAnswer": "Oriel v1 permits exactly one active writer per database; readers may run concurrently.",
+          "qualifiers": [
+            "version 1",
+            "one active writer"
+          ],
+          "commonErrors": [
+            "multiple simultaneous writers",
+            "readers cannot overlap writer"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        },
+        {
+          "id": "license",
+          "expectedAnswer": "Oriel v1 permits choosing license A or B, not both mandatory.",
+          "qualifiers": [
+            "version 1",
+            "choice, not conjunction"
+          ],
+          "commonErrors": [
+            "both licenses mandatory",
+            "B not available"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        },
+        {
+          "id": "encryption",
+          "expectedAnswer": "Oriel v1 encryption is off by default and optionally enabled explicitly.",
+          "qualifiers": [
+            "version 1",
+            "default versus optional"
+          ],
+          "commonErrors": [
+            "on by default",
+            "cannot enable"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "oriel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            20,
+            49
+          ],
+          "allowedSpan": [
+            0,
+            56
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact",
+            "inference"
+          ],
+          "truth": "unverifiable",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "unsupported"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [],
+      "designReview": "Original report and expected truth preserved. Atomic occurrence and citation oracle added before calls; no real v5 output has been observed."
+    },
+    {
+      "id": "cal-16",
+      "family": "oriel",
+      "mode": "assertions",
+      "report": "Oriel v2 enables encryption by default. [1.1]",
+      "sources": [
+        {
+          "id": "oriel",
+          "text": "The fictional Oriel database version 1 permits exactly one active writer per database. Readers can run concurrently with that writer. Oriel version 1 is offered under license A or license B, at the user's choice; accepting both is not required. Encryption is disabled by default in Oriel version 1 and can be enabled explicitly. No throughput measurements or network filesystem guarantees are supplied by this manual.",
+          "version": "Oriel v1",
+          "url": "https://example.test/oriel/manual",
+          "bodyHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "writer",
+          "expectedAnswer": "Oriel v1 permits exactly one active writer per database; readers may run concurrently.",
+          "qualifiers": [
+            "version 1",
+            "one active writer"
+          ],
+          "commonErrors": [
+            "multiple simultaneous writers",
+            "readers cannot overlap writer"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        },
+        {
+          "id": "license",
+          "expectedAnswer": "Oriel v1 permits choosing license A or B, not both mandatory.",
+          "qualifiers": [
+            "version 1",
+            "choice, not conjunction"
+          ],
+          "commonErrors": [
+            "both licenses mandatory",
+            "B not available"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        },
+        {
+          "id": "encryption",
+          "expectedAnswer": "Oriel v1 encryption is off by default and optionally enabled explicitly.",
+          "qualifiers": [
+            "version 1",
+            "default versus optional"
+          ],
+          "commonErrors": [
+            "on by default",
+            "cannot enable"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "oriel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            17,
+            38
+          ],
+          "allowedSpan": [
+            0,
+            45
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact",
+            "inference"
+          ],
+          "truth": "unverifiable",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "unsupported"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [],
+      "designReview": "Original report and expected truth preserved. Atomic occurrence and citation oracle added before calls; no real v5 output has been observed."
+    },
+    {
+      "id": "cal-17",
+      "family": "oriel",
+      "mode": "assertions",
+      "report": "Oriel v1 is guaranteed safe across multiple hosts on network filesystems. [1.1]",
+      "sources": [
+        {
+          "id": "oriel",
+          "text": "The fictional Oriel database version 1 permits exactly one active writer per database. Readers can run concurrently with that writer. Oriel version 1 is offered under license A or license B, at the user's choice; accepting both is not required. Encryption is disabled by default in Oriel version 1 and can be enabled explicitly. No throughput measurements or network filesystem guarantees are supplied by this manual.",
+          "version": "Oriel v1",
+          "url": "https://example.test/oriel/manual",
+          "bodyHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "writer",
+          "expectedAnswer": "Oriel v1 permits exactly one active writer per database; readers may run concurrently.",
+          "qualifiers": [
+            "version 1",
+            "one active writer"
+          ],
+          "commonErrors": [
+            "multiple simultaneous writers",
+            "readers cannot overlap writer"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        },
+        {
+          "id": "license",
+          "expectedAnswer": "Oriel v1 permits choosing license A or B, not both mandatory.",
+          "qualifiers": [
+            "version 1",
+            "choice, not conjunction"
+          ],
+          "commonErrors": [
+            "both licenses mandatory",
+            "B not available"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        },
+        {
+          "id": "encryption",
+          "expectedAnswer": "Oriel v1 encryption is off by default and optionally enabled explicitly.",
+          "qualifiers": [
+            "version 1",
+            "default versus optional"
+          ],
+          "commonErrors": [
+            "on by default",
+            "cannot enable"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "oriel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            12,
+            49
+          ],
+          "allowedSpan": [
+            0,
+            79
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact",
+            "inference"
+          ],
+          "truth": "unverifiable",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "unsupported"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [],
+      "designReview": "Original report and expected truth preserved. Atomic occurrence and citation oracle added before calls; no real v5 output has been observed."
+    },
+    {
+      "id": "holdout-27",
+      "family": "oriel",
+      "mode": "assertions",
+      "report": "Because Oriel v1 enables encryption by default, I recommend retaining that default. [1.1]",
+      "sources": [
+        {
+          "id": "oriel",
+          "text": "The fictional Oriel database version 1 permits exactly one active writer per database. Readers can run concurrently with that writer. Oriel version 1 is offered under license A or license B, at the user's choice; accepting both is not required. Encryption is disabled by default in Oriel version 1 and can be enabled explicitly. No throughput measurements or network filesystem guarantees are supplied by this manual.",
+          "version": "Oriel v1",
+          "url": "https://example.test/oriel/manual",
+          "bodyHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "writer",
+          "expectedAnswer": "Oriel v1 permits exactly one active writer per database; readers may run concurrently.",
+          "qualifiers": [
+            "version 1",
+            "one active writer"
+          ],
+          "commonErrors": [
+            "multiple simultaneous writers",
+            "readers cannot overlap writer"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        },
+        {
+          "id": "license",
+          "expectedAnswer": "Oriel v1 permits choosing license A or B, not both mandatory.",
+          "qualifiers": [
+            "version 1",
+            "choice, not conjunction"
+          ],
+          "commonErrors": [
+            "both licenses mandatory",
+            "B not available"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        },
+        {
+          "id": "encryption",
+          "expectedAnswer": "Oriel v1 encryption is off by default and optionally enabled explicitly.",
+          "qualifiers": [
+            "version 1",
+            "default versus optional"
+          ],
+          "commonErrors": [
+            "on by default",
+            "cannot enable"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "oriel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            25,
+            46
+          ],
+          "allowedSpan": [
+            0,
+            47
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact",
+            "inference"
+          ],
+          "truth": "incorrect",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "unsupported"
+            }
+          ],
+          "critical": true
+        },
+        {
+          "id": "assertion-2",
+          "span": [
+            50,
+            69
+          ],
+          "allowedSpan": [
+            47,
+            89
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "recommendation"
+          ],
+          "truth": "unverifiable",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "unsupported"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [],
+      "designReview": "Legacy technicalOnly label incorrect is unchanged for its empirical premise. The formerly excluded pure advice is now separately labeled recommendation/unverifiable. Sentence-final [1.1] applies to both clauses; it supports neither the false premise nor the advice. These rules are frozen before calls."
+    },
+    {
+      "id": "holdout-28",
+      "family": "oriel",
+      "mode": "assertions",
+      "report": "## Oriel v1 enables encryption by default [1.1]",
+      "sources": [
+        {
+          "id": "oriel",
+          "text": "The fictional Oriel database version 1 permits exactly one active writer per database. Readers can run concurrently with that writer. Oriel version 1 is offered under license A or license B, at the user's choice; accepting both is not required. Encryption is disabled by default in Oriel version 1 and can be enabled explicitly. No throughput measurements or network filesystem guarantees are supplied by this manual.",
+          "version": "Oriel v1",
+          "url": "https://example.test/oriel/manual",
+          "bodyHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "writer",
+          "expectedAnswer": "Oriel v1 permits exactly one active writer per database; readers may run concurrently.",
+          "qualifiers": [
+            "version 1",
+            "one active writer"
+          ],
+          "commonErrors": [
+            "multiple simultaneous writers",
+            "readers cannot overlap writer"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        },
+        {
+          "id": "license",
+          "expectedAnswer": "Oriel v1 permits choosing license A or B, not both mandatory.",
+          "qualifiers": [
+            "version 1",
+            "choice, not conjunction"
+          ],
+          "commonErrors": [
+            "both licenses mandatory",
+            "B not available"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        },
+        {
+          "id": "encryption",
+          "expectedAnswer": "Oriel v1 encryption is off by default and optionally enabled explicitly.",
+          "qualifiers": [
+            "version 1",
+            "default versus optional"
+          ],
+          "commonErrors": [
+            "on by default",
+            "cannot enable"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "oriel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            20,
+            41
+          ],
+          "allowedSpan": [
+            0,
+            47
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact",
+            "inference"
+          ],
+          "truth": "incorrect",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "unsupported"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [],
+      "designReview": "Original report and expected truth preserved. Atomic occurrence and citation oracle added before calls; no real v5 output has been observed."
+    },
+    {
+      "id": "holdout-31",
+      "family": "oriel",
+      "mode": "assertions",
+      "report": "Oriel v1 has encryption disabled by default. [9.9]",
+      "sources": [
+        {
+          "id": "oriel",
+          "text": "The fictional Oriel database version 1 permits exactly one active writer per database. Readers can run concurrently with that writer. Oriel version 1 is offered under license A or license B, at the user's choice; accepting both is not required. Encryption is disabled by default in Oriel version 1 and can be enabled explicitly. No throughput measurements or network filesystem guarantees are supplied by this manual.",
+          "version": "Oriel v1",
+          "url": "https://example.test/oriel/manual",
+          "bodyHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "writer",
+          "expectedAnswer": "Oriel v1 permits exactly one active writer per database; readers may run concurrently.",
+          "qualifiers": [
+            "version 1",
+            "one active writer"
+          ],
+          "commonErrors": [
+            "multiple simultaneous writers",
+            "readers cannot overlap writer"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        },
+        {
+          "id": "license",
+          "expectedAnswer": "Oriel v1 permits choosing license A or B, not both mandatory.",
+          "qualifiers": [
+            "version 1",
+            "choice, not conjunction"
+          ],
+          "commonErrors": [
+            "both licenses mandatory",
+            "B not available"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        },
+        {
+          "id": "encryption",
+          "expectedAnswer": "Oriel v1 encryption is off by default and optionally enabled explicitly.",
+          "qualifiers": [
+            "version 1",
+            "default versus optional"
+          ],
+          "commonErrors": [
+            "on by default",
+            "cannot enable"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "oriel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            13,
+            43
+          ],
+          "allowedSpan": [
+            0,
+            50
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact",
+            "inference"
+          ],
+          "truth": "correct",
+          "citations": [
+            {
+              "key": "9.9",
+              "verdict": "unresolved"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [],
+      "designReview": "Original report and expected truth preserved. Atomic occurrence and citation oracle added before calls; no real v5 output has been observed."
+    },
+    {
+      "id": "holdout-39",
+      "family": "oriel",
+      "mode": "assertions",
+      "report": "This research run completed all requirements.",
+      "sources": [
+        {
+          "id": "oriel",
+          "text": "The fictional Oriel database version 1 permits exactly one active writer per database. Readers can run concurrently with that writer. Oriel version 1 is offered under license A or license B, at the user's choice; accepting both is not required. Encryption is disabled by default in Oriel version 1 and can be enabled explicitly. No throughput measurements or network filesystem guarantees are supplied by this manual.",
+          "version": "Oriel v1",
+          "url": "https://example.test/oriel/manual",
+          "bodyHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "writer",
+          "expectedAnswer": "Oriel v1 permits exactly one active writer per database; readers may run concurrently.",
+          "qualifiers": [
+            "version 1",
+            "one active writer"
+          ],
+          "commonErrors": [
+            "multiple simultaneous writers",
+            "readers cannot overlap writer"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        },
+        {
+          "id": "license",
+          "expectedAnswer": "Oriel v1 permits choosing license A or B, not both mandatory.",
+          "qualifiers": [
+            "version 1",
+            "choice, not conjunction"
+          ],
+          "commonErrors": [
+            "both licenses mandatory",
+            "B not available"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        },
+        {
+          "id": "encryption",
+          "expectedAnswer": "Oriel v1 encryption is off by default and optionally enabled explicitly.",
+          "qualifiers": [
+            "version 1",
+            "default versus optional"
+          ],
+          "commonErrors": [
+            "on by default",
+            "cannot enable"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "oriel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            18,
+            44
+          ],
+          "allowedSpan": [
+            0,
+            45
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "execution_status"
+          ],
+          "truth": "incorrect",
+          "citations": [],
+          "critical": true
+        }
+      ],
+      "tags": [],
+      "designReview": "Original report and expected truth preserved. Atomic occurrence and citation oracle added before calls; no real v5 output has been observed.",
+      "execution": {
+        "completionStatus": "incomplete"
+      }
+    },
+    {
+      "id": "v4-h01",
+      "family": "oriel",
+      "mode": "assertions",
+      "report": "## Oriel 第一版：默认已开启数据加密 [1.1]",
+      "sources": [
+        {
+          "id": "oriel",
+          "text": "The fictional Oriel database version 1 permits exactly one active writer per database. Readers can run concurrently with that writer. Oriel version 1 is offered under license A or license B, at the user's choice; accepting both is not required. Encryption is disabled by default in Oriel version 1 and can be enabled explicitly. No throughput measurements or network filesystem guarantees are supplied by this manual.",
+          "version": "Oriel v1",
+          "url": "https://example.test/oriel/manual",
+          "bodyHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "writer",
+          "expectedAnswer": "Oriel v1 permits exactly one active writer per database; readers may run concurrently.",
+          "qualifiers": [
+            "version 1",
+            "one active writer"
+          ],
+          "commonErrors": [
+            "multiple simultaneous writers",
+            "readers cannot overlap writer"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        },
+        {
+          "id": "license",
+          "expectedAnswer": "Oriel v1 permits choosing license A or B, not both mandatory.",
+          "qualifiers": [
+            "version 1",
+            "choice, not conjunction"
+          ],
+          "commonErrors": [
+            "both licenses mandatory",
+            "B not available"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        },
+        {
+          "id": "encryption",
+          "expectedAnswer": "Oriel v1 encryption is off by default and optionally enabled explicitly.",
+          "qualifiers": [
+            "version 1",
+            "default versus optional"
+          ],
+          "commonErrors": [
+            "on by default",
+            "cannot enable"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "oriel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            13,
+            22
+          ],
+          "allowedSpan": [
+            0,
+            28
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact",
+            "inference"
+          ],
+          "truth": "incorrect",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "unsupported"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [],
+      "designReview": "Original report and expected truth preserved. Atomic occurrence and citation oracle added before calls; no real v5 output has been observed."
+    },
+    {
+      "id": "v4-h02",
+      "family": "oriel",
+      "mode": "assertions",
+      "report": "### Choosing B alone is a licensing option for Oriel version 1 [1.1]",
+      "sources": [
+        {
+          "id": "oriel",
+          "text": "The fictional Oriel database version 1 permits exactly one active writer per database. Readers can run concurrently with that writer. Oriel version 1 is offered under license A or license B, at the user's choice; accepting both is not required. Encryption is disabled by default in Oriel version 1 and can be enabled explicitly. No throughput measurements or network filesystem guarantees are supplied by this manual.",
+          "version": "Oriel v1",
+          "url": "https://example.test/oriel/manual",
+          "bodyHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "writer",
+          "expectedAnswer": "Oriel v1 permits exactly one active writer per database; readers may run concurrently.",
+          "qualifiers": [
+            "version 1",
+            "one active writer"
+          ],
+          "commonErrors": [
+            "multiple simultaneous writers",
+            "readers cannot overlap writer"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        },
+        {
+          "id": "license",
+          "expectedAnswer": "Oriel v1 permits choosing license A or B, not both mandatory.",
+          "qualifiers": [
+            "version 1",
+            "choice, not conjunction"
+          ],
+          "commonErrors": [
+            "both licenses mandatory",
+            "B not available"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        },
+        {
+          "id": "encryption",
+          "expectedAnswer": "Oriel v1 encryption is off by default and optionally enabled explicitly.",
+          "qualifiers": [
+            "version 1",
+            "default versus optional"
+          ],
+          "commonErrors": [
+            "on by default",
+            "cannot enable"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "oriel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            4,
+            20
+          ],
+          "allowedSpan": [
+            0,
+            68
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact",
+            "inference"
+          ],
+          "truth": "correct",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "supported"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [],
+      "designReview": "Original report and expected truth preserved. Atomic occurrence and citation oracle added before calls; no real v5 output has been observed."
+    },
+    {
+      "id": "v4-h03",
+      "family": "oriel",
+      "mode": "assertions",
+      "report": "## Oriel v1 achieves a 2 ms write latency at the 99th percentile",
+      "sources": [
+        {
+          "id": "oriel",
+          "text": "The fictional Oriel database version 1 permits exactly one active writer per database. Readers can run concurrently with that writer. Oriel version 1 is offered under license A or license B, at the user's choice; accepting both is not required. Encryption is disabled by default in Oriel version 1 and can be enabled explicitly. No throughput measurements or network filesystem guarantees are supplied by this manual.",
+          "version": "Oriel v1",
+          "url": "https://example.test/oriel/manual",
+          "bodyHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "writer",
+          "expectedAnswer": "Oriel v1 permits exactly one active writer per database; readers may run concurrently.",
+          "qualifiers": [
+            "version 1",
+            "one active writer"
+          ],
+          "commonErrors": [
+            "multiple simultaneous writers",
+            "readers cannot overlap writer"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        },
+        {
+          "id": "license",
+          "expectedAnswer": "Oriel v1 permits choosing license A or B, not both mandatory.",
+          "qualifiers": [
+            "version 1",
+            "choice, not conjunction"
+          ],
+          "commonErrors": [
+            "both licenses mandatory",
+            "B not available"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        },
+        {
+          "id": "encryption",
+          "expectedAnswer": "Oriel v1 encryption is off by default and optionally enabled explicitly.",
+          "qualifiers": [
+            "version 1",
+            "default versus optional"
+          ],
+          "commonErrors": [
+            "on by default",
+            "cannot enable"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "oriel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            23,
+            41
+          ],
+          "allowedSpan": [
+            0,
+            64
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact",
+            "inference"
+          ],
+          "truth": "unverifiable",
+          "citations": [],
+          "critical": true
+        }
+      ],
+      "tags": [],
+      "designReview": "Original report and expected truth preserved. Atomic occurrence and citation oracle added before calls; no real v5 output has been observed."
+    },
+    {
+      "id": "v4-h06",
+      "family": "oriel",
+      "mode": "assertions",
+      "report": "| Product | Measured sustained writes per second |\n|---|---|\n| Oriel version 1 | 35,000 [1.1] |",
+      "sources": [
+        {
+          "id": "oriel",
+          "text": "The fictional Oriel database version 1 permits exactly one active writer per database. Readers can run concurrently with that writer. Oriel version 1 is offered under license A or license B, at the user's choice; accepting both is not required. Encryption is disabled by default in Oriel version 1 and can be enabled explicitly. No throughput measurements or network filesystem guarantees are supplied by this manual.",
+          "version": "Oriel v1",
+          "url": "https://example.test/oriel/manual",
+          "bodyHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "writer",
+          "expectedAnswer": "Oriel v1 permits exactly one active writer per database; readers may run concurrently.",
+          "qualifiers": [
+            "version 1",
+            "one active writer"
+          ],
+          "commonErrors": [
+            "multiple simultaneous writers",
+            "readers cannot overlap writer"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        },
+        {
+          "id": "license",
+          "expectedAnswer": "Oriel v1 permits choosing license A or B, not both mandatory.",
+          "qualifiers": [
+            "version 1",
+            "choice, not conjunction"
+          ],
+          "commonErrors": [
+            "both licenses mandatory",
+            "B not available"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        },
+        {
+          "id": "encryption",
+          "expectedAnswer": "Oriel v1 encryption is off by default and optionally enabled explicitly.",
+          "qualifiers": [
+            "version 1",
+            "default versus optional"
+          ],
+          "commonErrors": [
+            "on by default",
+            "cannot enable"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "oriel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            81,
+            87
+          ],
+          "allowedSpan": [
+            0,
+            95
+          ],
+          "requiredSpans": [
+            [
+              12,
+              48
+            ],
+            [
+              63,
+              78
+            ]
+          ],
+          "kinds": [
+            "fact",
+            "inference"
+          ],
+          "truth": "unverifiable",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "unsupported"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [],
+      "designReview": "Original report and expected truth preserved. Atomic occurrence and citation oracle added before calls; no real v5 output has been observed."
+    },
+    {
+      "id": "v4-h10",
+      "family": "oriel",
+      "mode": "assertions",
+      "report": "- Oriel 第一版在每个数据库上只允许一个活跃写入者。[1.1]\n- 该版本的读取者可以与这个写入者同时运行。[1.1]",
+      "sources": [
+        {
+          "id": "oriel",
+          "text": "The fictional Oriel database version 1 permits exactly one active writer per database. Readers can run concurrently with that writer. Oriel version 1 is offered under license A or license B, at the user's choice; accepting both is not required. Encryption is disabled by default in Oriel version 1 and can be enabled explicitly. No throughput measurements or network filesystem guarantees are supplied by this manual.",
+          "version": "Oriel v1",
+          "url": "https://example.test/oriel/manual",
+          "bodyHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "writer",
+          "expectedAnswer": "Oriel v1 permits exactly one active writer per database; readers may run concurrently.",
+          "qualifiers": [
+            "version 1",
+            "one active writer"
+          ],
+          "commonErrors": [
+            "multiple simultaneous writers",
+            "readers cannot overlap writer"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        },
+        {
+          "id": "license",
+          "expectedAnswer": "Oriel v1 permits choosing license A or B, not both mandatory.",
+          "qualifiers": [
+            "version 1",
+            "choice, not conjunction"
+          ],
+          "commonErrors": [
+            "both licenses mandatory",
+            "B not available"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        },
+        {
+          "id": "encryption",
+          "expectedAnswer": "Oriel v1 encryption is off by default and optionally enabled explicitly.",
+          "qualifiers": [
+            "version 1",
+            "default versus optional"
+          ],
+          "commonErrors": [
+            "on by default",
+            "cannot enable"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "oriel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            18,
+            28
+          ],
+          "allowedSpan": [
+            0,
+            34
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact"
+          ],
+          "truth": "correct",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "supported"
+            }
+          ],
+          "critical": true
+        },
+        {
+          "id": "assertion-2",
+          "span": [
+            41,
+            56
+          ],
+          "allowedSpan": [
+            35,
+            62
+          ],
+          "requiredSpans": [
+            [
+              2,
+              11
+            ]
+          ],
+          "kinds": [
+            "fact"
+          ],
+          "truth": "correct",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "supported"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [],
+      "designReview": "Original report and expected truth preserved. Atomic occurrence and citation oracle added before calls; no real v5 output has been observed."
+    },
+    {
+      "id": "v4-h13",
+      "family": "oriel",
+      "mode": "assertions",
+      "report": "Oriel 第一版保证在网络文件系统发生主机崩溃后不会丢失任何已提交数据。[1.1]",
+      "sources": [
+        {
+          "id": "oriel",
+          "text": "The fictional Oriel database version 1 permits exactly one active writer per database. Readers can run concurrently with that writer. Oriel version 1 is offered under license A or license B, at the user's choice; accepting both is not required. Encryption is disabled by default in Oriel version 1 and can be enabled explicitly. No throughput measurements or network filesystem guarantees are supplied by this manual.",
+          "version": "Oriel v1",
+          "url": "https://example.test/oriel/manual",
+          "bodyHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "writer",
+          "expectedAnswer": "Oriel v1 permits exactly one active writer per database; readers may run concurrently.",
+          "qualifiers": [
+            "version 1",
+            "one active writer"
+          ],
+          "commonErrors": [
+            "multiple simultaneous writers",
+            "readers cannot overlap writer"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        },
+        {
+          "id": "license",
+          "expectedAnswer": "Oriel v1 permits choosing license A or B, not both mandatory.",
+          "qualifiers": [
+            "version 1",
+            "choice, not conjunction"
+          ],
+          "commonErrors": [
+            "both licenses mandatory",
+            "B not available"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        },
+        {
+          "id": "encryption",
+          "expectedAnswer": "Oriel v1 encryption is off by default and optionally enabled explicitly.",
+          "qualifiers": [
+            "version 1",
+            "default versus optional"
+          ],
+          "commonErrors": [
+            "on by default",
+            "cannot enable"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "oriel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            25,
+            36
+          ],
+          "allowedSpan": [
+            0,
+            42
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "fact",
+            "inference"
+          ],
+          "truth": "unverifiable",
+          "citations": [
+            {
+              "key": "1.1",
+              "verdict": "unsupported"
+            }
+          ],
+          "critical": true
+        }
+      ],
+      "tags": [],
+      "designReview": "Original report and expected truth preserved. Atomic occurrence and citation oracle added before calls; no real v5 output has been observed."
+    },
+    {
+      "id": "v4-h19",
+      "family": "oriel",
+      "mode": "assertions",
+      "report": "本次运行成功执行了三次来源正文读取。",
+      "sources": [
+        {
+          "id": "oriel",
+          "text": "The fictional Oriel database version 1 permits exactly one active writer per database. Readers can run concurrently with that writer. Oriel version 1 is offered under license A or license B, at the user's choice; accepting both is not required. Encryption is disabled by default in Oriel version 1 and can be enabled explicitly. No throughput measurements or network filesystem guarantees are supplied by this manual.",
+          "version": "Oriel v1",
+          "url": "https://example.test/oriel/manual",
+          "bodyHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "writer",
+          "expectedAnswer": "Oriel v1 permits exactly one active writer per database; readers may run concurrently.",
+          "qualifiers": [
+            "version 1",
+            "one active writer"
+          ],
+          "commonErrors": [
+            "multiple simultaneous writers",
+            "readers cannot overlap writer"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        },
+        {
+          "id": "license",
+          "expectedAnswer": "Oriel v1 permits choosing license A or B, not both mandatory.",
+          "qualifiers": [
+            "version 1",
+            "choice, not conjunction"
+          ],
+          "commonErrors": [
+            "both licenses mandatory",
+            "B not available"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        },
+        {
+          "id": "encryption",
+          "expectedAnswer": "Oriel v1 encryption is off by default and optionally enabled explicitly.",
+          "qualifiers": [
+            "version 1",
+            "default versus optional"
+          ],
+          "commonErrors": [
+            "on by default",
+            "cannot enable"
+          ],
+          "weight": 2,
+          "core": true,
+          "critical": true,
+          "requirementIds": [],
+          "reviewRecord": "Agent-authored fixture, verified before model execution.",
+          "anchors": [
+            {
+              "sourceId": "oriel",
+              "span": [
+                0,
+                417
+              ],
+              "textHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d"
+            }
+          ]
+        }
+      ],
+      "citations": [
+        {
+          "key": "1.1",
+          "sourceId": "oriel"
+        }
+      ],
+      "expectedAssertions": [
+        {
+          "id": "assertion-1",
+          "span": [
+            9,
+            17
+          ],
+          "allowedSpan": [
+            0,
+            18
+          ],
+          "requiredSpans": [],
+          "kinds": [
+            "execution_status"
+          ],
+          "truth": "unverifiable",
+          "citations": [],
+          "critical": true
+        }
+      ],
+      "tags": [],
+      "designReview": "Original report and expected truth preserved. Atomic occurrence and citation oracle added before calls; no real v5 output has been observed.",
+      "execution": {}
+    }
+  ]
+}

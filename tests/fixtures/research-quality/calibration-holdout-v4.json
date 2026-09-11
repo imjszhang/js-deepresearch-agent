@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "judgeVersion": "quality-judge-4",
+  "labeledBy": "codex-agent",
+  "humanReviewed": false,
+  "purpose": "Frozen before the first v4 model call. New examples for the same synthetic manual; not evidence of cross-domain generalization.",
+  "cases": [
+    { "id": "v4-h01", "split": "holdout", "report": "## Oriel 第一版：默认已开启数据加密 [1.1]", "expectedTruth": "incorrect", "technicalOnly": true },
+    { "id": "v4-h02", "split": "holdout", "report": "### Choosing B alone is a licensing option for Oriel version 1 [1.1]", "expectedTruth": "correct", "technicalOnly": true },
+    { "id": "v4-h03", "split": "holdout", "report": "## Oriel v1 achieves a 2 ms write latency at the 99th percentile", "expectedTruth": "unverifiable", "technicalOnly": true },
+    { "id": "v4-h04", "split": "holdout", "report": "| 数据库版本 | 同一数据库可同时活跃的写入者 |\n|---|---|\n| Oriel 1 | 2 个 [1.1] |", "expectedTruth": "incorrect", "technicalOnly": true },
+    { "id": "v4-h05", "split": "holdout", "report": "| Product | Initial encryption setting |\n|---|---|\n| Oriel version 1 | Disabled [1.1] |", "expectedTruth": "correct", "technicalOnly": true },
+    { "id": "v4-h06", "split": "holdout", "report": "| Product | Measured sustained writes per second |\n|---|---|\n| Oriel version 1 | 35,000 [1.1] |", "expectedTruth": "unverifiable", "technicalOnly": true },
+    { "id": "v4-h07", "split": "holdout", "report": "建议启动两个并发写入进程，因为 Oriel 第一版允许同一个数据库同时有两个活跃写入者。[1.1]", "expectedTruth": "incorrect", "technicalOnly": true },
+    { "id": "v4-h08", "split": "holdout", "report": "Consider selecting B: Oriel version 1 allows B to be chosen without accepting A as well. [1.1]", "expectedTruth": "correct", "technicalOnly": true },
+    { "id": "v4-h09", "split": "holdout", "report": "Summary: Oriel version 1 has no way to switch encryption on, even through explicit configuration. [1.1]", "expectedTruth": "incorrect", "technicalOnly": true },
+    { "id": "v4-h10", "split": "holdout", "report": "- Oriel 第一版在每个数据库上只允许一个活跃写入者。[1.1]\n- 该版本的读取者可以与这个写入者同时运行。[1.1]", "expectedTruth": "correct", "technicalOnly": true },
+    { "id": "v4-h11", "split": "holdout", "report": "Oriel version 1 requires accepting license B even when the user has selected license A. [1.1]", "expectedTruth": "incorrect", "technicalOnly": true },
+    { "id": "v4-h12", "split": "holdout", "report": "Oriel version 3 is offered under license A. [1.1]", "expectedTruth": "unverifiable", "technicalOnly": true },
+    { "id": "v4-h13", "split": "holdout", "report": "Oriel 第一版保证在网络文件系统发生主机崩溃后不会丢失任何已提交数据。[1.1]", "expectedTruth": "unverifiable", "technicalOnly": true },
+    { "id": "v4-h14", "split": "holdout", "report": "The minimum memory required to start Oriel version 1 is 256 MiB.", "expectedTruth": "unverifiable", "technicalOnly": true },
+    { "id": "v4-h15", "split": "holdout", "report": "这份 Oriel 第一版手册没有给出吞吐量测试数字。[1.1]", "expectedTruth": "correct", "technicalOnly": true },
+    { "id": "v4-h16", "split": "holdout", "report": "Encryption starts in the disabled state for Oriel version 1. [8.2]", "expectedTruth": "correct", "technicalOnly": true, "expectedCitation": "unresolved" },
+    { "id": "v4-h17", "split": "holdout", "report": "本次运行已达到探索 token 下限。", "execution": { "budget": { "floorStatus": "unmet", "usage": { "explorationTokens": 12000 } } }, "expectedTruth": "incorrect", "expectedKinds": ["execution_status"] },
+    { "id": "v4-h18", "split": "holdout", "report": "This run's recorded completion status is complete.", "execution": { "completionStatus": "complete" }, "expectedTruth": "correct", "expectedKinds": ["execution_status"] },
+    { "id": "v4-h19", "split": "holdout", "report": "本次运行成功执行了三次来源正文读取。", "execution": {}, "expectedTruth": "unverifiable", "expectedKinds": ["execution_status"] },
+    { "id": "v4-h20", "split": "holdout", "report": "Limitation: encryption is unavailable in Oriel version 1. [1.1]", "expectedTruth": "incorrect", "technicalOnly": true }
+  ]
+}

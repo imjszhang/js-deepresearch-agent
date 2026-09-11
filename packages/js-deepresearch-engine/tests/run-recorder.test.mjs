@@ -310,6 +310,19 @@ ${secret}
     assert.equal(loaded.state.source.content, content);
   });
 
+  it('preserves lone UTF-16 surrogates in large strings across checkpoints and events', () => {
+    const sessionDir = makeSession();
+    const recorder = new FileRunRecorder({ sessionDir, runId: 'utf16', strategy: 'exploratory' });
+    const strings = ['\uddfc', '\ud83c', '\ufffd', '🌼'].map((edge) => `${edge}${'x'.repeat(3000)}${edge}`);
+    recorder.checkpoint('unicode', { strings });
+    recorder.event('unicode', { strings });
+    assert.deepEqual(loadLatestCheckpoint(sessionDir).state.strings, strings);
+    assert.deepEqual(readEventJournal(sessionDir, { materializeBlobs: true }).at(-1).strings, strings);
+    const reopened = FileRunRecorder.reopen(sessionDir);
+    reopened.checkpoint('unicode-again', loadLatestCheckpoint(sessionDir).state);
+    assert.deepEqual(loadLatestCheckpoint(sessionDir).state.strings, strings);
+  });
+
   it('replays an exact recorded body against the current configured endpoint and credentials', async () => {
     const sessionDir = makeSession();
     const recorder = new FileRunRecorder({

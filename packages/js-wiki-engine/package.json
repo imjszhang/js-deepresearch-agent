@@ -27,6 +27,7 @@
     "node": ">=20"
   },
   "dependencies": {
-    "js-intel-store": "^0.1.0"
+    "js-intel-store": "^0.1.0",
+    "js-deepresearch-engine": "1.0.0"
   }
 }

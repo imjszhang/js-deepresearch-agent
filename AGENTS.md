@@ -14,6 +14,28 @@
 - 修改调研逻辑时优先改 `packages/js-deepresearch-engine`；修改归档或 Wiki 管线时分别查看 `src/storage/intel-store.mjs`、`packages/js-wiki-engine`。
 - 对一次性实验使用 CLI flags 覆盖配置，不要用 `config set` 写入持久设置，除非用户明确要求。
 
+## 新执行版本的输入与证据合同
+
+- 新 run 使用 `executionVersion=2`。CLI query 保留原始问题；代理扩写提纲放 `--planning-context <json-file>`，仅接受 `questions / identityHints / readingHints` 字符串数组。API 使用同名 `planningContext`。不得把代理提纲冒充人类硬需求。
+- 入口保存完整 ResearchRequest；明确结构化 slots 和原文明示的枚举交付项保持独立约束。LLM 的 `required`、来源声明及 profile 偏好没有新增硬约束的权限。不确定的输入限制标为 `unresolved_request_constraint`，不得宣称已完整满足。
+- focused/exploratory 的 EvidenceStore 按正文版本保存真实读取内容；位置是提取文本的 UTF-16 区间，summary/snippet 不产生正文锚点。检查范围不足不能写成全文或公开资料不存在。
+- 新报告通过固定 ClaimRecord/SlotBinding 生成。`[n.m]` 必须查 `citations.json`，不能猜测 findings 坐标。来源自述、前提与推导分别验证；失败或冲突会降低绑定与完成度。
+- 未绑定研究问题的文档只保留在证据层，不自动提升为报告主张。主张校验从已有正文片段选择交叉核对上下文，保留反证锚点；比较材料不能替代主张缺失的直接支持。报告恢复仅复用同一校验版本的冻结主张，新 revision 保持已有引用编号。
+- 主张与表达校验要求每个 claimId 恰好一个判断；重复、额外或缺失 ID 按结构错误处理。返回有效反证片段时不能同时判为 supported。当前 claimReviewVersion=4 / claimGraphVersion=2，原子候选还需逐 task 校验回答关系；旧未完成报告需重新校验，已完成结果仍直接交付原 revision。指标 uniqueCitationCount 只统计主报告使用的引用，历史编号总量看 citationRegistryEntryCount。
+- v2 开跑在首次 Planner 前执行一次真实业务搜索探测；正常空结果算成功。搜索调用连续失败会中断依赖动作并保留恢复边界，不能记为正常探索收尾。多 skill 的通道健康独立保存。
+- 新 run 冻结脱敏 executionConfig/configHash；恢复沿用已保存报告输出上限和账本，凭据从当前环境绑定。配置损坏、身份漂移或必要历史身份无法确认需显式报错，不能冒充预算不足。
+- requestContractVersion=2 保留受限语法识别的独立交付项、原文范围与共享上下文；未解析的剩余指令继续作为 unresolved_request_constraint。原子结论通过真值与回答关系校验后可部分交付，不能据此把未完成槽位标为完整。
+- claim_validation 在探索与报告中共用按依赖和协议版本缓存的判断，始终归入校验用量，不补探索下限。新相关反证、条件/版本或协议变化要求重新验证。
+- benchmark 的 quality-judge-9 / quality-scoring-2 使用独立 evaluationRevision，旧分数和 v5–v8 实模失败记录保持原样。工程验收使用 `npm run verify:programmatic -- --output-dir <new-local-dir>`，由真实离线测试、lint/build/diff 和固定场景生成验收记录，不依赖模型准确率；不得以手写 passed 布尔值或模型满分代替。产物完整性、程序验收、模型语义观察分开；`modelThresholdsMet` 仅描述模型判断的聚合，不能证明内容正确。程序/人工来源不能由 provider 声明。
+- 新 benchmark `score --mode model-observation --program-verification <file>` 和 `rebuild --program-verification <file>` 不要求真实校准命中；真实操作仍需用户明确要求。旧 `--calibration`、`validationGate` 保留原严格语义，禁止与新门槛混用或静默改写。普通 `jdr research` / API 不新增验收文件要求。artifact_rebuild 只用既有正文，不搜索或抓取，floorApplicable=false，不混入正式 Google 批次；旧失败不能因新工程验收通过而改成成功。
+- 模型提取、回答关系和出处忠实性仍是模型观察，待审保留分母；相同关系修复不能通过重复审核消除原分歧，绑定按 UTF-16 区间并集判断真正新增，合法零新增结束修复并保留原判断。候选结构失败仅在用量已知、正文完整时退到空提示全文判断；未知调用、预算和完整性错误仍暂停。脚本化 fixture 只验证程序行为，不进入真实观察/曝光账本。
+- 如另行执行真实 calibrate，仍须提供当前版本 --suite、--plan-file、--validation-file 并遵守冻结阶段和预算。v8 suite 只能由其冻结代码继续，不能冒充 v9 留出。已暴露材料不能冒充新留出，首次实模调用后不得改冻结代码、输入、oracle 或预算。
+- v2 manifest 在原文件外包含 `evidence-index.json / citations.json / evidence.md` 及 `evidence-bodies/<hash>.txt`。使用 `readArtifactManifest` / `readArtifactEvidence` 校验；不得回退嵌套 findings 正文来掩盖损坏。无 work-dir 时 result.evidenceStore 带按 hash 去重的内联正文。
+- API 用数据库已提交的 `resultRevision / resultManifestPath` 读取同版本引用和证据，不能用可能滞后的 result-current 指针拼接。`GET /api/research/:id/evidence` 提供独立证据附件；缺失返回完整性错误。
+- 探索下限仍为 600000、探索上限 1000000；`floorStatus=met|unmet|unknown` 独立于保存状态/证据充分性，报告与评估不补探索下限。`action_frontier_exhausted / no_state_change` 如实标记安全停止。禁止空转凑 token。
+- 下限只使用已确认探索用量：确认值达到下限即可标 met；不足且存在未知用量时为 unknown。未知调用不能补下限，且始终保留上限预约和 unknown 记录，不能当作零消耗。
+- 新动作回执与预算账本参与恢复。未知调用保留预约，已落盘响应只结算一次；报告恢复复用已验证主张。旧完成结果保持 v1，旧未收尾探索在内存迁移且冻结原强度；明确继续探索才产生新执行段。
+
 ## 常用开发命令
 
 ```bash
@@ -223,6 +245,7 @@ npm exec --package=. -- jdr research "监管处罚" \
 
 | 条件 | 行为 |
 |---|---|
+| 最新有效边界是 `research-complete`，且没有更新的探索检查点 | 恢复完整最终结果与 `resultRevision`，仅提交/交付；不调用搜索或 LLM |
 | 有 `pre-report` 且无 `--continue-explore` | 只续写报告（noop search；接上已有 `llm-N` 序号） |
 | 无 `pre-report`，但有 `strategy-complete` / `exploratory-loop-complete`，或 step 检查点已带 terminal stop | 不重进探索循环，从该边界续写 passages / 报告 |
 | 无 `pre-report`，有未收尾的 `exploratory-step-complete`（无 terminal stop） | 恢复 `ResearchState` / `loopLocal` / budget / query memory，从**下一步**继续探索循环；使用真实 search |
@@ -265,7 +288,7 @@ npm exec --package=. -- jdr research "deep research" --search js-eyes --search-s
 | 信号 | 首次 `SIGINT` / `SIGTERM` 触发 `AbortController`，取消信号传递到 `ResearchRunner`、[`search-executor`](packages/js-deepresearch-engine/src/research/search-executor.mjs) 与 js-eyes CLI 子进程 |
 | stderr 提示 | `[info] -% Cancellation requested. Stopping research...`，随后 `Research cancelled.` |
 | 历史 | 默认写入 SQLite：创建时 `queued` → 立即 `running` → 成功 `completed` / 取消 `cancelled` / 失败 `failed` |
-| 取消时产物 | 不写半成品 `report` / `work_dir` / `sources`；仅更新历史状态与 `error` 字段 |
+| 取消时产物 | 不提交半成品报告/来源为完成结果；保留已创建会话目录、外部调用记录和最后检查点，更新历史状态与 `error` |
 | `--no-save` | 不写历史，仅 stderr 输出取消提示 |
 | `--json` | 取消时不输出半截 JSON；错误/取消信息走 stderr，exit code **130** |
 | js-eyes | Windows 上 [`cli-process.mjs`](src/search-providers/js-eyes/cli-process.mjs) 会 `child.kill()` 并 `taskkill /T /F` 清理进程树，避免 `.cmd` shim 留下孤儿 Node 进程 |
@@ -281,6 +304,12 @@ CLI 与 Web UI 取消对比：
 两者语义一致（均向 `ResearchRunner` 传 `signal`），CLI 无需 job id。
 
 ### 会话产物结构
+
+新增结果封装 schema v1（不改变 evidence artifact schema v4）：完整批次位于 `results/<resultRevision>/`，包含下表产物、恢复用 `result.json` 与文件哈希 `manifest.json`；`result-current.json` 原子指向当前发布批次。程序读取使用 engine 导出的 `resolveResearchArtifacts(sessionDir)`；没有指针的旧会话沿用根目录读取，有新指针但校验失败时不得静默回退。根目录文件是兼容导出，不保证整批原子更新。
+
+CLI/Web 通过 `ResultCommitService` 将完整来源快照、report、quality、版本和 completed 状态放进同一 SQLite 事务。新版 Intel 归档以 `research_result_snapshots` 保存完整版本，最后发布 `research_runs` 指针；读取优先快照，避免旧增量集合残留来源。提交后的 archive/output/recorder/notification 失败单独记录 delivery，不改变研究状态；显式 `--output` 失败仍返回非零退出码，JSON stdout 保持单个结果。SQLite 提交后若发布指针失败，`--resume` 从完整检查点补齐。`.writer.sqlite` 用 OS 锁保护同一会话写入，进程退出自动解锁；不要删除正在使用的锁文件。
+
+探索循环实现拆分为 `exploratory-loop`（调度及检查点）、`exploratory-planning`（规划/修复辅助）、`exploratory-search`、`exploratory-read` 和 `exploratory-finalization`。循环局部计数/停止状态统一在 `loopLocal`，检查点字段保持兼容。报告准备与收尾分别位于 `report-preparation.mjs`、`report-finalizer.mjs`。
 
 默认路径：`work_dir/<strategy>/<YYYY-MM-DD_HHMMSS>/`
 
@@ -581,93 +610,44 @@ History / Results 中 completed 调研可直达 `/wiki.html?researchId=<id>`；�
 
 ---
 
-## `benchmark` — 评估报告与来源匹配
+## `benchmark` — 新版评测兼容入口
 
-离线评估已保存调研产物，**不会**重新执行 `research` 或搜索。入口为独立脚本（**未**并入主 CLI `jdr`）。
-
-```bash
-# 从 work_dir 会话目录（新产物在 work_dir/focused|quick|exploratory/；source-based 等为历史目录，仍可读）
-node scripts/benchmark-research.mjs work_dir/focused/2026-05-26_043125
-node scripts/benchmark-research.mjs work_dir/source-based/2026-05-26_043125 --no-llm --json
-
-# 从 intel store（需先 archive 或 intel import）
-node scripts/benchmark-research.mjs --research-id 00176e84-2548-4160-add1-7df5a49f7e27 --no-llm
-node scripts/benchmark-research.mjs --research-id imported__source-based__2026-05-26_065414 --strict-platform js-eyes:zhihu
-```
-
-| Flag | 说明 |
-|---|---|
-| `--research-id <id>` | 从 `data/intel` 加载四件套（与 `work_dir` 路径二选一） |
-| `--json` | 输出机器可读 JSON |
-| `--no-llm` | 仅规则层评分，不调用 LLM |
-| `--strict-platform` | 要求引用来源的 `engine` 匹配指定值，如 `js-eyes:zhihu` |
-| `--compare <id1,id2>` | 横向比较多个 Intel Store run 的质量、证据、成本指标，不重新调研 |
-
-输入需包含 `report.md`、`findings.json`、`sources.json`、`meta.json`（目录或 intel 归档均可）。脚本会：
-
-1. 从 `findings.json` 建立 `[1.1]` 引用映射
-2. 从 `Summary` / `Key Findings` / `Evidence` 提取 claim
-3. 规则层检查引用是否存在、来源字段是否完整、平台是否匹配
-4. 可选调用当前 LLM 配置，判定 `supported / partially_supported / unsupported / unverifiable`
-
-典型用途：对比修复前后两次调研，例如 `sources.json` 为空但报告仍完整时，benchmark 会标记 `empty_sources` 与 `no_citation` 风险。
-
-质量指标采用 v2 口径：按 claim 而非 evidence 条目计数；事实 claim 的五种互斥结论之和必须等于 `evaluatedClaimCount`。局限与建议保留展示但不进入事实支持率，Sources/参考文献条目不算 claim，分母为 0 时 rate 为 `null`（文本显示 `n/a`）。Schema v3 的 `--no-llm` 会复用归档 verdict，旧产物才运行本地规则；输出中的 `evaluationOrigin` 用于区分 stored/runtime 与 rules/llm。
-
-### 策略对比 benchmark（`benchmark-strategies`）
-
-横向比较 **quick**、**focused**、**exploratory** 的质量、耗时与成本（LLM tokens、搜索次数、source reads、rerank 次数）。支持离线对比已有 `work_dir` 会话，或对同一 query 依次跑三种策略。
+`benchmark`、`benchmark:strategies`、`benchmark:extract` 共用 `benchmark:quality` 的子命令实现。`score / summary / compare / verify-artifacts / verify-program / plan / run / rebuild` 等参数、预算和执行门槛保持一致；入口仍是独立脚本，不属于 `jdr` 子命令。
 
 ```bash
-# 离线对比已有会话（推荐，不重新调研）
-npm run benchmark:strategies -- \
-  --sessions work_dir/focused/2026-07-13_051140,work_dir/exploratory/2026-07-13_051626 \
-  --no-llm --output tmp/strategy-compare.md
-
-# 从 intel store 对比
-npm run benchmark:strategies -- --research-ids <id1>,<id2> --no-llm --json
-
-# 对同一 query 依次跑三种策略（会调用 LLM + 搜索）
-npm run benchmark:strategies -- \
-  --run "Ollama vs llama.cpp for local LLM deployment" \
-  --strategies quick,focused,exploratory \
-  --no-llm
+npm run benchmark -- --help
+npm run benchmark -- validate --suite benchmarks/research-quality/v1/suite.json
+npm run benchmark -- score --mode model-observation --program-verification <record> --campaign <file> --gold-dir <dir>
+npm run benchmark:strategies -- compare --baseline <campaign> --candidate <campaign>
 ```
 
-| Flag | 说明 |
-|---|---|
-| `--sessions <paths>` | 逗号分隔的 `work_dir` 会话；可用 `adaptive-v2=path` 显式标注 |
-| `--research-ids <ids>` | 从 intel store 加载 |
-| `--run <query>` | 依次执行多种策略后自动对比 |
-| `--strategies <list>` | `--run` 时指定预设，默认 `quick,focused,exploratory` |
-| `--output <file>` | 写入 Markdown/JSON 报告 |
-| `--no-llm` | 官方对比路径：只跑确定性审计。归档 verdict / `--llm` 仅进入文末 **optional / non-official** 语义层，不写入 `status` |
-
-对比报告的官方结果是 **Strategy Audit**，只回答「这次 run 是否满足已发布的确定性证据合同」，不回答「报告好不好 / 真不真」。`--no-llm` 是官方 compare 路径。`status` 是硬门槛，三轮都可以同为 `not_ready`；要比模式差别看 **Observable counts**、**Slot matrix** 和 **Where strategies differ**，不要只看第一列状态。
-
-审计输出 `status`：`ready` / `not_ready` / `invalid`。没有加权总分、没有 A/B/good 评级。五组硬检查：
-
-| 组 | 含义 |
-|---|---|
-| `processContract` | 按策略检查过程（quick 必须 snippet-only 且 `sourceReads=0`；focused 必须有真实正文/摘要并完成所有 `required` slot；exploratory 必须达到探索 token 下限或留下 hard stop，且 `critical` slot 不得 `missing`） |
-| `reportIntegrity` | 标题、非空 Summary/Key Findings、无空列表项、叙事不低于 200 字符 |
-| `citationIntegrity` | `[n.m]` / `citedSourceId` 必须能解析到 findings/sources |
-| `evidenceProvenance` | 真实抓取正文；WAF/Cloudflare/过短壳页不算 body |
-| `requiredSlotCompletion` | 由 `scripts/benchmark/query-battery.mjs` 的 slot catalog 决定，不是主体×方面笛卡尔积 |
-
-Battery 用 **required slots** 替代旧的 subject×aspect 格子。官方 host 写在每个 battery 的 `sourcePolicies` 里（精确 hostname + 可选 `pathPrefix`），不再使用全局 Apple-only 列表。Query 未命中 battery 时，slot 组为 `not_applicable`，不因此判 focused/exploratory 覆盖失败；过程、引用、报告检查仍生效。
-
-`quality.json` / `claims.json` 里的 `supported` / `partially_supported`、规则重叠率、LLM entailment **不得**喂给 `processContract.pass`、`status` 或官方 delta。Markdown 里的 Supported rate 表标为 **optional / non-official semantic analysis**。成本拆出 `explorationTokens` / `reportTokens` / `evaluationTokens`（能拆时），官方效率 **不**除以 supported claim 数。
-
-同一道题的离线对比：
+已有的会话路径、归档 ID 和策略对比参数继续可用，默认只做离线产物诊断，不读取模型设置或调用模型。`--no-llm` 保留为兼容别名。原关键词匹配、历史主张裁决和旧模型 Judge 不再生成新语义分数；缺标准答案不能以空 rubric 或运行时 `supported` 代替。
 
 ```bash
-npm run benchmark:strategies -- \
-  --sessions quick=work_dir/quick/<timestamp>,focused=work_dir/focused/<timestamp>,exploratory=work_dir/exploratory/<timestamp> \
-  --no-llm --output tmp/strategy-audit.md
+npm run benchmark -- <session-dir> --json
+npm run benchmark -- --research-id <id> --json
+npm run benchmark -- --compare <id1>,<id2> --json
+npm run benchmark:strategies -- --sessions focused=<dir1>,exploratory=<dir2> --json
+npm run benchmark:strategies -- --research-ids <id1>,<id2> --output <file>
 ```
 
-耗时取自 `--run` 墙钟时间，或从 `trace.json` 时间戳/`durationMs` 推算；成本取自 `quality.json` 的 `budget.usage`，并尽量按 `trace.json` 的 `llm_call` purpose 拆分。
+检查输出 schemaVersion=2，`artifactVerification` 与 `modelAssessment` 独立。v2 按固定 manifest/revision 复用新版正文、引用注册表和已声明绑定校验；损坏不能回退根目录或 findings。归档 ID 使用已提交 revision，并与归档快照证据核对，不跟随更新的磁盘指针。旧四件套、裸 JSON 或不能确认的归档证据标记 `incomplete`。命令成功返回诊断结果不等于产物状态为 `passed`。
+
+离线输出的 `modelAssessment.observed=false`、`modelThresholdsMet=null`。它可以展示来源字段、正文版本和引用解析等计数，不展示旧 supported rate，也不证明语义真实性和提取完整性。`--strict-platform <id>` 只产生指定搜索平台的来源字段诊断。
+
+### 策略与抽取模式比较
+
+策略比较保留耗时、已记录 token/搜索/阅读/rerank 成本和旧运行诊断。`runtimeDiagnostics`（兼容字段 `audit` / `effectiveness`）标记为 `legacy_heuristic_diagnostics`、`authoritative=false`：旧 query battery 的正则槽位和 `ready/not_ready/invalid` 不属于新版程序验收或独立质量评分。新版质量比较显式使用 `compare --baseline / --candidate`。
+
+`--run` 仍可显式采集同题的多策略样本，必须先提供当前程序验收记录；它不是冻结 Google 题库 campaign，不自动启动模型评分。要求完整冻结实验和逐项评分时使用新版 `plan / run / score`。
+
+```bash
+npm run benchmark:strategies -- --run "你的问题" --strategies quick,focused,exploratory --program-verification <record> --json
+```
+
+抽取比较接受一个 summary 会话目录和一个 extract 结果 JSON；按各自实际记录统计，不虚构 query、创建时间、节省比例或质量结论。裸 JSON 不具备 manifest 证明，保持 `incomplete`。
+
+成本缺失显示 `null/n/a`，明确零值保留；主张/叙事校验计入 evaluation，不补探索。未知用量和下界保留，差值只有两端已知才计算，不能把缺失记录当零成本。
 
 ---
 
@@ -744,11 +724,13 @@ Agent 选型建议：
 
 预算、查询记忆、来源聚类、passage/claim 证据链与自适应停轮**默认已开启**（质量优先预设）。快速摸底可用 `--focused-fetch-mode disabled`、`--focused-evidence-passages false` 等 flag 单次关闭。`preReportGate` 与 LLM 相关性过滤仍默认关闭。专题/快速的次数预算是 `research.budget.maxSearchRequests`（默认 18）和 `maxSourceReads`（默认 16），可用 `--max-search-requests` / `--max-source-reads` 覆盖。探索性调研以 `research.exploratory.minLlmTokens`（默认 600000）为探索下限、`research.exploratory.maxLlmTokens`（默认 1000000）为上限；这两项只约束探索循环（search/read/reason），不含候选答案评估、最终报告和报告后蕴含判定。下限不是停点，也不能因为“已经有一些正文”就输出 `evidence_sufficient`。`evidence_sufficient` 是硬门槛：required/critical gap 仍为 `open`/`missing`、必需一手来源未读、或本轮 search 后尚未成功读到真实正文时，不得结束。允许的新停因只有 `evidence_sufficient`、`budget_exhausted`、`safety_cap`、`user_cancelled`（旧的 `max_budget_exhausted` / `target_budget_reached` 会映射为 `budget_exhausted`；历史产物里的 `source_blocked` 仍可显示，新 run 不再产出）。搜索词只能来自用户原始 query 或统一 LLM Search Query Planner。确定性代码只做调度、去重、`site:` 合法性、来源准入和证据门；校验失败时要求 Planner 重写或停止，不得拼接、锚定、截断或删除 `site:` 后改写查询。恢复路径按未读候选、Planner repair/recovery、有限重写逐级升级；单 gap 默认失败 3 次后标记 `blocked`，全部 unresolved gap 被阻塞或连续 6 步无有效动作时以 `safety_cap` / `quality.stopDetail=repair_exhausted` 或 `query_planner_exhausted` 退出，并在报告 Caveats/Limitations 披露 blocked slot。`maxConsecutiveInvalidSteps` 只保护「LLM 连续给不出有效动作」这类廉价死循环：站点拒绝抓取（4xx/5xx/timeout/network/challenge）计入 `transportFailures`，在探索 token 下限之前**不**计入连续无效步、不触发 `safety_cap`；下限之后若整批读取仍全是传输失败才以 `quality.stopDetail=transport_blocked` 退出。搜索/阅读次数和 `maxSteps` 默认 `0`（不限制）。显式设了探索性次数上限时，用尽后立刻写报告，并列出未关闭 gap、未读官方 host 和仅有二手证据的结论。仅当探索性与全局 token 硬上限都关闭时，才用 64 步安全阀防止廉价死循环。报告默认不截断；`research.budget.reserveReportTokens` 不再预留探索额度。
 
-Schema v4 在 v3 产物之外写入 `report-plan.json`；`claims.json` 增加 `canonicalClaimId`、`placements`、`boundSlotIds`、`origin`。claim/quality 口径升级为 extraction v7、evaluation v5、metrics v4，跨版本指标不要直接比较。Intel Store 继续读取 v2/v3；有 ReportPlan 时优先 round-trip plan claims，无 plan 才重抽 Markdown。`intel import --upgrade-existing` 可从有正文的旧产物派生 passage/claim，不能从 snippet 伪造正文证据。Wiki 会为 v3 生成 `Evidence/` 与 `Open Questions/` 页面。`report.md` 的 Evidence 是精选 passage 展示层：每个 citation 最多展示 1 段、长度不超过 `research.focused.evidencePassages.maxPassageChars`；完整正文以 `sources.json` 为准，完整候选证据以 `passages.json` 为准。主支持率 `supportedRate` 只统计 Summary / Key Findings 的原子事实（完全 supported / 全部分母）；`supportedOrPartialRate` 把 partial 也算进分子。Evidence / Sources / Caveats 不进这个分母。claim extraction v5 起，未知一级标题会开启新的文档根并重置为 `supporting_claim`，不再继承前面的 Key Findings。对比旧 run 时看 `qualityMetricsVersion` 与 `claimExtractionVersion`，不要直接比口径变更前后的百分比。已引用且有正文、规则尚未明确 supported/unsupported 的 key claim，默认再走 `research.quality.entailment=rules_then_llm` 做蕴含判定；设为 `rules` 可关掉。snippet-only 与无引用不能靠 LLM 洗白。
+以下为 executionVersion=1 历史产物的兼容口径；新版以本文开头的 v2 证据/主张规则为准，正文真值在 EvidenceStore，不再以嵌套 sources.content 为准。
+
+历史 Schema v4 在 v3 产物之外写入 `report-plan.json`；`claims.json` 增加 `canonicalClaimId`、`placements`、`boundSlotIds`、`origin`。claim/quality 口径升级为 extraction v7、evaluation v5、metrics v4，跨版本指标不要直接比较。Intel Store 继续读取 v2/v3；有 ReportPlan 时优先 round-trip plan claims，无 plan 才重抽 Markdown。`intel import --upgrade-existing` 可从有正文的旧产物派生 passage/claim，不能从 snippet 伪造正文证据。Wiki 会为 v3 生成 `Evidence/` 与 `Open Questions/` 页面。`report.md` 的 Evidence 是精选 passage 展示层：每个 citation 最多展示 1 段、长度不超过 `research.focused.evidencePassages.maxPassageChars`；完整正文以 `sources.json` 为准，完整候选证据以 `passages.json` 为准。主支持率 `supportedRate` 只统计 Summary / Key Findings 的原子事实（完全 supported / 全部分母）；`supportedOrPartialRate` 把 partial 也算进分子。Evidence / Sources / Caveats 不进这个分母。claim extraction v5 起，未知一级标题会开启新的文档根并重置为 `supporting_claim`，不再继承前面的 Key Findings。对比旧 run 时看 `qualityMetricsVersion` 与 `claimExtractionVersion`，不要直接比口径变更前后的百分比。已引用且有正文、规则尚未明确 supported/unsupported 的 key claim，默认再走 `research.quality.entailment=rules_then_llm` 做蕴含判定；设为 `rules` 可关掉。snippet-only 与无引用不能靠 LLM 洗白。
 
 探索式读取使用共享相关性闭环：`siteQueryMode` 默认 `confirmed`，Planner 仅可对 required host 或本 run SERP 已观察到的 host 生成 `site:`；preferred host 默认只参与排序加权。生成查询中的 `site:` 仍会在结果返回后按真实 hostname 强制校验；若结果 100% 被 site 过滤，该查询只记入 `exhaustedAngles`，不计入 `searchedQueries`，并由 Planner 的 `site_fallback` 模式重写，不得用规则删掉 `site:` 后重搜。新行为只能来自用户显式搜索配置、搜索提供方原始观测、或结构化 LLM 输出；不得新增规则造词、语言检测、静态引擎路由或内容分类域名表。Planner 查询可带可选 `searchOptions` 并原样透传。`summary` 读取改为一次 `source_assessment`（`readability`/`contentKind`/`publisherType`/`firstParty`/`evidenceTier`）。抓取状态、正文质量、来源评估、证据准入是四个独立字段：`fetchStatus` 只记传输事实，`bodyQuality` 记确定性正文判定，`assessmentStatus`（`ok` | `unavailable` | `skipped`）记评估是否跑通。评估返回无效 JSON 只标 `assessmentStatus=unavailable`，**不得**改写 `fetchStatus`、**不得**删除已抓正文，改由规则层（WAF 壳、二进制、过短、实体不匹配）判定是否可用；只有 LLM 真给出 `readability=unreadable` 才是内容判定，且同样只写 `bodyQuality`。评估不可用时 `criterion:first_party` 降级为硬 host 规则（用户显式 host 与 query 字面 host，不含 planner 的 preferred host）。成功搜索 trace 必须带 `queryOrigin`（`user_query` | `llm_planner`）。离线审计字段为 `queriesMissingProvenance`、`ruleGeneratedQueryCount`、`plannerRejectedQueries`、`plannerRetryCount`、`siteFallbackWithoutPlanner`；新 run 缺失 provenance、规则造词或非 Planner 的 site fallback 均判失败，旧 schema 产物标为 not-applicable。候选按目标 gap 分别保存 rerank 分数和准入决策；未执行 rerank 时分数保持 `null`，以 `rerank_not_evaluated` 准入。外部 rerank 分数是排序与诊断信号，低于阈值标记为 `rerank_below_threshold_soft` 并降低优先级，但不能单独禁止读取；`site:` 约束、实体不匹配与正文主体不相关仍是硬拒绝。混合读取批次只过滤不合格来源，不得连带拒绝同批合格来源。抓取正文仍须命中 ResearchBrief 实体，否则标为 `irrelevant`，不生成 summary/passage/finding、不增加 novelty。引用锚定允许 HTML entity 与 Unicode 标点的等价规范化，但不允许模糊改写；研究判断槽可由多条已锚定事实综合支持，不要求来源逐字写出分析结论。`quality.metrics.relevance` 保存 returned/site-rejected/admitted/rerank-accepted/rerank-rejected/body-irrelevant/read-accepted 漏斗；`quality.metrics.relevance` 另有 `assessmentUnavailable` / `admittedWithoutAssessment`。`quality.metrics.recovery` 保存 invalid/recovery/duplicate/site fallback/blocked gap 统计，以及独立于语义无效步的 `transportFailures` / `transportStreak` / `transportBlockedHosts`。`required_host_missing` 失败带 `hostDiagnostics`，区分 `not_retrieved`（没搜到）、`fetch_blocked`（站点拒绝）与 `body_rejected`（抓到但没通过证据检查）。HTTP endpoint 不返回 token usage 时 `budget.unknown.rerankTokens=true`。
 
-Issue #27 起还写入 `brief.json`：ResearchBrief schema v2 兼容 v1 与原字符串 query；gap schema v4 兼容旧 gap，并增加 `contractSlotId`、`preferredHosts`、`requiredHostMode`。每个 required slot 一对一物化，模糊问题去重与动态 gap 上限不能吞掉契约槽；required slot 也不能借用其他槽的正文。用户结构化输入优先，planner 只能补空；用户显式或 query 字面 slot host 可保持 required，Planner 非字面 host 降为 preferred hint。`budget_exhausted` 只表示真实有限 token/search/read cap 阻止继续，具体原因写入 `quality.stopDetail`；重复查询、plateau 与无新角度不再伪装成预算耗尽。有 explicit slots 时 root gap 只做 roll-up，不重复搜索、不独立阻断 readiness。focused 与 exploratory 共用确定性 readiness primitive，normal required slot 也不能被忽略；plateau 只能让 focused 停止追加 repair 或让 exploratory 换角度，不能越过 readiness failure 或 exploratory token floor。共享读取配置为 `research.read.*`，旧 `research.focused.*` 仍作为兼容 fallback；无效的 `plannerParallelism`、`enableCoding` 已移除。`intel import` / archive 会 round-trip `brief`。
+历史 Issue #27 起还写入 `brief.json`：ResearchBrief schema v2 兼容 v1 与原字符串 query；gap schema v4 兼容旧 gap，并增加 `contractSlotId`、`preferredHosts`、`requiredHostMode`。每个 required slot 一对一物化，模糊问题去重与动态 gap 上限不能吞掉契约槽；required slot 也不能借用其他槽的正文。用户结构化输入优先，planner 只能补空；用户显式或 query 字面 slot host 可保持 required，Planner 非字面 host 降为 preferred hint。`budget_exhausted` 只表示真实有限 token/search/read cap 阻止继续，具体原因写入 `quality.stopDetail`；重复查询、plateau 与无新角度不再伪装成预算耗尽。有 explicit slots 时 root gap 只做 roll-up，不重复搜索、不独立阻断 readiness。focused 与 exploratory 共用确定性 readiness primitive，normal required slot 也不能被忽略；plateau 只能让 focused 停止追加 repair 或让 exploratory 换角度，不能越过 readiness failure 或 exploratory token floor。共享读取配置为 `research.read.*`，旧 `research.focused.*` 仍作为兼容 fallback；无效的 `plannerParallelism`、`enableCoding` 已移除。`intel import` / archive 会 round-trip `brief`。
 
 ### HTTP 取证客户端
 

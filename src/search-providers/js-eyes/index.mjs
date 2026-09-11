@@ -5,6 +5,7 @@ import {
   filterSearchOptions,
   sanitizeSearchOptions,
   SearchProviderError,
+  SearchHealth,
   searchErrorFromProviderPayload,
 } from 'js-deepresearch-engine';
 import {
@@ -27,10 +28,12 @@ import { DEFAULT_TIMEOUT_MS } from './constants.mjs';
 function wrapProviderError(error, fallbackMessage = 'JS Eyes search failed') {
   if (isAbortError(error)) return error;
   if (error instanceof SearchProviderError) return error;
+  if (error?.payload?.error && typeof error.payload.error === 'object') return searchErrorFromProviderPayload(error.payload, { provider: 'js-eyes' });
   return new SearchProviderError(error?.message || fallbackMessage, {
-    code: 'provider_error',
+    code: error?.code || 'provider_error',
     retryable: false,
     provider: 'js-eyes',
+    phase: error?.phase,
   });
 }
 
@@ -41,11 +44,17 @@ function retryLimit(provider, error) {
 
 export class JsEyesCliSearchEngine {
   constructor(config = {}, options = {}) {
+    this.requiresReadinessProbe = true;
     this.config = config;
     this.spawn = options.spawn || spawn;
+    this.skillHealth = new Map();
     const provider = resolveProviderConfig(config);
     this.capabilities = resolveJsEyesCapabilities(provider, options.capabilities || {});
   }
+
+  getSearchHealthState() { return [...this.skillHealth].map(([skillId, health]) => [skillId, health.snapshot()]); }
+  restoreSearchHealthState(saved = []) { this.skillHealth = new Map(saved.map(([skillId, snapshot]) => [skillId, new SearchHealth({ snapshot })])); }
+  beginReadinessProbe() { for (const health of this.skillHealth.values()) if (health.state === 'open') health.beginProbe(); }
 
   async search(query, { signal, searchOptions } = {}) {
     const trimmedQuery = String(query || '').trim();
@@ -129,7 +138,10 @@ export class JsEyesCliSearchEngine {
     const failures = [];
 
     for (const skillId of provider.skills) {
+      if (!this.skillHealth.has(skillId)) this.skillHealth.set(skillId, new SearchHealth());
+      const health = this.skillHealth.get(skillId);
       try {
+        health.assertAvailable();
         const preArgs = buildSkillRunPreCommand(query, skillId, provider);
         if (preArgs) {
           await this.runCliQueued(
@@ -160,9 +172,15 @@ export class JsEyesCliSearchEngine {
         }
 
         batches.push(normalizeUnifiedItems(payload, this.config, skillId));
+        health.succeed();
       } catch (error) {
         if (isAbortError(error)) throw error;
-        failures.push({ skillId, error: error.message, raw: error });
+        let failure = error;
+        if (health.state !== 'open') {
+          try { health.fail(Object.assign(wrapProviderError(error), { failureScope: 'skill', skillId })); }
+          catch (observed) { failure = observed; }
+        }
+        failures.push({ skillId, error: failure.message, raw: failure });
       }
     }
 

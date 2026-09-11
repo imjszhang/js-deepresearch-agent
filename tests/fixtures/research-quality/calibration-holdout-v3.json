@@ -1,0 +1,176 @@
+{
+  "schemaVersion": 1,
+  "labeledBy": "codex-agent",
+  "humanReviewed": false,
+  "cases": [
+    {
+      "id": "holdout-21",
+      "split": "holdout",
+      "report": "本次调研范围是 Oriel v1 的加密默认设置。",
+      "query": "调研 Oriel v1 的加密默认设置。",
+      "expectedTruth": "correct",
+      "expectedKinds": [
+        "research_scope"
+      ]
+    },
+    {
+      "id": "holdout-22",
+      "split": "holdout",
+      "report": "本次调研未完整回答问题。",
+      "execution": {
+        "completionStatus": "incomplete"
+      },
+      "expectedTruth": "correct",
+      "expectedKinds": [
+        "execution_status"
+      ]
+    },
+    {
+      "id": "holdout-23",
+      "split": "holdout",
+      "report": "本次运行没有进行来源正文读取。",
+      "execution": {
+        "budget": {
+          "usage": {
+            "sourceReads": 0
+          }
+        }
+      },
+      "expectedTruth": "correct",
+      "expectedKinds": [
+        "epistemic_limit",
+        "execution_status"
+      ]
+    },
+    {
+      "id": "holdout-24",
+      "split": "holdout",
+      "report": "No public evidence about Oriel v1 throughput exists anywhere.",
+      "expectedTruth": "unverifiable",
+      "technicalOnly": true
+    },
+    {
+      "id": "holdout-25",
+      "split": "holdout",
+      "report": "Oriel v1 has no encryption feature.",
+      "expectedTruth": "incorrect",
+      "technicalOnly": true
+    },
+    {
+      "id": "holdout-26",
+      "split": "holdout",
+      "report": "Consider testing your workload before deployment.",
+      "expectedTruth": "unverifiable",
+      "expectedKinds": [
+        "recommendation"
+      ]
+    },
+    {
+      "id": "holdout-27",
+      "split": "holdout",
+      "report": "Because Oriel v1 enables encryption by default, I recommend retaining that default. [1.1]",
+      "expectedTruth": "incorrect",
+      "technicalOnly": true
+    },
+    {
+      "id": "holdout-28",
+      "split": "holdout",
+      "report": "## Oriel v1 enables encryption by default [1.1]",
+      "expectedTruth": "incorrect",
+      "technicalOnly": true
+    },
+    {
+      "id": "holdout-29",
+      "split": "holdout",
+      "report": "| Version | Concurrent writers per database |\n|---|---|\n| Oriel v1 | Unlimited [1.1] |",
+      "expectedTruth": "incorrect",
+      "technicalOnly": true
+    },
+    {
+      "id": "holdout-30",
+      "split": "holdout",
+      "report": "Oriel version 1 allows choosing license B.",
+      "expectedTruth": "correct",
+      "technicalOnly": true
+    },
+    {
+      "id": "holdout-31",
+      "split": "holdout",
+      "report": "Oriel v1 has encryption disabled by default. [9.9]",
+      "expectedTruth": "correct",
+      "technicalOnly": true,
+      "expectedCitation": "unresolved"
+    },
+    {
+      "id": "holdout-32",
+      "split": "holdout",
+      "report": "Oriel v2 permits exactly one writer per database. [1.1]",
+      "expectedTruth": "unverifiable",
+      "technicalOnly": true
+    },
+    {
+      "id": "holdout-33",
+      "split": "holdout",
+      "report": "Oriel v1 encryption is enabled only when explicitly enabled, rather than by default. [1.1]",
+      "expectedTruth": "correct",
+      "technicalOnly": true
+    },
+    {
+      "id": "holdout-34",
+      "split": "holdout",
+      "report": "In Oriel v1, a reader cannot run while a writer is active. [1.1]",
+      "expectedTruth": "incorrect",
+      "technicalOnly": true
+    },
+    {
+      "id": "holdout-35",
+      "split": "holdout",
+      "report": "Oriel v1 requires accepting A in addition to B. [1.1]",
+      "expectedTruth": "incorrect",
+      "technicalOnly": true
+    },
+    {
+      "id": "holdout-36",
+      "split": "holdout",
+      "report": "Oriel v1 allows only one active writer per database, with readers allowed concurrently. [1.1]",
+      "expectedTruth": "correct",
+      "technicalOnly": true
+    },
+    {
+      "id": "holdout-37",
+      "split": "holdout",
+      "report": "The supplied Oriel v1 manual states that users may choose license A or license B. [1.1]",
+      "expectedTruth": "correct",
+      "expectedKinds": [
+        "attribution",
+        "fact"
+      ]
+    },
+    {
+      "id": "holdout-38",
+      "split": "holdout",
+      "report": "Oriel v1 therefore guarantees one million writes per second. [1.1]",
+      "expectedTruth": "unverifiable",
+      "technicalOnly": true
+    },
+    {
+      "id": "holdout-39",
+      "split": "holdout",
+      "report": "This research run completed all requirements.",
+      "execution": {
+        "completionStatus": "incomplete"
+      },
+      "expectedTruth": "incorrect",
+      "expectedKinds": [
+        "execution_status"
+      ]
+    },
+    {
+      "id": "holdout-40",
+      "split": "holdout",
+      "report": "The supplied Oriel v1 manual provides no throughput measurements. [1.1]",
+      "expectedTruth": "correct",
+      "technicalOnly": true
+    }
+  ]
+}

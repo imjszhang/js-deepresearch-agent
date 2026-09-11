@@ -1,7 +1,9 @@
 import express from 'express';
 import path from 'node:path';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
+  readArtifactManifest,
   providerMetadata,
   searchEngineMetadata,
   strategyMetadata,
@@ -63,11 +65,12 @@ export function createApp(db) {
     try {
       const record = jobRunner.start({
         query,
+        planningContext: req.body?.planningContext,
         overrides: req.body?.settings || {},
       });
       res.status(202).json(record);
     } catch (error) {
-      res.status(500).json({ error: error.message });
+      res.status(error instanceof TypeError ? 400 : 500).json({ error: error.message });
     }
   });
 
@@ -77,11 +80,37 @@ export function createApp(db) {
       res.status(404).json({ error: 'Research not found.' });
       return;
     }
+    let committed = {};
+    if (record.resultManifestPath) {
+      try {
+        const artifacts = readArtifactManifest(record.sessionDir, record.resultManifestPath);
+        if (artifacts.resultRevision !== record.resultRevision) throw new Error('Revision mismatch');
+        committed = { citationRegistry: artifacts.citationsPath ? JSON.parse(fs.readFileSync(artifacts.citationsPath, 'utf8')) : null,
+          evidenceUrl: artifacts.evidencePath ? `/api/research/${encodeURIComponent(record.id)}/evidence` : null, integrityStatus: 'verified' };
+      } catch {
+        res.status(503).json({ error: 'Committed result artifacts failed integrity verification.', code: 'RESULT_INTEGRITY' });
+        return;
+      }
+    }
     res.json({
       ...record,
+      ...committed,
       logs: logRepository.list(req.params.id),
       sources: sourceRepository.list(req.params.id),
     });
+  });
+
+  app.get('/api/research/:id/evidence', (req, res) => {
+    const record = researchRepository.get(req.params.id);
+    if (!record?.resultManifestPath) return res.status(404).json({ error: 'Evidence not found.' });
+    try {
+      const artifacts = readArtifactManifest(record.sessionDir, record.resultManifestPath);
+      if (artifacts.resultRevision !== record.resultRevision) throw new Error('Revision mismatch');
+      if (!artifacts.evidencePath) return res.status(404).json({ error: 'No separate evidence appendix for this legacy result.' });
+      res.type('text/markdown').attachment('evidence.md').send(fs.readFileSync(artifacts.evidencePath, 'utf8'));
+    } catch {
+      res.status(503).json({ error: 'Committed evidence failed integrity verification.', code: 'RESULT_INTEGRITY' });
+    }
   });
 
   app.get('/api/research/:id/events', (req, res) => {

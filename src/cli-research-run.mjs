@@ -8,8 +8,11 @@ import {
   saveResearchArtifacts,
   isReportResumeMode,
   selectResearchResumePlan,
+  normalizePlanningContext,
+  resolveRunExecutionSettings,
 } from 'js-deepresearch-engine';
-import { archiveResearchResultSafe } from './storage/intel-store.mjs';
+import { completeResearch, recordResearchFailure, deliveryFailure } from './research-completion.mjs';
+import { acquireSessionLock } from './session-lock.mjs';
 import { probeSearchProvider } from './search-preflight.mjs';
 import { parseResumeExploreFlags } from './cli-utils.mjs';
 
@@ -64,6 +67,7 @@ export function createResearchAbortController({
 
 export async function runCliResearch({
   query,
+  planningContext,
   settings,
   flags,
   services,
@@ -77,6 +81,10 @@ export async function runCliResearch({
   onProgressLog = defaultProgressLog,
   probeSearch = probeSearchProvider,
 }) {
+  const contextFile = flags['planning-context'];
+  if (contextFile === true) throw new TypeError('--planning-context requires a JSON file.');
+  planningContext = normalizePlanningContext(contextFile
+    ? JSON.parse(fs.readFileSync(path.resolve(contextFile), 'utf8')) : planningContext);
   const { controller, install, remove } = createResearchAbortController({
     signalTarget,
     onFirstCancel: () => {
@@ -88,6 +96,7 @@ export async function runCliResearch({
   let recordId = null;
   let sessionDir = null;
   let recorder = null;
+  let releaseLock = null;
 
   try {
     await probeSearch(settings, { signal: controller.signal });
@@ -108,6 +117,7 @@ export async function runCliResearch({
       if (recordId) {
         services.researchRepository.updateStatus(recordId, 'running', { sessionDir });
       }
+      releaseLock = acquireSessionLock(sessionDir);
       recorder = createRecorder({
         sessionDir,
         runId,
@@ -121,6 +131,7 @@ export async function runCliResearch({
 
     const result = await runner.run({
       query,
+      planningContext,
       settings,
       signal: controller.signal,
       recorder,
@@ -129,89 +140,21 @@ export async function runCliResearch({
       },
     });
 
-    let artifacts = null;
-    if (!flags['no-work-dir']) {
-      artifacts = saveArtifacts({
-        sessionDir,
-        settings,
-        strategy: settings.research.strategy,
-        query,
-        result,
-        researchId: recordId || undefined,
-      });
-      if (!flags.json) {
-        onProgressLog('info', '-', `Artifacts saved to ${artifacts.sessionDir}`);
-      }
-    }
-
-    if (recordId) {
-      services.sourceRepository.addMany(recordId, result.sources);
-      await archiveResearchResultSafe({
-        researchId: recordId,
-        query,
-        strategy: settings.research.strategy,
-        result,
-        artifacts,
-        settings,
-      }, {
-        onWarning: (message) => {
-          if (!flags.json) {
-            onProgressLog('warn', '-', `Intel store archive failed: ${message}`);
-          }
-        },
-      });
-      services.researchRepository.updateStatus(recordId, 'completed', {
-        report: result.report,
-        quality: result.quality,
-        completedAt: new Date().toISOString(),
-      });
-    }
-
-    if (!flags.json) {
-      for (const hint of collectManualImportHints({
-        gaps: result.gaps || [],
-        readiness: result.readiness || result.quality?.readiness || null,
-        findings: result.findings || [],
-        corpusDirs: settings.search?.local?.dirs || [],
-      })) {
-        onProgressLog('info', '-', hint);
-      }
-    }
-
-    if (flags.output) {
-      writeFile(flags.output, result.report, 'utf8');
-    }
-
-    recorder?.finalize?.('completed', {
-      artifacts: artifacts ? {
-        reportPath: artifacts.reportPath,
-        findingsPath: artifacts.findingsPath,
-        sourcesPath: artifacts.sourcesPath,
-        metaPath: artifacts.metaPath,
-      } : null,
+    const outcome = await completeResearch({
+      id: recordId, result, query, strategy: settings.research.strategy, settings,
+      sessionDir, recorder, services, saveArtifacts, writeFile, output: flags.output,
+      signal: controller.signal,
+      onWarning: ({ stage, code }) => onProgressLog('warn', '-', `Delivery ${stage} failed (${code}); research result retained.`),
     });
-    return { result, artifacts };
+    reportCompletionHints(outcome, settings, flags, onProgressLog);
+    return outcome;
   } catch (error) {
-    if (isAbortError(error) || controller.signal.aborted) {
-      recorder?.finalize?.('cancelled', { error });
-      if (recordId) {
-        services.researchRepository.updateStatus(recordId, 'cancelled', {
-          error: error.message || 'Research cancelled.',
-          completedAt: new Date().toISOString(),
-        });
-      }
-      throw new ResearchCancelledError(error.message || 'Research cancelled.');
-    }
-
-    recorder?.finalize?.('failed', { error });
-    if (recordId) {
-      services.researchRepository.updateStatus(recordId, 'failed', {
-        error: error.message,
-        completedAt: new Date().toISOString(),
-      });
-    }
+    const cancelled = isAbortError(error) || controller.signal.aborted;
+    recordResearchFailure({ recorder, repository: services.researchRepository, id: recordId, error, cancelled });
+    if (cancelled) throw new ResearchCancelledError();
     throw error;
   } finally {
+    releaseLock?.();
     remove();
   }
 }
@@ -250,11 +193,24 @@ export async function runCliResearchResume({
   install();
   let recordId = null;
   let recorder = null;
+  let releaseLock = null;
+  let preserveCommittedResult = false;
 
   try {
+    releaseLock = acquireSessionLock(resolvedSessionDir);
+    const exploreFlags = resumeExplore || parseResumeExploreFlags(flags);
+    const resumePlan = selectResearchResumePlan({
+      sessionDir: resolvedSessionDir,
+      continueExplore: exploreFlags.continueExplore,
+      extraSteps: exploreFlags.extraSteps,
+    });
+    if (resumePlan.mode !== 'commit-result') settings = resolveRunExecutionSettings(settings, {
+      sessionDir: resolvedSessionDir, checkpoint: resumePlan.checkpoint?.state,
+    }).settings;
     if (!flags['no-save'] && runId) {
       recordId = runId;
       const existing = services.researchRepository.get(recordId);
+      preserveCommittedResult = resumePlan.mode === 'commit-result' && existing?.status === 'completed';
       if (!existing) {
         services.researchRepository.create({
           id: recordId,
@@ -262,7 +218,7 @@ export async function runCliResearchResume({
           strategy,
         });
       }
-      services.researchRepository.updateStatus(recordId, 'running', {
+      if (resumePlan.mode !== 'commit-result' || existing?.status !== 'completed') services.researchRepository.updateStatus(recordId, 'running', {
         error: null,
         sessionDir: resolvedSessionDir,
         completedAt: null,
@@ -270,14 +226,8 @@ export async function runCliResearchResume({
     }
 
     recorder = createRecorder(resolvedSessionDir);
-    const exploreFlags = resumeExplore || parseResumeExploreFlags(flags);
-    const resumePlan = selectResearchResumePlan({
-      sessionDir: resolvedSessionDir,
-      continueExplore: exploreFlags.continueExplore,
-      extraSteps: exploreFlags.extraSteps,
-    });
     if (isReportResumeMode(resumePlan.mode)) {
-      onProgressLog('info', '-', `Resuming report phase from ${resolvedSessionDir}`);
+      onProgressLog('info', '-', resumePlan.mode === 'commit-result' ? `Restoring completed result from ${resolvedSessionDir}` : `Resuming report phase from ${resolvedSessionDir}`);
     } else {
       onProgressLog(
         'info',
@@ -303,87 +253,23 @@ export async function runCliResearchResume({
       },
     });
 
-    const artifacts = saveArtifacts({
-      sessionDir: resolvedSessionDir,
-      settings,
-      strategy,
-      query,
-      result,
-      researchId: recordId || undefined,
+    const outcome = await completeResearch({
+      id: recordId, result, query, strategy, settings,
+      sessionDir: resolvedSessionDir, recorder, services, saveArtifacts, writeFile, output: flags.output,
+      signal: controller.signal,
+      onWarning: ({ stage, code }) => onProgressLog('warn', '-', `Delivery ${stage} failed (${code}); research result retained.`),
     });
-    if (!flags.json) {
-      onProgressLog('info', '-', `Artifacts saved to ${artifacts.sessionDir}`);
-    }
-
-    if (recordId) {
-      services.sourceRepository.addMany(recordId, result.sources);
-      await archiveResearchResultSafe({
-        researchId: recordId,
-        query,
-        strategy,
-        result,
-        artifacts,
-        settings,
-      }, {
-        onWarning: (message) => {
-          if (!flags.json) {
-            onProgressLog('warn', '-', `Intel store archive failed: ${message}`);
-          }
-        },
-      });
-      services.researchRepository.updateStatus(recordId, 'completed', {
-        report: result.report,
-        quality: result.quality,
-        error: null,
-        completedAt: new Date().toISOString(),
-      });
-    }
-
-    if (!flags.json) {
-      for (const hint of collectManualImportHints({
-        gaps: result.gaps || [],
-        readiness: result.readiness || result.quality?.readiness || null,
-        findings: result.findings || [],
-        corpusDirs: settings.search?.local?.dirs || [],
-      })) {
-        onProgressLog('info', '-', hint);
-      }
-    }
-
-    if (flags.output) {
-      writeFile(flags.output, result.report, 'utf8');
-    }
-
-    recorder?.finalize?.('completed', {
-      artifacts: artifacts ? {
-        reportPath: artifacts.reportPath,
-        findingsPath: artifacts.findingsPath,
-        sourcesPath: artifacts.sourcesPath,
-        metaPath: artifacts.metaPath,
-      } : null,
-    });
-    return { result, artifacts };
+    reportCompletionHints(outcome, settings, flags, onProgressLog);
+    return outcome;
   } catch (error) {
-    if (isAbortError(error) || controller.signal.aborted) {
-      recorder?.finalize?.('cancelled', { error });
-      if (recordId) {
-        services.researchRepository.updateStatus(recordId, 'cancelled', {
-          error: error.message || 'Research cancelled.',
-          completedAt: new Date().toISOString(),
-        });
-      }
-      throw new ResearchCancelledError(error.message || 'Research cancelled.');
-    }
-
-    recorder?.finalize?.('failed', { error });
-    if (recordId) {
-      services.researchRepository.updateStatus(recordId, 'failed', {
-        error: error.message,
-        completedAt: new Date().toISOString(),
-      });
-    }
+    const cancelled = isAbortError(error) || controller.signal.aborted;
+    if (preserveCommittedResult) {
+      try { services.researchRepository.saveDelivery?.(recordId, { failures: [deliveryFailure('resume', error)] }); } catch { /* result already committed */ }
+    } else recordResearchFailure({ recorder, repository: services.researchRepository, id: recordId, error, cancelled });
+    if (cancelled) throw new ResearchCancelledError();
     throw error;
   } finally {
+    releaseLock?.();
     remove();
   }
 }
@@ -394,4 +280,15 @@ function defaultCryptoRandomId() {
 
 function defaultProgressLog(level, progress, message) {
   console.error(`[${level}] ${progress ?? '-'}% ${message}`);
+}
+
+function reportCompletionHints({ result, artifacts }, settings, flags, log) {
+  // Reporting after commit is best effort, just like SSE delivery.
+  try {
+    if (artifacts && !flags.json) log('info', '-', `Artifacts saved to ${artifacts.reportPath}`);
+    if (!flags.json) for (const hint of collectManualImportHints({
+      gaps: result.gaps || [], readiness: result.readiness || result.quality?.readiness || null,
+      findings: result.findings || [], corpusDirs: settings.search?.local?.dirs || [],
+    })) log('info', '-', hint);
+  } catch { /* result already committed */ }
 }

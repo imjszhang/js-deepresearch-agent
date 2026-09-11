@@ -1,0 +1,9 @@
+{
+  "id": "sqlite-open",
+  "topicId": "sqlite",
+  "variant": "open",
+  "query": "调研 SQLite 3.46.0 在单机本地文件系统、多个进程访问、长时间读取和持续写入场景中的 WAL 可靠性风险及应对办法。",
+  "language": "zh-CN",
+  "scope": "SQLite 3.46.0; single host, local filesystem; WAL; separate connections/processes",
+  "requirements": []
+}

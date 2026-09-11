@@ -246,7 +246,7 @@ describe('extract run stats', () => {
         budget: { usage: { llmTokens: 1200, explorationTokens: 1000 } },
       },
       trace: [
-        { action: 'search', query: 'topic', queryOrigin: 'user_query', resultCount: 2, budgetAfter: { usage: { llmTokens: 700 } } },
+        { action: 'search', query: 'topic', queryOrigin: 'user_query', resultCount: 2, budgetAfter: { usage: { llmTokens: 700, explorationTokens: 700 } } },
         { action: 'search', query: 'topic official', queryOrigin: 'llm_planner', reasonCode: 'site_fallback_query', siteFallbackOf: 'site:gov.cn topic' },
         { action: 'llm_call', status: 'completed', purpose: 'agent_decision', tokens: 300 },
       ],
@@ -335,6 +335,39 @@ describe('extract run stats', () => {
 });
 
 describe('compare strategy sessions', () => {
+  it('[V23] rejects implicit legacy judging before reading any session', async () => {
+    await assert.rejects(compareStrategySessions({ sessions: ['missing-a', 'missing-b'], llmEnabled: true }), /offline/);
+  });
+
+  it('[V23] preserves session paths containing equals and marks missing queries unverified', async () => {
+    const original = createFixture({ query: 'Known question' });
+    const baseline = `${original}=revision`;
+    fs.renameSync(original, baseline);
+    tempDirs.push(baseline);
+    const candidate = createFixture({ query: null });
+    const comparison = await compareStrategySessions({ sessions: [`baseline=${baseline}`, candidate] });
+    assert.equal(comparison.runs[0].workDir, baseline);
+    assert.equal(comparison.query, null);
+    assert.ok(comparison.warnings.some((warning) => warning.includes('no recorded query')));
+    const unlabelled = await compareStrategySessions({ sessions: [baseline, candidate] });
+    assert.equal(unlabelled.runs[0].workDir, baseline);
+  });
+
+  it('[V23] preserves unknown costs and keeps legacy heuristics outside artifact verification', async () => {
+    const baseline = createFixture({ quality: { budget: { usage: { llmTokens: 200 } } } });
+    const candidate = createFixture({ quality: { budget: { usage: { llmTokens: 100 }, unknown: { llmTokens: true } } } });
+    const comparison = await compareStrategySessions({ sessions: [baseline, candidate] });
+    assert.equal(comparison.deltas[0].llmTokens, null);
+    assert.equal(comparison.deltas[0].sourceReads, null);
+    assert.equal(comparison.runs[1].runtimeDiagnostics.scope, 'legacy_heuristic_diagnostics');
+    assert.equal(comparison.runs[1].runtimeDiagnostics.authoritative, false);
+    assert.equal(comparison.runs[1].benchmark.artifactVerification.status, 'incomplete');
+    const markdown = formatStrategyCompareMarkdown(comparison);
+    assert.match(markdown, />= 100 \(total unknown\)/);
+    assert.match(markdown, /LLM tokens: n\/a/);
+    assert.match(markdown, /independent answer completeness/);
+  });
+
   it('compares two offline sessions with deltas', async () => {
     const sourceBased = createFixture({
       strategy: 'focused',
@@ -402,9 +435,16 @@ describe('compare strategy sessions', () => {
     assert.equal(comparison.runs[0].effectiveness, comparison.runs[0].audit);
     const markdown = formatStrategyCompareMarkdown(comparison);
     assert.match(markdown, /Strategy Benchmark Comparison/);
-    assert.match(markdown, /Strategy Audit/);
+    assert.match(markdown, /Legacy heuristic diagnostics/);
     assert.match(markdown, /ready|not_ready|invalid/);
     assert.doesNotMatch(markdown, /Narrative supported|Tokens \/ supported|Contract \|/);
+    assert.doesNotMatch(markdown, /Optional semantic analysis|At least partial|Supported \|/);
+    assert.equal(comparison.schemaVersion, 2);
+    assert.equal(comparison.runs[0].benchmark.schemaVersion, 2);
+    assert.equal(comparison.runs[0].benchmark.artifactVerification.status, 'incomplete');
+    assert.equal(comparison.runs[0].benchmark.modelAssessment.observed, false);
+    assert.equal(comparison.runs[0].benchmark.modelAssessment.modelThresholdsMet, null);
+    assert.equal(comparison.runs[0].audit.authoritative, false);
     assert.match(formatStrategyCompareJson(comparison), /"strategyLabel": "exploratory"/);
   });
 
@@ -515,7 +555,8 @@ llama.cpp 定位为跨平台底层引擎 [1.1]。MLX 定位为 Apple 原生框�
     assert.match(markdown, /Slot matrix/);
     assert.match(markdown, /Where strategies differ/);
     assert.match(markdown, /llamacpp\.positioning/);
-    assert.match(markdown, /Optional semantic analysis \(non-official\)/);
+    assert.match(markdown, /Artifact verification and model observation/);
+    assert.doesNotMatch(markdown, /Optional semantic analysis/);
     assert.doesNotMatch(markdown, /Narrative supported|Tokens \/ supported|official supported rate/);
     assert.doesNotMatch(markdown, /Subject × aspect|cellRate/);
   });

@@ -131,6 +131,11 @@ export function sanitizeAnswerSlots(slots, {
       successCriteria: uniqueText(source.successCriteria, 8),
       evidenceCriteria: uniqueText(source.evidenceCriteria, 8),
       requiredSlot: source.requiredSlot !== false,
+      taskType: ['fact', 'comparison', 'derived_judgment'].includes(source.taskType) ? source.taskType : 'fact',
+      origin: source.origin || null,
+      constraintIds: uniqueText(source.constraintIds),
+      parentTaskId: source.parentTaskId || null,
+      evidencePreferences: uniqueText(source.evidencePreferences),
     });
     if (result.length >= 20) break;
   }
@@ -143,7 +148,7 @@ export function sanitizeResearchBrief(input = {}, {
   allowExplicitHosts = false,
 } = {}) {
   const source = typeof input === 'string' ? { query: input } : (input || {});
-  const resolvedQuery = text(query || source.query);
+  const resolvedQuery = source.request?.originalQuery || text(query || source.query);
   const resolvedDepth = RESEARCH_BRIEF_DEPTHS.includes(source.depth)
     ? source.depth
     : (RESEARCH_BRIEF_DEPTHS.includes(depth) ? depth : 'focused');
@@ -154,7 +159,9 @@ export function sanitizeResearchBrief(input = {}, {
     allowExplicitHosts,
   });
   return {
-    schemaVersion: RESEARCH_BRIEF_SCHEMA_VERSION,
+    schemaVersion: source.request ? 3 : (source.schemaVersion || RESEARCH_BRIEF_SCHEMA_VERSION),
+    ...(source.request ? { request: source.request, executionVersion: source.executionVersion,
+      constraints: source.constraints || [], researchPlan: source.researchPlan || null } : {}),
     query: resolvedQuery,
     queryShape: sanitizeQueryShape(source.queryShape),
     premise: text(source.premise) || null,

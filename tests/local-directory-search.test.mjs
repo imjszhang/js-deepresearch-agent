@@ -1,3 +1,4 @@
+import { ResearchRunner } from '../packages/js-deepresearch-engine/tests/helpers/legacy-research-runner.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -5,7 +6,6 @@ import path from 'node:path';
 import { after, describe, it } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import {
-  ResearchRunner,
   createSearchEngine,
   emptyBulletLines,
   normalizeSourceUrl,

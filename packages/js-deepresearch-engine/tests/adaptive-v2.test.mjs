@@ -1,6 +1,7 @@
+import { ResearchRunner } from './helpers/legacy-research-runner.mjs';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { ResearchRunner } from '../src/index.mjs';
+
 import { ResearchState } from '../src/research/adaptive/research-state.mjs';
 import { buildAngleChangeSearch, fallbackAdaptiveAction } from '../src/research/adaptive/agent-policy.mjs';
 import { defaultSearchQueryPlan } from './helpers/search-query-planner-mock.mjs';

@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "protocolVersion": "quality-live-google-v2",
+  "seed": "20260909",
+  "repeats": 2,
+  "cases": [
+    "cases/redis-explicit.json",
+    "cases/redis-open.json",
+    "cases/sqlite-explicit.json",
+    "cases/sqlite-open.json"
+  ],
+  "protocol": {
+    "skill": "js-google-ops-skill",
+    "serverUrl": "ws://localhost:18080",
+    "language": "zh-CN",
+    "searchMaxPages": 1,
+    "minTokens": 600000,
+    "maxTokens": 1000000,
+    "totalTokens": 1300000,
+    "reportMaxOutputTokens": 16000,
+    "judgeTokens": 100000,
+    "wallClockMs": 7200000
+  }
+}

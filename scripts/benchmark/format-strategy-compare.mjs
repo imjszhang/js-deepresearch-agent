@@ -1,7 +1,15 @@
 import { formatDurationMs } from './extract-run-stats.mjs';
 
-function formatPercent(value) {
-  return value === null || value === undefined ? 'n/a' : `${Math.round(value * 100)}%`;
+function formatValue(value) {
+  return value === null || value === undefined ? 'n/a' : value;
+}
+
+function formatCost(run, field) {
+  const value = run.cost[field];
+  if (!Number.isFinite(value)) return 'n/a';
+  const unknown = run.cost.unknownUsage?.[field]
+    || (field === 'llmTokens' && run.cost.costIsLowerBound);
+  return unknown ? `>= ${value} (total unknown)` : value;
 }
 
 function formatDelta(value, { percent = false, suffix = '' } = {}) {
@@ -12,7 +20,7 @@ function formatDelta(value, { percent = false, suffix = '' } = {}) {
 }
 
 function formatPass(value) {
-  return value ? 'pass' : 'fail';
+  return typeof value === 'boolean' ? (value ? 'pass' : 'fail') : 'n/a';
 }
 
 function formatList(values) {
@@ -105,22 +113,22 @@ export function formatStrategyCompareMarkdown(comparison) {
   lines.push(
     '## Overview',
     '',
-    '| Strategy | Duration | Sources | LLM tokens | LLM reqs | source_summary | Search | Reads | Rerank | Gate |',
+    '| Strategy | Duration | Sources | LLM tokens | LLM reqs | source_summary | Search | Reads | Rerank | Stored runtime gate |',
     '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |',
   );
 
   for (const run of comparison.runs) {
     lines.push(
-      `| ${run.strategyLabel} | ${run.durationLabel} | ${run.counts.sourceCount} | ${run.cost.llmTokens} | ${run.cost.llmRequests} | ${run.llmPurposes?.sourceSummaryCalls ?? 'n/a'} | ${run.cost.searchRequests} | ${run.cost.sourceReads} | ${run.cost.rerankRequests} | ${run.gate || 'n/a'} |`,
+      `| ${run.strategyLabel} | ${run.durationLabel} | ${formatValue(run.counts.sourceCount)} | ${formatCost(run, 'llmTokens')} | ${formatCost(run, 'llmRequests')} | ${run.llmPurposes?.sourceSummaryCalls ?? 'n/a'} | ${formatCost(run, 'searchRequests')} | ${formatCost(run, 'sourceReads')} | ${formatCost(run, 'rerankRequests')} | ${run.gate || 'n/a'} |`,
     );
   }
 
   if (comparison.runs.some((run) => run.audit)) {
     lines.push(
       '',
-      '## Strategy Audit',
+      '## Legacy heuristic diagnostics',
       '',
-      'Official result is `ready` / `not_ready` / `invalid`. This is a deterministic evidence contract, not a quality or truth grade. `--no-llm` is the official compare path.',
+      'The historical `ready` / `not_ready` / `invalid` labels describe runtime diagnostics. Slot checks include query-specific keyword, host, and number heuristics; they do not establish independent answer completeness, semantic correctness, or program acceptance.',
       '',
       '| Strategy | Status | Process | Report | Citations | Provenance | Required slots |',
       '| --- | --- | --- | --- | --- | --- | ---: |',
@@ -140,7 +148,7 @@ export function formatStrategyCompareMarkdown(comparison) {
       '',
       '### Observable counts',
       '',
-      'These are the comparable numbers. `status` stays `not_ready` until every hard gate passes; it is not the ranking.',
+      'Counts below are observations from the legacy diagnostics and declared runtime state. A completed slot here is a historical heuristic result, not a new independent quality judgment.',
       '',
       '| Strategy | Completed | Blocked | Missing | Empty bullets | Real bodies | WAF rejected | Resolved citations |',
       '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |',
@@ -150,7 +158,7 @@ export function formatStrategyCompareMarkdown(comparison) {
       if (!audit) continue;
       const slots = slotStatusCounts(audit);
       lines.push(
-        `| ${run.strategyLabel} | ${slots.completed} | ${slots.blocked} | ${slots.missing} | ${audit.reportIntegrity?.counts?.emptyBulletCount ?? 0} | ${audit.evidenceProvenance?.counts?.realBodies ?? 0} | ${audit.evidenceProvenance?.counts?.wafRejected ?? 0} | ${audit.citationIntegrity?.counts?.resolved ?? 0} |`,
+        `| ${run.strategyLabel} | ${slots.completed} | ${slots.blocked} | ${slots.missing} | ${audit.reportIntegrity?.counts?.emptyBulletCount ?? 'n/a'} | ${audit.evidenceProvenance?.counts?.realBodies ?? 'n/a'} | ${audit.evidenceProvenance?.counts?.wafRejected ?? 'n/a'} | ${audit.citationIntegrity?.counts?.resolved ?? 'n/a'} |`,
       );
     }
 
@@ -158,7 +166,7 @@ export function formatStrategyCompareMarkdown(comparison) {
       '',
       '### Descriptive observability',
       '',
-      'These fields explain search, assessment, and cache behavior. They are not official audit gates and do not change `status`.',
+      'These fields describe the recorded search, assessment, and cache behavior.',
       '',
       '| Strategy | Query outcomes | Responded engines | Unresponsive engines | Assessment | Slot-support cache | Agent snapshot |',
       '| --- | --- | --- | --- | --- | --- | ---: |',
@@ -210,7 +218,7 @@ export function formatStrategyCompareMarkdown(comparison) {
 
   if (comparison.deltas?.length) {
     const baseline = comparison.runs[0]?.strategyLabel || 'baseline';
-    lines.push('', `## Official deltas vs ${baseline}`, '');
+    lines.push('', `## Recorded cost and diagnostic deltas vs ${baseline}`, '');
     for (const delta of comparison.deltas) {
       lines.push(`### ${delta.strategyLabel}`);
       lines.push(`- Duration: ${formatDelta(delta.durationMs, { suffix: 'ms' })} (${formatDurationMs(delta.durationMs)})`);
@@ -218,7 +226,7 @@ export function formatStrategyCompareMarkdown(comparison) {
       lines.push(`- Search requests: ${formatDelta(delta.searchRequests)}`);
       lines.push(`- Source reads: ${formatDelta(delta.sourceReads)}`);
       lines.push(`- Rerank requests: ${formatDelta(delta.rerankRequests)}`);
-      lines.push(`- Completed slots: ${formatDelta(delta.completedSlots)}`);
+      lines.push(`- Legacy heuristic completed slots: ${formatDelta(delta.completedSlots)}`);
       lines.push(`- Resolved citations: ${formatDelta(delta.resolvedCitations)}`);
       lines.push(`- Real bodies: ${formatDelta(delta.realBodies)}`);
       lines.push(`- Process contract: ${formatDelta(delta.processContractPass)}`);
@@ -230,18 +238,18 @@ export function formatStrategyCompareMarkdown(comparison) {
 
   lines.push(
     '',
-    '## Optional semantic analysis (non-official)',
+    '## Artifact verification and model observation',
     '',
-    'Stored or runtime claim verdicts and overlap rates are **not** part of the official contract. They must not be read as `ready` / `not_ready`.',
+    'Artifact verification checks the pinned files, declared references, and evidence ranges. Independent model assessment was not run. Stored claim verdicts and keyword overlap are not imported as quality scores; unobserved values remain n/a.',
     '',
-    '| Strategy | Supported | At least partial | Partial | Unsupported | Unverifiable | Evidence cov. | Direct ev. | Key claim sup. |',
-    '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |',
+    '| Strategy | Artifact verification | Model observed | Model thresholds met |',
+    '| --- | --- | --- | --- |',
   );
 
   for (const run of comparison.runs) {
-    const { metrics } = run.benchmark;
+    const { artifactVerification, modelAssessment } = run.benchmark;
     lines.push(
-      `| ${run.strategyLabel} | ${formatPercent(metrics.rates.supportedRate)} | ${formatPercent(metrics.rates.supportedOrPartialRate)} | ${formatPercent(metrics.rates.partiallySupportedRate)} | ${formatPercent(metrics.rates.unsupportedRate)} | ${formatPercent(metrics.rates.unverifiableRate)} | ${formatPercent(metrics.rates.evidenceCoverageRate)} | ${formatPercent(metrics.rates.directEvidenceRate)} | ${formatPercent(metrics.rates.keyClaimSupportedRate)} |`,
+      `| ${run.strategyLabel} | ${artifactVerification?.status ?? 'incomplete'} | ${modelAssessment?.observed === true ? 'yes' : 'no'} | ${formatValue(modelAssessment?.modelThresholdsMet)} |`,
     );
   }
 
@@ -258,7 +266,7 @@ export function formatStrategyCompareMarkdown(comparison) {
       lines.push(`  - min tokens: ${run.minLlmTokens || run.targetLlmTokens}`);
     }
     if (run.actualLlmTokens != null || run.cost?.llmTokens != null) {
-      lines.push(`  - actual tokens: ${run.actualLlmTokens ?? run.cost.llmTokens}`);
+      lines.push(`  - actual tokens: ${formatCost(run, 'llmTokens')}`);
     }
     if (run.unusedBudgetTokens != null) {
       lines.push(`  - unused budget: ${run.unusedBudgetTokens}`);

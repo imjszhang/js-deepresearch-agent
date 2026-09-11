@@ -429,7 +429,7 @@ describe('passage artifacts and report claim alignment', () => {
           async embedDocuments(texts) {
             return texts.map((text) => {
               const value = String(text);
-              if (value.includes('代持操作手册') || value.includes('代持操作的核心')) return [1, 0];
+              if (value.includes('房产操作攻略') || value.includes('代持操作手册') || value.includes('代持操作的核心')) return [1, 0];
               return [0, 1];
             });
           },

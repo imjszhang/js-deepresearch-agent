@@ -59,9 +59,21 @@ export function stripInternalReferenceTokens(text = '') {
     .trim();
 }
 
-export function buildCitationMap(findings = [], { sourceIdFor } = {}) {
+export function buildCitationMap(findings = [], { sourceIdFor, citationRegistry, sources = [], evidenceStore } = {}) {
   const map = new Map();
 
+  if (citationRegistry) {
+    if (citationRegistry.schemaVersion !== 1) throw new Error('Unsupported citation registry');
+    for (const entry of citationRegistry.entries) {
+      if (map.has(entry.citationKey)) throw new Error('Duplicate citation key');
+      const version = evidenceStore?.versions.get(entry.documentVersionId);
+      const source = version ? { ...version, id: version.sourceId, content: evidenceStore.body(version.documentVersionId), fetchStatus: 'ok' }
+        : sources.find((item) => item.id === entry.sourceId);
+      if (!source) throw new Error('Unresolved citation source');
+      map.set(entry.citationKey, { ...entry, key: `[${entry.citationKey}]`, source });
+    }
+    return map;
+  }
   findings.forEach((finding, findingIndex) => {
     const sources = Array.isArray(finding?.sources) ? finding.sources : [];
     sources.forEach((source, sourceIndex) => {

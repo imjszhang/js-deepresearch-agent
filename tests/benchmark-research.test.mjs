@@ -14,7 +14,9 @@ import {
 import { scoreClaimRule, summarizeFindingsHealth } from '../scripts/benchmark/rule-score.mjs';
 import { runBenchmark } from '../scripts/benchmark/run-benchmark.mjs';
 import { resolveBenchmarkTarget } from '../scripts/benchmark/resolve-target.mjs';
-import { formatJsonSummary } from '../scripts/benchmark/format-output.mjs';
+import { formatJsonSummary, formatMarkdownSummary } from '../scripts/benchmark/format-output.mjs';
+import { readArtifactManifest } from 'js-deepresearch-engine';
+import { programArtifact } from './helpers/program-artifacts.mjs';
 
 const tempDirs = [];
 
@@ -216,259 +218,181 @@ describe('benchmark rule scoring', () => {
 });
 
 describe('runBenchmark', () => {
-  it('reuses stored schema v3 verdicts and shows evaluation origin/version', async () => {
+  it('defaults to offline artifact verification and never promotes stored verdicts or keyword overlap', async () => {
     const workDir = createFixture({
-      report: '# Key Findings\n\nSecurity risks exist in local model execution [1.1].',
-      findings: [{
-        id: 'finding-1',
-        question: 'q',
-        sources: [
-          { id: 'wiki', title: 'Wikipedia', url: 'https://en.wikipedia.org/wiki/Ollama', snippet: 'security risks' },
-          { id: 'official', title: 'Official', url: 'https://ollama.com', snippet: 'official', content: 'security risks exist' },
-        ],
-      }],
-      sources: [
-        { id: 'wiki', title: 'Wikipedia', url: 'https://en.wikipedia.org/wiki/Ollama', snippet: 'security risks' },
-        { id: 'official', title: 'Official', url: 'https://ollama.com', snippet: 'official', content: 'security risks exist' },
-      ],
+      report: '# Report\n\n## Summary\n\nExact matching stored text [1.1].',
+      findings: [{ question: 'q', sources: [{ title: 'Exact matching stored text', url: 'https://a.test', content: 'Exact matching stored text' }] }],
+      sources: [{ title: 'Exact matching stored text', url: 'https://a.test', content: 'Exact matching stored text', fetchStatus: 'ok' }],
     });
-    fs.writeFileSync(path.join(workDir, 'passages.json'), JSON.stringify([
-      { id: 'passage-official', sourceId: 'official', text: 'security risks exist in local model execution' },
-    ]), 'utf8');
-    fs.writeFileSync(path.join(workDir, 'claims.json'), JSON.stringify([{
-      id: 'claim-old',
-      text: 'Security risks exist in local model execution [1.1].',
-      kind: 'key_claim',
-      citationKeys: ['1.1'],
-      citedSourceIds: ['wiki'],
-      flags: [],
-      evidence: [{ sourceId: 'official', passageId: 'passage-official', verdict: 'supported', score: 0.9 }],
-      evaluation: {
-        verdict: 'supported',
-        confidence: 0.9,
-        method: 'rules',
-        origin: 'runtime_rule',
-        evaluationVersion: 2,
-        evidenceCounts: { supported: 1, partiallySupported: 0, unsupported: 0, unverifiable: 0 },
-      },
-    }]), 'utf8');
-
-    const result = await runBenchmark({ workDir, llmEnabled: false });
-    assert.equal(result.metrics.claims.supported, 1);
-    assert.equal(result.evaluation.usedStoredRule, true);
-    assert.deepEqual(result.evaluation.storedEvaluationVersions, [2]);
-    assert.equal(result.claims[0].effectiveVerdict, 'supported');
-    assert.equal(result.claims[0].evaluationOrigin, 'stored_rule');
-    assert.equal(result.claims[0].effectiveEvaluation.evaluationVersion, 2);
-    const json = JSON.parse(formatJsonSummary(result));
-    assert.equal(json.evaluation.usedStoredRule, true);
-    assert.deepEqual(json.evaluation.storedEvaluationVersions, [2]);
-    assert.equal(json.claims[0].evaluationOrigin, 'stored_rule');
-    assert.equal(json.claims[0].evaluationVersion, 2);
+    for (const verdict of ['supported', 'unsupported']) {
+      fs.writeFileSync(path.join(workDir, 'claims.json'), JSON.stringify([{ text: 'private stored claim', evaluation: { verdict, method: 'llm', confidence: 1 } }]));
+      const result = await runBenchmark({ workDir });
+      assert.equal(result.schemaVersion, 2);
+      assert.equal(result.origin, 'program_check');
+      assert.equal(result.artifactVerification.status, 'incomplete');
+      assert.equal(result.artifactVerification.reason, 'VERSIONED_MANIFEST_UNAVAILABLE');
+      assert.equal(result.evaluation.llmInvoked, false);
+      assert.equal(result.evaluation.usedStoredLlm, false);
+      assert.equal(result.evaluation.usedStoredRule, false);
+      assert.deepEqual(result.modelAssessment, { origin: 'model_assessment', observed: false, modelThresholdsMet: null, reason: 'MODEL_OBSERVATION_NOT_REQUESTED' });
+      assert.equal(result.metrics.sourceCount, 1);
+      assert.equal(result.metrics.citationResolutionRate, null);
+      assert.equal(result.metrics.contentPresenceRate, 1);
+      assert.equal(result.metrics.claims, undefined);
+      assert.equal(result.metrics.rates, undefined);
+      assert.equal(result.claims, undefined);
+      const json = formatJsonSummary(result);
+      assert.equal(JSON.parse(json).schemaVersion, 2);
+      assert.equal(json.includes('private stored claim'), false);
+      assert.equal(json.includes('keywordOverlap'), false);
+      assert.match(formatMarkdownSummary(result), /Semantic truth and extraction completeness: not verified/);
+    }
   });
 
-  it('flags schema v3 claims that cite one source but borrowed evidence from another', async () => {
-    const workDir = createFixture({
-      report: '# Summary\n\nSecurity risks exist [1.1].',
-      findings: [{
-        question: 'q',
-        sources: [
-          { id: 'wiki', title: 'Wikipedia', url: 'https://en.wikipedia.org/wiki/Ollama', snippet: 'security' },
-          { id: 'official', title: 'Official', url: 'https://ollama.com', content: 'security risks exist' },
-        ],
-      }],
-      sources: [
-        { id: 'wiki', title: 'Wikipedia', url: 'https://en.wikipedia.org/wiki/Ollama', snippet: 'security' },
-        { id: 'official', title: 'Official', url: 'https://ollama.com', content: 'security risks exist' },
-      ],
-    });
-    fs.writeFileSync(path.join(workDir, 'passages.json'), JSON.stringify([
-      { id: 'passage-official', sourceId: 'official', text: 'security risks exist' },
-    ]), 'utf8');
-    fs.writeFileSync(path.join(workDir, 'claims.json'), JSON.stringify([{
-      id: 'claim-borrowed',
-      text: 'Security risks exist [1.1].',
-      kind: 'key_claim',
-      citationKeys: ['1.1'],
-      citedSourceIds: ['wiki'],
-      flags: ['missing_direct_evidence'],
-      evidence: [{ sourceId: 'official', passageId: 'passage-official', verdict: 'supported', score: 0.8 }],
-      evaluation: {
-        verdict: 'unverifiable',
-        confidence: 0,
-        method: 'rules',
-        evaluationVersion: 3,
-        evidenceCounts: { supported: 0, partiallySupported: 0, unsupported: 0, unverifiable: 1 },
-      },
-    }]), 'utf8');
-
-    const result = await runBenchmark({ workDir, llmEnabled: false });
-    assert.ok(result.claims[0].rule.flags.includes('borrowed_uncited_source'));
-    assert.ok(result.claims[0].rule.flags.includes('missing_direct_evidence'));
-    assert.equal(result.claims[0].effectiveVerdict, 'unverifiable');
-    assert.equal(result.evaluation.usedStoredRule, true);
+  it('rejects obsolete live judging before loading input or invoking a provider', async () => {
+    let calls = 0;
+    const llm = { complete: async () => { calls++; throw new Error('Must not run'); } };
+    await assert.rejects(runBenchmark({ llmEnabled: true }), { code: 'BENCHMARK_MODEL_OBSERVATION_REQUIRED' });
+    await assert.rejects(runBenchmark({ llm }), { code: 'BENCHMARK_MODEL_OBSERVATION_REQUIRED' });
+    assert.equal(calls, 0);
   });
 
-  it('prefers Schema v3 claims and validates passage links', async () => {
-    const workDir = createFixture({
-      report: '# Key Findings\n\nA sufficiently long claim about evidence-backed local research behavior.',
-      findings: [{ id: 'finding-1', question: 'q', sources: [{ id: 'source-1', title: 'S', url: 'https://example.test', snippet: 'evidence', engine: 'test' }] }],
-      sources: [{ id: 'source-1', title: 'S', url: 'https://example.test', snippet: 'evidence', engine: 'test' }],
-    });
-    fs.writeFileSync(path.join(workDir, 'passages.json'), JSON.stringify([{ id: 'passage-1', sourceId: 'source-1', text: 'evidence-backed local research behavior' }]), 'utf8');
-    fs.writeFileSync(path.join(workDir, 'claims.json'), JSON.stringify([{ id: 'claim-1', text: 'A sufficiently long claim about evidence-backed local research behavior.', importance: 'key', evidence: [{ sourceId: 'source-1', passageId: 'passage-1', verdict: 'supported', score: 0.9 }] }]), 'utf8');
-    const result = await runBenchmark({ workDir, llmEnabled: false });
-    assert.equal(result.metrics.rates.evidenceCoverageRate, 1);
-    assert.equal(result.metrics.rates.keyClaimSupportedRate, 1);
-    assert.equal(result.metrics.claims.supported, 1);
-    assert.equal(result.evaluation.llmInvoked, false);
-    assert.equal(result.evaluation.usedStoredRule, true);
-    assert.equal(result.metrics.passageCount, 1);
-    assert.equal(result.metrics.averageSourcesPerClaim, 1);
-  });
-
-  it('runs offline with --no-llm semantics', async () => {
-    const dir = createFixture({
-      report: `# Report
-
-## Summary
-
-Karpathy LLM Wiki uses compiler-style RAG [1.1].
-
-## Key Findings
-
-1. **Obsidian workflow**: users build personal wikis [1.1].
-`,
-      findings: [
-        {
-          question: 'llm wiki',
-          sources: [{
-            title: '用Obsidian打造LLM-Wiki经验分享',
-            url: 'https://zhuanlan.zhihu.com/p/1',
-            snippet: '用Obsidian打造LLM-Wiki经验分享',
-            engine: 'js-eyes:zhihu',
-          }],
-        },
-      ],
-      sources: [{
-        title: '用Obsidian打造LLM-Wiki经验分享',
-        url: 'https://zhuanlan.zhihu.com/p/1',
-        snippet: '用Obsidian打造LLM-Wiki经验分享',
-        engine: 'js-eyes:zhihu',
-      }],
-    });
-
-    const result = await runBenchmark({
-      workDir: dir,
-      strictPlatform: 'js-eyes:zhihu',
-      llmEnabled: false,
-    });
-
-    assert.equal(result.metrics.claimCount, 2);
-    assert.equal(result.llmEnabled, false);
-    assert.equal(result.metrics.claimsWithCitationsRate, 1);
+  it('checks versioned bodies and citation registry without semantic judgments', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'benchmark-v2-'));
+    tempDirs.push(directory);
+    const first = programArtifact(directory);
+    const result = await runBenchmark({ workDir: directory });
+    assert.equal(result.artifactVerification.status, 'passed');
+    assert.deepEqual(result.artifactVerification.resultPin, first.pin);
+    assert.equal(result.metrics.documentVersionCount, 1);
+    assert.equal(result.metrics.citationEntryCount, 1);
+    assert.equal(result.metrics.reportCitationCount, 1);
+    assert.equal(result.metrics.resolvedCitationCount, 1);
     assert.equal(result.metrics.citationResolutionRate, 1);
-    assert.equal(result.metrics.platformMatchRate, 1);
-    assert.equal(result.artifactsHealth.sourceCount, 1);
-
-    const json = JSON.parse(formatJsonSummary(result));
-    assert.equal(json.claims.length, 2);
-    assert.equal(json.evaluation.llmInvoked, false);
-    assert.equal(json.claims[0].evaluationOrigin, 'runtime_rule');
-    assert.equal(json.claims[0].llmVerdict, null);
+    assert.equal(result.modelAssessment.observed, false);
+    assert.equal(result.modelAssessment.modelThresholdsMet, null);
   });
 
-  it('marks unresolved citations and empty-source artifacts as risky', async () => {
-    const dir = createFixture({
-      report: `# Report
-
-## Evidence
-
-- Unsupported claim [9.9].
-`,
-      findings: [{ question: 'q1', sources: [] }],
-      sources: [],
-    });
-
-    const result = await runBenchmark({
-      workDir: dir,
-      llmEnabled: false,
-    });
-
-    assert.ok(result.artifactsHealth.flags.includes('empty_sources'));
-    assert.ok(result.riskExamples.some((entry) => entry.flags.includes('citation_unresolved')));
+  it('does not fall back to root exports after a versioned artifact is corrupted', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'benchmark-v2-corrupt-'));
+    tempDirs.push(directory);
+    const first = programArtifact(directory);
+    const manifest = readArtifactManifest(directory, first.pin.manifestPath);
+    fs.appendFileSync(manifest.reportPath, '\ncorruption');
+    await assert.rejects(runBenchmark({ workDir: directory }), { code: 'BENCHMARK_ARTIFACT_INTEGRITY_INVALID' });
+    assert.ok(fs.existsSync(path.join(directory, 'report.md')));
   });
 
-  it('scores enriched Chinese reports offline', async () => {
-    const dir = createFixture({
-      report: `# 报告
+  it('does not guess v2 citation coordinates from findings', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'benchmark-v2-citation-'));
+    tempDirs.push(directory);
+    programArtifact(directory, 'unresolved', result => ({ ...result, citationRegistry: { schemaVersion: 1, entries: [] },
+      findings: [{ sources: [{ title: 'Looks plausible', url: 'https://atlas.example.com/docs', content: 'Atlas provides a documented product' }] }] }));
+    await assert.rejects(runBenchmark({ workDir: directory }), { code: 'BENCHMARK_ARTIFACT_INTEGRITY_INVALID' });
+  });
 
-## 摘要
+  it('retains the manifest revision already loaded when the current pointer changes', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'benchmark-v2-fixed-'));
+    tempDirs.push(directory);
+    const first = programArtifact(directory, 'first');
+    const artifacts = loadArtifacts(directory);
+    programArtifact(directory, 'second', result => ({ ...result, report: result.report + '\nSecond revision.' }));
+    const result = await runBenchmark({ artifacts });
+    assert.equal(result.artifactMetadata.resultRevision, 'first');
+    assert.deepEqual(result.artifactVerification.resultPin, first.pin);
+    assert.equal(result.metrics.reportCharacterCount, artifacts.report.length);
+  });
 
-LLM Wiki 由 Karpathy 提出，强调编译式知识沉淀 [1.1]。
+  it('treats bare JSON as unversioned input without interpreting its file path as a session', async () => {
+    const result = await runBenchmark({ artifacts: { workDir: '/not/a/session/result.json', report: '# Report\n\nText [1.1].',
+      executionVersion: 2, findings: [], sources: [], claims: [{ evaluation: { verdict: 'supported' } }] } });
+    assert.equal(result.artifactVerification.status, 'incomplete');
+    assert.equal(result.artifactVerification.reason, 'VERSIONED_MANIFEST_UNAVAILABLE');
+    assert.equal(result.metrics.citationResolutionRate, null);
+    assert.equal(result.modelAssessment.observed, false);
+  });
 
-## 3. 对比分析
+  it('keeps unrecorded standalone fields unavailable instead of reporting zero or empty-source failures', async () => {
+    const result = await runBenchmark({ artifacts: { report: '', sources: [], findings: [], passages: [],
+      recordedFields: { report: false, sources: false, findings: false, passages: false } } });
+    for (const field of ['sourceCount', 'sourceHostCount', 'passageCount', 'reportCharacterCount', 'reportCitationCount']) {
+      assert.equal(result.metrics[field], null, field);
+    }
+    for (const field of ['sourceCount', 'findingCount', 'findingErrors', 'findingsWithSources']) assert.equal(result.artifactsHealth[field], null, field);
+    assert.ok(Object.values(result.artifactsHealth.enrichment).every(value => value === null));
+    assert.deepEqual(result.artifactsHealth.flags, []);
+    const declaredEmpty = await runBenchmark({ artifacts: { report: '', sources: [], findings: [], passages: [],
+      recordedFields: { report: true, sources: true, findings: true, passages: true } } });
+    assert.equal(declaredEmpty.metrics.sourceCount, 0);
+    assert.equal(declaredEmpty.metrics.passageCount, 0);
+    assert.equal(declaredEmpty.metrics.reportCharacterCount, 0);
+    assert.ok(declaredEmpty.artifactsHealth.flags.includes('empty_sources'));
+  });
 
-### 3.1 证据局限
+  it('compares all archived statistics with canonical fields while allowing compatibility-export normalization', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'benchmark-v2-archive-stats-'));
+    tempDirs.push(directory);
+    const baseline = programArtifact(directory, 'stats', result => ({ ...result,
+      sources: [{ id: result.citationRegistry.entries[0].sourceId, url: 'https://atlas.example.com/docs', title: 'Atlas' }],
+      findings: [{ question: 'Atlas', sources: [] }], gaps: [{ id: 'gap-1' }], passages: [],
+      claims: [{ id: 'claim-1', text: 'Saved claim' }],
+      quality: { schemaVersion: 4, budget: { usage: { llmTokens: 1 }, reservations: [], settledAttemptIds: [] } },
+      trace: [{ action: 'llm_call', status: 'completed', purpose: 'report', tokens: 1 }],
+    }));
+    const artifacts = readArtifactManifest(directory, baseline.pin.manifestPath);
+    const engine = createIntelStoreEngine({ baseDir: path.join(directory, 'store') });
+    const archive = (researchId, result) => archiveResearchResult({ researchId, query: 'Stats', strategy: 'focused', result, artifacts, engine });
+    archive('unchanged', baseline.result);
+    const unchanged = await runBenchmark({ researchId: 'unchanged', engine });
+    assert.equal(unchanged.artifactVerification.status, 'passed');
+    // claims.json adds placements/origin fields and report-plan.json has a
+    // generated fallback; canonical snapshot equality must not compare those.
+    assert.equal(unchanged.metrics.sourceCount, 1);
+    const mutations = { sources: [{ id: 'other', url: 'https://other.example.com' }], findings: [],
+      passages: [{ id: 'unexpected' }], claims: [], trace: [], quality: { budget: { usage: { llmTokens: 2 } } } };
+    for (const [field, value] of Object.entries(mutations)) {
+      const researchId = `changed-${field}`;
+      archive(researchId, { ...baseline.result, [field]: value });
+      await assert.rejects(runBenchmark({ researchId, engine }), { code: 'BENCHMARK_ARTIFACT_INTEGRITY_INVALID' }, field);
+    }
+    for (const field of ['sources', 'quality', 'trace']) {
+      const incomplete = { ...baseline.result };
+      delete incomplete[field];
+      const researchId = `missing-${field}`;
+      archive(researchId, incomplete);
+      const checked = await runBenchmark({ researchId, engine });
+      assert.equal(checked.artifactVerification.status, 'incomplete', field);
+      assert.equal(checked.artifactVerification.reason, 'ARCHIVED_SNAPSHOT_FIELDS_UNAVAILABLE', field);
+    }
+  });
 
-社区讨论未提供官方定量对比 [6.1-6.3]。
-`,
-      findings: [
-        {
-          question: 'q1',
-          sources: [{
-            title: 'Karpathy LLM Wiki',
-            url: 'https://zhuanlan.zhihu.com/p/1',
-            snippet: 'short',
-            content: 'Karpathy LLM Wiki compiler-style personal knowledge base',
-            engine: 'js-eyes:zhihu',
-          }],
-        },
-        {
-          question: 'q2',
-          sources: [],
-        },
-        {
-          question: 'q3',
-          sources: [],
-        },
-        {
-          question: 'q4',
-          sources: [],
-        },
-        {
-          question: 'q5',
-          sources: [],
-        },
-        {
-          question: 'q6',
-          sources: [
-            { title: 'S1', url: 'https://s1', snippet: 'a', engine: 'js-eyes:zhihu' },
-            { title: 'S2', url: 'https://s2', snippet: 'b', engine: 'js-eyes:zhihu' },
-            { title: 'S3', url: 'https://s3', snippet: 'c', engine: 'js-eyes:zhihu' },
-          ],
-        },
-      ],
-      sources: [{
-        title: 'Karpathy LLM Wiki',
-        url: 'https://zhuanlan.zhihu.com/p/1',
-        snippet: 'short',
-        content: 'Karpathy LLM Wiki compiler-style personal knowledge base',
-        fetchStatus: 'ok',
-        engine: 'js-eyes:zhihu',
-      }],
-    });
-
-    const result = await runBenchmark({
-      workDir: dir,
-      strictPlatform: 'js-eyes:zhihu',
-      llmEnabled: false,
-    });
-
-    assert.ok(result.metrics.claimCount >= 2);
-    assert.equal(result.metrics.claimsWithCitationsRate > 0, true);
-    assert.equal(result.metrics.enrichOkRate, 1);
-    assert.equal(result.metrics.contentPresenceRate, 1);
+  it('pins archived research to its committed revision instead of the newer disk pointer', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'benchmark-v2-archive-'));
+    tempDirs.push(directory);
+    const first = programArtifact(directory, 'archived');
+    const artifacts = readArtifactManifest(directory, first.pin.manifestPath);
+    const engine = createIntelStoreEngine({ baseDir: path.join(directory, 'store') });
+    archiveResearchResult({ researchId: 'fixed-archive', query: 'fixed', strategy: 'focused', result: first.result, artifacts, engine });
+    programArtifact(directory, 'later', result => ({ ...result, report: result.report + '\nLater revision.' }));
+    const result = await runBenchmark({ researchId: 'fixed-archive', engine });
+    assert.equal(result.artifactVerification.status, 'passed');
+    assert.equal(result.artifactVerification.resultPin.resultRevision, first.pin.resultRevision);
+    assert.equal(result.artifactVerification.resultPin.manifestHash, first.pin.manifestHash);
+    assert.equal(fs.realpathSync(result.artifactVerification.resultPin.sessionDir), fs.realpathSync(first.pin.sessionDir));
+    assert.equal(result.metrics.reportCharacterCount, first.result.report.length);
+    archiveResearchResult({ researchId: 'unfixed-archive', query: 'unfixed', strategy: 'focused', result: first.result,
+      artifacts: { sessionDir: directory, resultRevision: 'archived' }, engine });
+    const incomplete = await runBenchmark({ researchId: 'unfixed-archive', engine });
+    assert.equal(incomplete.artifactVerification.status, 'incomplete');
+    assert.equal(incomplete.artifactVerification.reason, 'ARCHIVED_RESULT_PIN_UNAVAILABLE');
+    archiveResearchResult({ researchId: 'changed-archive', query: 'changed', strategy: 'focused',
+      result: { ...first.result, citationRegistry: { schemaVersion: 1, entries: [] } }, artifacts, engine });
+    await assert.rejects(runBenchmark({ researchId: 'changed-archive', engine }), { code: 'BENCHMARK_ARTIFACT_INTEGRITY_INVALID' });
+    archiveResearchResult({ researchId: 'missing-snapshot-evidence', query: 'missing', strategy: 'focused',
+      result: { resultRevision: 'archived', report: first.result.report, findings: [], sources: [] }, artifacts, engine });
+    const missingSnapshot = await runBenchmark({ researchId: 'missing-snapshot-evidence', engine });
+    assert.equal(missingSnapshot.artifactVerification.status, 'incomplete');
+    assert.equal(missingSnapshot.artifactVerification.reason, 'ARCHIVED_SNAPSHOT_EVIDENCE_UNAVAILABLE');
   });
 
   it('loads artifacts from disk', () => {
@@ -535,7 +459,9 @@ LLM Wiki 由 Karpathy 提出，强调编译式知识沉淀 [1.1]。
       llmEnabled: false,
       engine,
     });
-    assert.ok(result.metrics.claimCount >= 1);
+    assert.equal(result.metrics.reportCitationCount, 1);
+    assert.equal(result.artifactVerification.status, 'incomplete');
+    assert.equal(result.modelAssessment.observed, false);
   });
 });
 

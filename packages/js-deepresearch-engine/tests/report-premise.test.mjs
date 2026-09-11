@@ -1,3 +1,4 @@
+import { ResearchRunner } from './helpers/legacy-research-runner.mjs';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
@@ -10,7 +11,6 @@ import {
   extractQualityClaims,
   hasOpenJudgmentSlot,
   partitionFindingsForReport,
-  ResearchRunner,
   reviseUnsupportedKeyClaims,
   shouldMoveWeakPremiseFact,
   stripEmptyNarrativeSections,

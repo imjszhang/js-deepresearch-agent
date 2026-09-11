@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { createServer } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, it } from 'node:test';
@@ -31,7 +32,7 @@ describe('API wiki and intel', () => {
     }
   });
 
-  function createTestApp({ intelDir, wikiDir } = {}) {
+  async function createTestApp(t, { intelDir, wikiDir } = {}) {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'jdr-api-wiki-'));
     tempDirs.push(root);
     const resolvedIntel = intelDir || path.join(root, 'intel');
@@ -50,11 +51,20 @@ describe('API wiki and intel', () => {
     });
 
     const engine = createIntelStoreEngine({ baseDir: resolvedIntel });
-    return { app, engine, wikiDir: resolvedWiki, root };
+    // Supertest reads the address immediately; explicit loopback binding must finish first.
+    const server = createServer(app);
+    t.after(async () => {
+      if (server.listening) await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    });
+    await new Promise((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', () => { server.off('error', reject); resolve(); });
+    });
+    return { app, client: request(server), engine, wikiDir: resolvedWiki, root };
   }
 
-  it('lists intel runs', async () => {
-    const { app, engine } = createTestApp();
+  it('lists intel runs', async (t) => {
+    const { client, engine } = await createTestApp(t);
     archiveResearchResult({
       researchId: 'api-wiki-run',
       query: 'llm wiki',
@@ -67,14 +77,14 @@ describe('API wiki and intel', () => {
       engine,
     });
 
-    const response = await request(app).get('/api/intel/runs?limit=10').expect(200);
+    const response = await client.get('/api/intel/runs?limit=10').expect(200);
     assert.equal(response.body.runs.length, 1);
     assert.equal(response.body.runs[0].researchId, 'api-wiki-run');
     assert.ok(response.body.vaultDir);
   });
 
-  it('compiles wiki and answers questions', async () => {
-    const { app, engine, wikiDir } = createTestApp();
+  it('compiles wiki and answers questions', async (t) => {
+    const { client, engine, wikiDir } = await createTestApp(t);
     archiveResearchResult({
       researchId: 'api-wiki-compile',
       query: 'llm wiki',
@@ -87,7 +97,7 @@ describe('API wiki and intel', () => {
       engine,
     });
 
-    const compiled = await request(app)
+    const compiled = await client
       .post('/api/wiki/compile')
       .send({ researchId: 'api-wiki-compile', lint: true })
       .expect(200);
@@ -96,11 +106,11 @@ describe('API wiki and intel', () => {
     assert.equal(compiled.body.lint.errorCount, 0);
     assert.ok(fs.existsSync(path.join(wikiDir, 'Home.md')));
 
-    const status = await request(app).get('/api/wiki/status').expect(200);
+    const status = await client.get('/api/wiki/status').expect(200);
     assert.equal(status.body.homeExists, true);
     assert.ok(status.body.manifest.compiledAt);
 
-    const ask = await request(app)
+    const ask = await client
       .post('/api/wiki/ask')
       .send({ question: 'LLM Wiki', limit: 5 })
       .expect(200);
@@ -108,21 +118,21 @@ describe('API wiki and intel', () => {
     assert.equal(ask.body.mode, 'retrieval');
     assert.ok(ask.body.pages.length > 0);
 
-    const pages = await request(app).get('/api/wiki/pages').expect(200);
+    const pages = await client.get('/api/wiki/pages').expect(200);
     assert.ok(pages.body.pages.length >= 1);
 
-    const home = await request(app).get('/api/wiki/page?path=Home.md').expect(200);
+    const home = await client.get('/api/wiki/page?path=Home.md').expect(200);
     assert.match(home.body.markdown, /LLM Wiki/i);
 
-    const topic = await request(app)
+    const topic = await client
       .get('/api/wiki/page?path=Topics/Llm%20Wiki.md')
       .expect(200);
     assert.ok(topic.body.links.length >= 0);
   });
 
-  it('returns 404 when researchId is missing from intel store', async () => {
-    const { app } = createTestApp();
-    const response = await request(app)
+  it('returns 404 when researchId is missing from intel store', async (t) => {
+    const { client } = await createTestApp(t);
+    const response = await client
       .post('/api/wiki/compile')
       .send({ researchId: 'missing-id' })
       .expect(404);

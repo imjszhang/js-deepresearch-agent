@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { EvidenceStore } from '../evidence-store.mjs';
+import { ActionScheduler } from './action-scheduler.mjs';
 import { ActionCostTracker, buildBudgetView, estimateReportPromptTokens } from './budget-view.mjs';
 import { evaluateEvidenceCriteria, gapNeedsRequiredEvidence } from '../evidence-criteria.mjs';
 import {
@@ -122,13 +124,15 @@ export class ResearchState {
       evidenceScope: this.evidenceScope,
     });
     this.brief = brief || this.profile?.brief || null;
+    this.evidenceStore = this.brief?.executionVersion === 2 ? new EvidenceStore() : null;
+    this.scheduler = this.evidenceStore ? new ActionScheduler(null, { maxFailures: Math.max(1, Number(this.settings.research?.exploratory?.maxRepairFailuresPerGap) || 3) }) : null;
     this.step = 0;
     this.lastAction = null;
     this.loopLocal = null;
     this.gaps = [createRootGap(query, this.profile)];
     this.findings = [];
     this.candidates = new Map();
-    this.urlPool = new UrlPool({ maxPerHostname: MAX_CANDIDATES_PER_HOSTNAME });
+    this.urlPool = new UrlPool({ maxPerHostname: MAX_CANDIDATES_PER_HOSTNAME, duplicatePolicy: this.evidenceStore ? 'canonical_url' : 'legacy_title' });
     this.readSourceIds = new Set();
     this.observedHosts = new Set();
     this.transportMemory = new TransportMemory(resolveTransportMemorySettings(this.settings));
@@ -197,6 +201,8 @@ export class ResearchState {
     this.searchOutcomes = [];
     this.plannerRejections = [];
     this.slotSupportCache = new Map();
+    this.claimValidationCache = {};
+    this.validatedClaimIds = [];
     this.lastAgentSnapshotChars = null;
   }
 
@@ -244,9 +250,14 @@ export class ResearchState {
       kind: options.kind,
       rollup: options.rollup,
       evidenceCriteria: options.evidenceCriteria,
+      taskType: options.taskType,
+      origin: options.origin,
+      constraintIds: options.constraintIds,
+      parentTaskId: options.parentTaskId,
       parentGapId: options.parentGapId,
       followUpQuestions: options.followUpQuestions,
     });
+    for (const key of ['basisRanges', 'contextRanges', 'sharedContext']) if (options[key] != null) gap[key] = globalThis.structuredClone(options[key]);
     this.gaps.push(gap);
     return gap;
   }
@@ -357,6 +368,7 @@ export class ResearchState {
   }
 
   syncGapCoverage() {
+    this.evidenceStore?.captureFindings(this.findings);
     const verifiedBefore = new Set(this.gaps.filter((gap) => evidenceStatusOf(gap) === 'verified').map((gap) => gap.id));
     for (const gap of this.gaps) {
       const sources = collectGapSources(gap, this.findings);
@@ -790,8 +802,12 @@ export class ResearchState {
   }
 
   exportCheckpoint({ queryMemory = null, loopLocal = null, focusedLocal = null } = {}) {
+    this.evidenceStore?.captureFindings(this.findings);
     return {
-      schemaVersion: 1,
+      schemaVersion: this.evidenceStore ? 2 : 1,
+      executionVersion: this.evidenceStore ? 2 : 1,
+      evidenceStore: this.evidenceStore?.export() || null,
+      scheduler: this.scheduler?.export() || null,
       query: this.query,
       evidenceScope: this.evidenceScope,
       maxSteps: this.maxSteps,
@@ -803,7 +819,7 @@ export class ResearchState {
       profile: this.profile,
       brief: this.brief,
       gaps: this.gaps.map((gap) => ({ ...gap })),
-      findings: this.findings,
+      findings: this.evidenceStore ? this.evidenceStore.compactFindings(this.findings) : this.findings,
       candidates: [...this.candidates.entries()],
       urlPool: this.urlPool.exportCheckpoint(),
       readSourceIds: [...this.readSourceIds],
@@ -824,6 +840,8 @@ export class ResearchState {
       searchOutcomes: this.searchOutcomes,
       plannerRejections: this.plannerRejections,
       slotSupportCache: [...this.slotSupportCache.entries()],
+      claimValidationCache: this.claimValidationCache,
+      validatedClaimIds: this.validatedClaimIds,
       lastAgentSnapshotChars: this.lastAgentSnapshotChars,
       budgetView: this.budgetView,
       readiness: this.readiness,
@@ -837,6 +855,9 @@ export class ResearchState {
   }
 
   restoreCheckpoint(checkpoint = {}, { queryMemory = null } = {}) {
+    if (checkpoint.schemaVersion != null && ![1, 2].includes(checkpoint.schemaVersion)) throw new Error('Unsupported research state schema.');
+    this.evidenceStore = checkpoint.evidenceStore ? new EvidenceStore(checkpoint.evidenceStore) : null;
+    this.scheduler = checkpoint.scheduler ? new ActionScheduler(checkpoint.scheduler) : null;
     this.evidenceScope = checkpoint.evidenceScope || this.evidenceScope;
     this.maxSteps = Number(checkpoint.maxSteps) || 0;
     this.maxGapDepth = Math.max(0, Number(checkpoint.maxGapDepth) || 0);
@@ -848,8 +869,15 @@ export class ResearchState {
     this.brief = checkpoint.brief || this.brief;
     this.gaps = (checkpoint.gaps || []).map((gap) => ({ ...gap }));
     this.findings = Array.isArray(checkpoint.findings) ? checkpoint.findings : [];
+    this.evidenceStore?.captureFindings(this.findings);
     this.candidates = new Map(checkpoint.candidates || []);
-    this.urlPool.restoreCheckpoint(checkpoint.urlPool || {});
+    this.urlPool = new UrlPool({ duplicatePolicy: this.evidenceStore ? 'canonical_url' : 'legacy_title' }).restoreCheckpoint(checkpoint.urlPool || {});
+    for (const record of this.urlPool.values()) {
+      const candidate = this.candidates.get(record.id);
+      if (record.status === 'unread' && candidate?.status === 'duplicate' && candidate.skipReason === 'same_domain_reprint') {
+        candidate.status = 'unread'; candidate.skipReason = null; candidate.clusterId = null;
+      }
+    }
     this.readSourceIds = new Set(checkpoint.readSourceIds || []);
     this.observedHosts = new Set(checkpoint.observedHosts || []);
     this.transportMemory.restoreCheckpoint(checkpoint.transportMemory || {});
@@ -868,6 +896,8 @@ export class ResearchState {
     this.searchOutcomes = Array.isArray(checkpoint.searchOutcomes) ? checkpoint.searchOutcomes : [];
     this.plannerRejections = Array.isArray(checkpoint.plannerRejections) ? checkpoint.plannerRejections : [];
     this.slotSupportCache = new Map(checkpoint.slotSupportCache || []);
+    this.claimValidationCache = checkpoint.claimValidationCache || {};
+    this.validatedClaimIds = checkpoint.validatedClaimIds || [];
     this.lastAgentSnapshotChars = checkpoint.lastAgentSnapshotChars ?? null;
     this.budgetView = checkpoint.budgetView || null;
     this.readiness = checkpoint.readiness || null;

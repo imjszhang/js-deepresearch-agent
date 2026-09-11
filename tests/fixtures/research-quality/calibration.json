@@ -1,0 +1,163 @@
+{
+  "body": "The fictional Oriel database version 1 permits exactly one active writer per database. Readers can run concurrently with that writer. Oriel version 1 is offered under license A or license B, at the user's choice; accepting both is not required. Encryption is disabled by default in Oriel version 1 and can be enabled explicitly. No throughput measurements or network filesystem guarantees are supplied by this manual.",
+  "criteria": [
+    {
+      "id": "writer",
+      "expectedAnswer": "Oriel v1 permits exactly one active writer per database; readers may run concurrently.",
+      "qualifiers": [
+        "version 1",
+        "one active writer"
+      ],
+      "commonErrors": [
+        "multiple simultaneous writers",
+        "readers cannot overlap writer"
+      ]
+    },
+    {
+      "id": "license",
+      "expectedAnswer": "Oriel v1 permits choosing license A or B, not both mandatory.",
+      "qualifiers": [
+        "version 1",
+        "choice, not conjunction"
+      ],
+      "commonErrors": [
+        "both licenses mandatory",
+        "B not available"
+      ]
+    },
+    {
+      "id": "encryption",
+      "expectedAnswer": "Oriel v1 encryption is off by default and optionally enabled explicitly.",
+      "qualifiers": [
+        "version 1",
+        "default versus optional"
+      ],
+      "commonErrors": [
+        "on by default",
+        "cannot enable"
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "id": "cal-01",
+      "split": "calibration",
+      "report": "Oriel v1 permits one active writer per database. [1.1]",
+      "expectedTruth": "correct"
+    },
+    {
+      "id": "cal-02",
+      "split": "calibration",
+      "report": "Oriel v1 allows readers to run concurrently with its writer. [1.1]",
+      "expectedTruth": "correct"
+    },
+    {
+      "id": "cal-03",
+      "split": "calibration",
+      "report": "Oriel v1 offers a choice of license A or B. [1.1]",
+      "expectedTruth": "correct"
+    },
+    {
+      "id": "cal-04",
+      "split": "calibration",
+      "report": "Oriel v1 has encryption disabled by default. [1.1]",
+      "expectedTruth": "correct"
+    },
+    {
+      "id": "cal-05",
+      "split": "calibration",
+      "report": "Oriel v1 encryption can be explicitly enabled. [1.1]",
+      "expectedTruth": "correct"
+    },
+    {
+      "id": "cal-06",
+      "split": "calibration",
+      "report": "Oriel v1 does not require accepting both licenses. [1.1]",
+      "expectedTruth": "correct"
+    },
+    {
+      "id": "cal-07",
+      "split": "calibration",
+      "report": "Oriel v1 permits exactly one active writer per database.",
+      "expectedTruth": "correct"
+    },
+    {
+      "id": "cal-08",
+      "split": "calibration",
+      "report": "Oriel v1 allows two simultaneous writers per database. [1.1]",
+      "expectedTruth": "incorrect"
+    },
+    {
+      "id": "cal-09",
+      "split": "calibration",
+      "report": "Oriel v1 requires both licenses A and B. [1.1]",
+      "expectedTruth": "incorrect"
+    },
+    {
+      "id": "cal-10",
+      "split": "calibration",
+      "report": "Oriel v1 enables encryption by default. [1.1]",
+      "expectedTruth": "incorrect"
+    },
+    {
+      "id": "cal-11",
+      "split": "calibration",
+      "report": "Oriel v1 cannot enable encryption. [1.1]",
+      "expectedTruth": "incorrect"
+    },
+    {
+      "id": "cal-12",
+      "split": "calibration",
+      "report": "Oriel v1 readers cannot run concurrently with its writer. [1.1]",
+      "expectedTruth": "incorrect"
+    },
+    {
+      "id": "cal-13",
+      "split": "calibration",
+      "report": "Oriel v1 permits unlimited simultaneous writers per database. [1.1]",
+      "expectedTruth": "incorrect"
+    },
+    {
+      "id": "cal-14",
+      "split": "calibration",
+      "report": "Oriel v1 must be used under license A; license B is not an option. [1.1]",
+      "expectedTruth": "incorrect"
+    },
+    {
+      "id": "cal-15",
+      "split": "calibration",
+      "report": "Oriel v1 guarantees one million writes per second. [1.1]",
+      "expectedTruth": "unverifiable"
+    },
+    {
+      "id": "cal-16",
+      "split": "calibration",
+      "report": "Oriel v2 enables encryption by default. [1.1]",
+      "expectedTruth": "unverifiable"
+    },
+    {
+      "id": "cal-17",
+      "split": "holdout",
+      "report": "Oriel v1 is guaranteed safe across multiple hosts on network filesystems. [1.1]",
+      "expectedTruth": "unverifiable"
+    },
+    {
+      "id": "cal-18",
+      "split": "holdout",
+      "report": "In Oriel v1, a writer and readers may operate concurrently. [1.1]",
+      "expectedTruth": "correct"
+    },
+    {
+      "id": "cal-19",
+      "split": "holdout",
+      "report": "Oriel v1 allows three active writers simultaneously on the same database. [1.1]",
+      "expectedTruth": "incorrect"
+    },
+    {
+      "id": "cal-20",
+      "split": "holdout",
+      "report": "Users of Oriel v1 must accept A and B simultaneously. [1.1]",
+      "expectedTruth": "incorrect"
+    }
+  ]
+}

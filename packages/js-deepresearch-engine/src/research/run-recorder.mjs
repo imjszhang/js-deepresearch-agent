@@ -205,6 +205,8 @@ export class FileRunRecorder {
     this.blobsDir = path.join(this.sessionDir, 'blobs');
     this.sequence = 0;
     this.checkpointSequence = 0;
+    this.actionContext = null;
+    this.recoverableCalls = [];
     for (const dir of [this.sessionDir, path.dirname(this.eventsPath), this.callsDir, this.checkpointsDir, this.blobsDir]) {
       ensurePrivateDirectory(dir);
     }
@@ -237,6 +239,12 @@ export class FileRunRecorder {
 
   static reopen(sessionDir) {
     return new FileRunRecorder({ sessionDir, reopen: true });
+  }
+
+  setExecutionConfig(config) {
+    this.executionConfig = config;
+    this.run.executionConfig = config;
+    atomicWrite(this.runPath, this.run);
   }
 
   #reopenExisting() {
@@ -296,6 +304,11 @@ export class FileRunRecorder {
   }
 
   #writeBlobBody(body, mediaType) {
+    // UTF-8 replaces lone UTF-16 surrogates. JSON escapes them losslessly; existing
+    // materialization already decodes JSON strings as well as ordinary text blobs.
+    if (mediaType === 'text/plain' && Buffer.from(body, 'utf8').toString('utf8') !== body) {
+      return this.#writeBlobBody(JSON.stringify(body), 'application/json');
+    }
     const hash = crypto.createHash('sha256').update(body).digest('hex');
     const extension = mediaType === 'text/plain' ? 'txt' : 'json';
     const file = path.join(this.blobsDir, `${hash}.${extension}`);
@@ -309,6 +322,7 @@ export class FileRunRecorder {
   }
 
   checkpoint(boundary, state, metadata = {}) {
+    if (this.executionConfig) state = { ...state, executionConfig: this.executionConfig };
     const checkpointId = String(++this.checkpointSequence).padStart(6, '0');
     const externalizedState = this.#externalize(sanitizeRecordedValue(state));
     const stateBlob = this.writeBlob(externalizedState, { sanitized: true });
@@ -346,11 +360,43 @@ export class FileRunRecorder {
     return record;
   }
 
+  setActionContext(action) { this.actionContext = action ? { actionId: action.actionId, attemptId: action.attemptId } : null; }
+
+  enableRecovery(checkpointId) {
+    const after = Number(checkpointId);
+    this.recoverableCalls = fs.readdirSync(this.callsDir).filter((name) => name.endsWith('.request.json')).flatMap((name) => {
+      const request = JSON.parse(fs.readFileSync(path.join(this.callsDir, name), 'utf8'));
+      if (Number(request.startedCheckpointId) < after || !Number.isFinite(Number(request.startedCheckpointId))) return [];
+      const file = path.join(this.callsDir, name.replace('.request.json', '.response.json'));
+      if (!fs.existsSync(file)) return [];
+      const response = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (request.callId !== response.callId || request.kind !== response.kind || response.status !== 'completed') return [];
+      return [{ ...request, response: response.response }];
+    });
+  }
+
+  hasRecoverable(kind, { actionId = this.actionContext?.actionId, url } = {}) {
+    return this.recoverableCalls.some((item) => (!kind || item.kind === kind) && item.actionId === actionId && (!url || item.request?.url === url));
+  }
+
+  recoverCall(kind, request, purpose = null) {
+    const normalized = sanitizeRecordedValue(request, '', payloadFidelity(kind));
+    const key = JSON.stringify(normalized);
+    const index = this.recoverableCalls.findIndex((item) => item.kind === kind && (item.actionId || null) === (this.actionContext?.actionId || null)
+      && (!purpose || item.purpose === purpose) && JSON.stringify(item.request) === key);
+    if (index < 0) return null;
+    const [receipt] = this.recoverableCalls.splice(index, 1);
+    this.event('external_receipt_recovered', { callId: receipt.callId, kind, actionId: receipt.actionId || null });
+    return receipt;
+  }
+
   callStarted({ callId, kind, request, ...metadata } = {}) {
     const id = safeName(callId, `call-${this.sequence + 1}`);
     const normalizedKind = safeName(kind, 'external');
     const record = {
       ...sanitizeRecordedValue(metadata),
+      ...this.actionContext,
+      startedCheckpointId: this.checkpointSequence,
       schemaVersion: RUN_RECORD_SCHEMA_VERSION,
       callId: id,
       kind: normalizedKind,

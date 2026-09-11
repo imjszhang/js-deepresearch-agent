@@ -1,0 +1,815 @@
+{
+  "schemaVersion": 1,
+  "entries": [
+    {
+      "id": "cal-01",
+      "round": "calibration.json",
+      "reportHash": "f580d37187c0526bbf2d6bbe4122243f3ef9672aaf17786309bff866ae5510e6",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "calibration"
+    },
+    {
+      "id": "cal-02",
+      "round": "calibration.json",
+      "reportHash": "d58148cea43600ffbde37d5a52588abd4ec350bc52a71a74148225d9ba2fe2b4",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "calibration"
+    },
+    {
+      "id": "cal-03",
+      "round": "calibration.json",
+      "reportHash": "a237ed0e9c1000b5c472fc6d89b28923bc5228707d545f8b9cf410ae8005ce2d",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "calibration"
+    },
+    {
+      "id": "cal-04",
+      "round": "calibration.json",
+      "reportHash": "52893eac5fc6416b5405761eb5d2139064f2bcee3e46ef2c913073ddf4fe187c",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "calibration"
+    },
+    {
+      "id": "cal-05",
+      "round": "calibration.json",
+      "reportHash": "aaa8e9b19c1984090e89f75a0d91ae7a0232b7de0323dbec2baac300aca032c9",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "calibration"
+    },
+    {
+      "id": "cal-06",
+      "round": "calibration.json",
+      "reportHash": "7084c3c361b4b7cf5b8392e65b03cde56181d4da70ec1d8603cb1324ed0d945e",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "calibration"
+    },
+    {
+      "id": "cal-07",
+      "round": "calibration.json",
+      "reportHash": "674d913bf37f9f27bd7dafa57a3012f945f6d28694217897e27b66707fd961a9",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "calibration"
+    },
+    {
+      "id": "cal-08",
+      "round": "calibration.json",
+      "reportHash": "b60eea0cd02b46475949195bc3f23a8ca5a6225c0becbd0383e88b44e9430b42",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "calibration"
+    },
+    {
+      "id": "cal-09",
+      "round": "calibration.json",
+      "reportHash": "985bfa29493220d9fd65175c47c4a5454249f9ac06498a2f79d91a0ae97400fc",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "calibration"
+    },
+    {
+      "id": "cal-10",
+      "round": "calibration.json",
+      "reportHash": "4fed8f7064d28130c7253036189f0d8f28a64b1ae157a8470b0d324ae59105fd",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "calibration"
+    },
+    {
+      "id": "cal-11",
+      "round": "calibration.json",
+      "reportHash": "344490d131c9e8f0e5401ae02798b63d6ac9cc589fa4141de8b084e59343ea10",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "calibration"
+    },
+    {
+      "id": "cal-12",
+      "round": "calibration.json",
+      "reportHash": "af50b2c02c141e15fdd0791d91d323cb7d32b1b98e02945247bf3f7fb8286819",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "calibration"
+    },
+    {
+      "id": "cal-13",
+      "round": "calibration.json",
+      "reportHash": "b77c6f8113c33dd3f1bfb4bd951c58898bea004549401ffe521dd218e32de0d3",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "calibration"
+    },
+    {
+      "id": "cal-14",
+      "round": "calibration.json",
+      "reportHash": "b613b2b697f36ae80cb192150e3f62d50d93f05502e9f3ae7d11a05c79f3c33f",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "calibration"
+    },
+    {
+      "id": "cal-15",
+      "round": "calibration.json",
+      "reportHash": "be68dab5824ea0a68a399fc73673b455e452aa462d040b1d60e3c7221e55327b",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "calibration"
+    },
+    {
+      "id": "cal-16",
+      "round": "calibration.json",
+      "reportHash": "748e4cc1953a0577ad33e9d3d7bdf756ec5cddece3dddf4e7392cceeec07ca81",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "calibration"
+    },
+    {
+      "id": "cal-17",
+      "round": "calibration.json",
+      "reportHash": "de49b519606603a59cac9c932287fefd061ad4e3adf0a762d28fb3f8d4839b11",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "cal-18",
+      "round": "calibration.json",
+      "reportHash": "15a9b3838ee9ffe0d6e7f0ef0a872b81bb986dcb9a0c28c6341e42b38989bbfd",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "cal-19",
+      "round": "calibration.json",
+      "reportHash": "38144ffa05f47ba0d8e7c273a23f0bce35f49bd31e42c3e340b7ea58c0b12392",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "cal-20",
+      "round": "calibration.json",
+      "reportHash": "e320cff21fc44258831e602327122dda68cba738107cc23d8c34e174a63257d8",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "holdout-21",
+      "round": "calibration-holdout-v3.json",
+      "reportHash": "01ce984bb8bf83a31f9a8d1f5b4edee9c4409cb9f3fee6f402b3f6695becaef6",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "holdout-22",
+      "round": "calibration-holdout-v3.json",
+      "reportHash": "3ccd9f06ae9489b1ed616180a977ea5536b0c4e631d8c3c6e26be13b99b1bde0",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "holdout-23",
+      "round": "calibration-holdout-v3.json",
+      "reportHash": "22380d9385316c4eb13d2ac6f9f02b2be2b1114a52648140a4992fd8b2377863",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "holdout-24",
+      "round": "calibration-holdout-v3.json",
+      "reportHash": "b12b21ba61e9a14f32d3a6a4f95721b021709b551528f2d516aa159b1b4ed997",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "holdout-25",
+      "round": "calibration-holdout-v3.json",
+      "reportHash": "fdb9e594bdc035352dbc48671f5c7cfcc47dad4c189712a2d7327a448f99fa41",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "holdout-26",
+      "round": "calibration-holdout-v3.json",
+      "reportHash": "a51875bb41837826c78dade7cec555f0c6c12a67a2a7982dae5928ab3261c725",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "holdout-27",
+      "round": "calibration-holdout-v3.json",
+      "reportHash": "d79de096c869e51b5729846233614ca225dbb5e09b7149b21b73322e112a0129",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "holdout-28",
+      "round": "calibration-holdout-v3.json",
+      "reportHash": "112ebdc46a958e67e5933cf916a528434ba98ce298a4069a54e3b824bee381b8",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "holdout-29",
+      "round": "calibration-holdout-v3.json",
+      "reportHash": "6c154935861760be603ef123519613ede0d172d150e3eded868a559e9a7b2582",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "holdout-30",
+      "round": "calibration-holdout-v3.json",
+      "reportHash": "16787c2c72e7e8c6890e709885aba30deee969073675b978b5427568709143a6",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "holdout-31",
+      "round": "calibration-holdout-v3.json",
+      "reportHash": "ac7ea113f37414a7232787c8c2c5a98b45306d4b4c775ab886d6533492c40630",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "holdout-32",
+      "round": "calibration-holdout-v3.json",
+      "reportHash": "68dd9e2899d67ad163c2e305006d9dd9a613418cd0f6e9bbeb275208368cff51",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "holdout-33",
+      "round": "calibration-holdout-v3.json",
+      "reportHash": "16c08200751b686767cf84d98b3521024d8b182940cfda00fec764528ad30730",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "holdout-34",
+      "round": "calibration-holdout-v3.json",
+      "reportHash": "d92457c47d846e853d7bc8fa5afd5752a46726d232340c67b67eb63a150d8600",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "holdout-35",
+      "round": "calibration-holdout-v3.json",
+      "reportHash": "33540768b0e60fb3f4457adc25186ab6b1d6e14429c3e63dfd1e65e14ed067c5",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "holdout-36",
+      "round": "calibration-holdout-v3.json",
+      "reportHash": "10de5566c8cdb560db2951120c83cceeee0f51815d194360c6d8d92d41f0486f",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "holdout-37",
+      "round": "calibration-holdout-v3.json",
+      "reportHash": "b43b2686498a8674aac89a3c72fd0d77e09f1666728d4b78e80db75a8687a2a3",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "holdout-38",
+      "round": "calibration-holdout-v3.json",
+      "reportHash": "0dbd54e6b809d8c7fe30dbcbf77c83dab477ff0b233facbaa97f27a83a8674ca",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "holdout-39",
+      "round": "calibration-holdout-v3.json",
+      "reportHash": "86c0b34bb50c8f4843f71761e7b005f79b6361d669d5f950b8dd834398e619a2",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "holdout-40",
+      "round": "calibration-holdout-v3.json",
+      "reportHash": "79e3b567e8d3a00208ee39fb4da344dec9a204d4f7759a513da6ab095560b241",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "v4-h01",
+      "round": "calibration-holdout-v4.json",
+      "reportHash": "e7c8ce174b4dda703220afa567a6e1513e6bb69ea1c308a78a6ed991785a6b52",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "v4-h02",
+      "round": "calibration-holdout-v4.json",
+      "reportHash": "675cc621d58f2f9eaaeca97fff80f86a9da48414dca6ff28a352e172088332b5",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "v4-h03",
+      "round": "calibration-holdout-v4.json",
+      "reportHash": "32676050a72e4894573fcbe47f2bec325d44e0a9915181162448942e48962ec1",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "v4-h04",
+      "round": "calibration-holdout-v4.json",
+      "reportHash": "0c36de5362950d294102f05c956adb9d9325202d65718629fc4c9253077a9802",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "v4-h05",
+      "round": "calibration-holdout-v4.json",
+      "reportHash": "53b7f6d453e78c0391297c89bcdb4d21cfa50d49eada1da41dbf53a02bfcfd30",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "v4-h06",
+      "round": "calibration-holdout-v4.json",
+      "reportHash": "ceb386d7a9108045f5c39039c2332252e9403910a6e313245ae7f078ec9fb60e",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "v4-h07",
+      "round": "calibration-holdout-v4.json",
+      "reportHash": "ec56cb70ea2228a698a547b2848d13a00f98c76482fc5c76f1470f8d86359b0d",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "v4-h08",
+      "round": "calibration-holdout-v4.json",
+      "reportHash": "cef855b64f2f6b2adc99e1d00f5705bb68cd160de894aa43078287ecd1c99afd",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "v4-h09",
+      "round": "calibration-holdout-v4.json",
+      "reportHash": "e1628c7b866232e2f0564f962e22f2e65bb992d15a09f6d29e286a27347d7390",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "v4-h10",
+      "round": "calibration-holdout-v4.json",
+      "reportHash": "e59aa4016ceba88392b38dfd776de4aedf68ae14e38787c78fadd4be228ce0e2",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "v4-h11",
+      "round": "calibration-holdout-v4.json",
+      "reportHash": "28743eb91af5b448653db37563dbd3d97a7f513c7c2a71f3e2d1e8bbbc464ae5",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "v4-h12",
+      "round": "calibration-holdout-v4.json",
+      "reportHash": "8cf6ce49f955d6135db2946f9e78ce38b47652eef3a08dffc1f9bede000b48bd",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "v4-h13",
+      "round": "calibration-holdout-v4.json",
+      "reportHash": "79158c2101dc87a73d6b6252bf9a3fba2a5aaf7592849b5f30191b743d44bfd3",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "v4-h14",
+      "round": "calibration-holdout-v4.json",
+      "reportHash": "57f3dd4b4e9bf50b8996eca262c3c2522b567eab80b2333f3b6234cad8330f7e",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "v4-h15",
+      "round": "calibration-holdout-v4.json",
+      "reportHash": "af3a085b4b48f06aac5442bc90314e790826fa130ff48dc18d5502d06c5a4622",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "v4-h16",
+      "round": "calibration-holdout-v4.json",
+      "reportHash": "c883ab765754ca519decbb96075a325c7b871827755516ab694fd1b2d5857a70",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "v4-h17",
+      "round": "calibration-holdout-v4.json",
+      "reportHash": "26a1dbedfa2ac240d7cc063a3074e3e00b94914398e4a4810204e2bcdd3a55be",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "v4-h18",
+      "round": "calibration-holdout-v4.json",
+      "reportHash": "ec41a9c777753351193eb85421befdb704ffc34962dade39a772756288fc2dba",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "v4-h19",
+      "round": "calibration-holdout-v4.json",
+      "reportHash": "9b9b0f1cb976fd8d391ff47543751ada33544700c1710bef154adab849629ce3",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "v4-h20",
+      "round": "calibration-holdout-v4.json",
+      "reportHash": "1f3bd9af281da8cecb5837892013503a84767a24135552a401c858d1fbb2ca8f",
+      "evidenceHash": "6df7d7ad596fb048c5b222ff2590a4f990dea09545767ca3885ead0087725f0d",
+      "family": "oriel",
+      "role": "previously_exposed",
+      "originalSplit": "holdout"
+    },
+    {
+      "id": "cal-01",
+      "roundId": "quality-v5-round-1",
+      "stage": "development",
+      "reportHash": "f580d37187c0526bbf2d6bbe4122243f3ef9672aaf17786309bff866ae5510e6",
+      "evidenceHash": "a57680ca1ee84066aef96d42afdc59ee390db0059a32152d4c20b6294a0eb73a",
+      "family": "oriel",
+      "firstUsedAt": "2026-09-10T19:13:05.112Z"
+    },
+    {
+      "id": "cal-02",
+      "roundId": "quality-v5-round-1",
+      "stage": "development",
+      "reportHash": "d58148cea43600ffbde37d5a52588abd4ec350bc52a71a74148225d9ba2fe2b4",
+      "evidenceHash": "a57680ca1ee84066aef96d42afdc59ee390db0059a32152d4c20b6294a0eb73a",
+      "family": "oriel",
+      "firstUsedAt": "2026-09-10T19:13:26.751Z"
+    },
+    {
+      "id": "cal-03",
+      "roundId": "quality-v5-round-1",
+      "stage": "development",
+      "reportHash": "a237ed0e9c1000b5c472fc6d89b28923bc5228707d545f8b9cf410ae8005ce2d",
+      "evidenceHash": "a57680ca1ee84066aef96d42afdc59ee390db0059a32152d4c20b6294a0eb73a",
+      "family": "oriel",
+      "firstUsedAt": "2026-09-10T19:13:32.171Z"
+    },
+    {
+      "id": "cal-04",
+      "roundId": "quality-v5-round-1",
+      "stage": "development",
+      "reportHash": "52893eac5fc6416b5405761eb5d2139064f2bcee3e46ef2c913073ddf4fe187c",
+      "evidenceHash": "a57680ca1ee84066aef96d42afdc59ee390db0059a32152d4c20b6294a0eb73a",
+      "family": "oriel",
+      "firstUsedAt": "2026-09-10T19:13:37.044Z"
+    },
+    {
+      "id": "cal-08",
+      "roundId": "quality-v5-round-1",
+      "stage": "development",
+      "reportHash": "b60eea0cd02b46475949195bc3f23a8ca5a6225c0becbd0383e88b44e9430b42",
+      "evidenceHash": "a57680ca1ee84066aef96d42afdc59ee390db0059a32152d4c20b6294a0eb73a",
+      "family": "oriel",
+      "firstUsedAt": "2026-09-10T19:13:41.511Z"
+    },
+    {
+      "id": "cal-10",
+      "roundId": "quality-v5-round-1",
+      "stage": "development",
+      "reportHash": "4fed8f7064d28130c7253036189f0d8f28a64b1ae157a8470b0d324ae59105fd",
+      "evidenceHash": "a57680ca1ee84066aef96d42afdc59ee390db0059a32152d4c20b6294a0eb73a",
+      "family": "oriel",
+      "firstUsedAt": "2026-09-10T19:13:46.313Z"
+    },
+    {
+      "id": "cal-15",
+      "roundId": "quality-v5-round-1",
+      "stage": "development",
+      "reportHash": "be68dab5824ea0a68a399fc73673b455e452aa462d040b1d60e3c7221e55327b",
+      "evidenceHash": "a57680ca1ee84066aef96d42afdc59ee390db0059a32152d4c20b6294a0eb73a",
+      "family": "oriel",
+      "firstUsedAt": "2026-09-10T19:13:50.911Z"
+    },
+    {
+      "id": "cal-16",
+      "roundId": "quality-v5-round-1",
+      "stage": "development",
+      "reportHash": "748e4cc1953a0577ad33e9d3d7bdf756ec5cddece3dddf4e7392cceeec07ca81",
+      "evidenceHash": "a57680ca1ee84066aef96d42afdc59ee390db0059a32152d4c20b6294a0eb73a",
+      "family": "oriel",
+      "firstUsedAt": "2026-09-10T19:13:55.781Z"
+    },
+    {
+      "id": "cal-17",
+      "roundId": "quality-v5-round-1",
+      "stage": "development",
+      "reportHash": "de49b519606603a59cac9c932287fefd061ad4e3adf0a762d28fb3f8d4839b11",
+      "evidenceHash": "a57680ca1ee84066aef96d42afdc59ee390db0059a32152d4c20b6294a0eb73a",
+      "family": "oriel",
+      "firstUsedAt": "2026-09-10T19:14:00.358Z"
+    },
+    {
+      "id": "holdout-27",
+      "roundId": "quality-v5-round-1",
+      "stage": "development",
+      "reportHash": "d79de096c869e51b5729846233614ca225dbb5e09b7149b21b73322e112a0129",
+      "evidenceHash": "a57680ca1ee84066aef96d42afdc59ee390db0059a32152d4c20b6294a0eb73a",
+      "family": "oriel",
+      "firstUsedAt": "2026-09-10T19:14:05.363Z"
+    },
+    {
+      "id": "holdout-28",
+      "roundId": "quality-v5-round-1",
+      "stage": "development",
+      "reportHash": "112ebdc46a958e67e5933cf916a528434ba98ce298a4069a54e3b824bee381b8",
+      "evidenceHash": "a57680ca1ee84066aef96d42afdc59ee390db0059a32152d4c20b6294a0eb73a",
+      "family": "oriel",
+      "firstUsedAt": "2026-09-10T19:14:12.477Z"
+    },
+    {
+      "id": "holdout-31",
+      "roundId": "quality-v5-round-1",
+      "stage": "development",
+      "reportHash": "ac7ea113f37414a7232787c8c2c5a98b45306d4b4c775ab886d6533492c40630",
+      "evidenceHash": "a57680ca1ee84066aef96d42afdc59ee390db0059a32152d4c20b6294a0eb73a",
+      "family": "oriel",
+      "firstUsedAt": "2026-09-10T19:14:16.850Z"
+    },
+    {
+      "id": "holdout-39",
+      "roundId": "quality-v5-round-1",
+      "stage": "development",
+      "reportHash": "86c0b34bb50c8f4843f71761e7b005f79b6361d669d5f950b8dd834398e619a2",
+      "evidenceHash": "a57680ca1ee84066aef96d42afdc59ee390db0059a32152d4c20b6294a0eb73a",
+      "family": "oriel",
+      "firstUsedAt": "2026-09-10T19:14:31.779Z"
+    },
+    {
+      "id": "v4-h01",
+      "roundId": "quality-v5-round-1",
+      "stage": "development",
+      "reportHash": "e7c8ce174b4dda703220afa567a6e1513e6bb69ea1c308a78a6ed991785a6b52",
+      "evidenceHash": "a57680ca1ee84066aef96d42afdc59ee390db0059a32152d4c20b6294a0eb73a",
+      "family": "oriel",
+      "firstUsedAt": "2026-09-10T19:14:39.478Z"
+    },
+    {
+      "id": "v4-h02",
+      "roundId": "quality-v5-round-1",
+      "stage": "development",
+      "reportHash": "675cc621d58f2f9eaaeca97fff80f86a9da48414dca6ff28a352e172088332b5",
+      "evidenceHash": "a57680ca1ee84066aef96d42afdc59ee390db0059a32152d4c20b6294a0eb73a",
+      "family": "oriel",
+      "firstUsedAt": "2026-09-10T19:14:44.112Z"
+    },
+    {
+      "id": "v4-h03",
+      "roundId": "quality-v5-round-1",
+      "stage": "development",
+      "reportHash": "32676050a72e4894573fcbe47f2bec325d44e0a9915181162448942e48962ec1",
+      "evidenceHash": "a57680ca1ee84066aef96d42afdc59ee390db0059a32152d4c20b6294a0eb73a",
+      "family": "oriel",
+      "firstUsedAt": "2026-09-10T19:15:00.116Z"
+    },
+    {
+      "id": "v4-h06",
+      "roundId": "quality-v5-round-1",
+      "stage": "development",
+      "reportHash": "ceb386d7a9108045f5c39039c2332252e9403910a6e313245ae7f078ec9fb60e",
+      "evidenceHash": "a57680ca1ee84066aef96d42afdc59ee390db0059a32152d4c20b6294a0eb73a",
+      "family": "oriel",
+      "firstUsedAt": "2026-09-10T19:15:06.347Z"
+    },
+    {
+      "id": "v4-h10",
+      "roundId": "quality-v5-round-1",
+      "stage": "development",
+      "reportHash": "e59aa4016ceba88392b38dfd776de4aedf68ae14e38787c78fadd4be228ce0e2",
+      "evidenceHash": "a57680ca1ee84066aef96d42afdc59ee390db0059a32152d4c20b6294a0eb73a",
+      "family": "oriel",
+      "firstUsedAt": "2026-09-10T19:15:14.705Z"
+    },
+    {
+      "id": "v4-h13",
+      "roundId": "quality-v5-round-1",
+      "stage": "development",
+      "reportHash": "79158c2101dc87a73d6b6252bf9a3fba2a5aaf7592849b5f30191b743d44bfd3",
+      "evidenceHash": "a57680ca1ee84066aef96d42afdc59ee390db0059a32152d4c20b6294a0eb73a",
+      "family": "oriel",
+      "firstUsedAt": "2026-09-10T19:15:21.931Z"
+    },
+    {
+      "id": "v4-h19",
+      "roundId": "quality-v5-round-1",
+      "stage": "development",
+      "reportHash": "9b9b0f1cb976fd8d391ff47543751ada33544700c1710bef154adab849629ce3",
+      "evidenceHash": "a57680ca1ee84066aef96d42afdc59ee390db0059a32152d4c20b6294a0eb73a",
+      "family": "oriel",
+      "firstUsedAt": "2026-09-10T19:15:27.099Z"
+    },
+    {
+      "id": "cal-01",
+      "roundId": "quality-v6-round-1",
+      "stage": "development",
+      "reportHash": "f580d37187c0526bbf2d6bbe4122243f3ef9672aaf17786309bff866ae5510e6",
+      "evidenceHash": "a57680ca1ee84066aef96d42afdc59ee390db0059a32152d4c20b6294a0eb73a",
+      "family": "oriel",
+      "firstUsedAt": "2026-09-11T05:43:35.951Z"
+    },
+    {
+      "id": "cal-02",
+      "roundId": "quality-v6-round-1",
+      "stage": "development",
+      "reportHash": "d58148cea43600ffbde37d5a52588abd4ec350bc52a71a74148225d9ba2fe2b4",
+      "evidenceHash": "a57680ca1ee84066aef96d42afdc59ee390db0059a32152d4c20b6294a0eb73a",
+      "family": "oriel",
+      "firstUsedAt": "2026-09-11T05:43:56.074Z"
+    },
+    {
+      "id": "cal-03",
+      "roundId": "quality-v6-round-1",
+      "stage": "development",
+      "reportHash": "a237ed0e9c1000b5c472fc6d89b28923bc5228707d545f8b9cf410ae8005ce2d",
+      "evidenceHash": "a57680ca1ee84066aef96d42afdc59ee390db0059a32152d4c20b6294a0eb73a",
+      "family": "oriel",
+      "firstUsedAt": "2026-09-11T05:44:19.151Z"
+    },
+    {
+      "id": "cal-04",
+      "roundId": "quality-v6-round-1",
+      "stage": "development",
+      "reportHash": "52893eac5fc6416b5405761eb5d2139064f2bcee3e46ef2c913073ddf4fe187c",
+      "evidenceHash": "a57680ca1ee84066aef96d42afdc59ee390db0059a32152d4c20b6294a0eb73a",
+      "family": "oriel",
+      "firstUsedAt": "2026-09-11T05:44:32.674Z"
+    },
+    {
+      "id": "cal-08",
+      "roundId": "quality-v6-round-1",
+      "stage": "development",
+      "reportHash": "b60eea0cd02b46475949195bc3f23a8ca5a6225c0becbd0383e88b44e9430b42",
+      "evidenceHash": "a57680ca1ee84066aef96d42afdc59ee390db0059a32152d4c20b6294a0eb73a",
+      "family": "oriel",
+      "firstUsedAt": "2026-09-11T05:44:54.515Z"
+    },
+    {
+      "id": "cal-10",
+      "roundId": "quality-v6-round-1",
+      "stage": "development",
+      "reportHash": "4fed8f7064d28130c7253036189f0d8f28a64b1ae157a8470b0d324ae59105fd",
+      "evidenceHash": "a57680ca1ee84066aef96d42afdc59ee390db0059a32152d4c20b6294a0eb73a",
+      "family": "oriel",
+      "firstUsedAt": "2026-09-11T05:45:17.174Z"
+    },
+    {
+      "id": "cal-15",
+      "roundId": "quality-v6-round-1",
+      "stage": "development",
+      "reportHash": "be68dab5824ea0a68a399fc73673b455e452aa462d040b1d60e3c7221e55327b",
+      "evidenceHash": "a57680ca1ee84066aef96d42afdc59ee390db0059a32152d4c20b6294a0eb73a",
+      "family": "oriel",
+      "firstUsedAt": "2026-09-11T05:45:35.887Z"
+    },
+    {
+      "id": "cal-16",
+      "roundId": "quality-v6-round-1",
+      "stage": "development",
+      "reportHash": "748e4cc1953a0577ad33e9d3d7bdf756ec5cddece3dddf4e7392cceeec07ca81",
+      "evidenceHash": "a57680ca1ee84066aef96d42afdc59ee390db0059a32152d4c20b6294a0eb73a",
+      "family": "oriel",
+      "firstUsedAt": "2026-09-11T05:45:54.000Z"
+    },
+    {
+      "id": "cal-17",
+      "roundId": "quality-v6-round-1",
+      "stage": "development",
+      "reportHash": "de49b519606603a59cac9c932287fefd061ad4e3adf0a762d28fb3f8d4839b11",
+      "evidenceHash": "a57680ca1ee84066aef96d42afdc59ee390db0059a32152d4c20b6294a0eb73a",
+      "family": "oriel",
+      "firstUsedAt": "2026-09-11T05:46:09.851Z"
+    },
+    {
+      "id": "holdout-27",
+      "roundId": "quality-v6-round-1",
+      "stage": "development",
+      "reportHash": "d79de096c869e51b5729846233614ca225dbb5e09b7149b21b73322e112a0129",
+      "evidenceHash": "a57680ca1ee84066aef96d42afdc59ee390db0059a32152d4c20b6294a0eb73a",
+      "family": "oriel",
+      "firstUsedAt": "2026-09-11T05:46:32.232Z"
+    }
+  ]
+}

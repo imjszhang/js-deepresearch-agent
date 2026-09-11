@@ -11,7 +11,8 @@ function collectWarnings(runs) {
   const duplicateLabels = labels.filter((label, index) => labels.indexOf(label) !== index);
 
   if (queries.length > 1) warnings.push('Compared runs use different queries.');
-  if (metricVersions.length > 1) warnings.push('Compared runs use different quality metrics versions.');
+  if (runs.some((run) => !run.query)) warnings.push('A compared run has no recorded query; query equivalence is unverified.');
+  if (metricVersions.length > 1) warnings.push('Compared runs use different artifact metrics versions.');
   if (duplicateLabels.length > 0) {
     warnings.push(`Duplicate strategy labels detected: ${[...new Set(duplicateLabels)].join(', ')}`);
   }
@@ -20,15 +21,26 @@ function collectWarnings(runs) {
 }
 
 function completedSlotCount(audit) {
-  return (audit?.requiredSlotCompletion?.slots || []).filter((slot) => slot.status === 'completed').length;
+  const slots = audit?.requiredSlotCompletion?.slots;
+  return Array.isArray(slots) ? slots.filter((slot) => slot.status === 'completed').length : null;
 }
 
 function resolvedCitationCount(audit) {
-  return audit?.citationIntegrity?.counts?.resolved ?? 0;
+  return audit?.citationIntegrity?.counts?.resolved ?? null;
 }
 
 function realBodyCount(audit) {
-  return audit?.evidenceProvenance?.counts?.realBodies ?? 0;
+  return audit?.evidenceProvenance?.counts?.realBodies ?? null;
+}
+
+function difference(value, baseline) {
+  return Number.isFinite(value) && Number.isFinite(baseline) ? value - baseline : null;
+}
+
+function costDifference(run, baseline, key) {
+  if (run.cost.unknownUsage?.[key] || baseline.cost.unknownUsage?.[key]
+    || (key === 'llmTokens' && (run.cost.costIsLowerBound || baseline.cost.costIsLowerBound))) return null;
+  return difference(run.cost[key], baseline.cost[key]);
 }
 
 function buildDeltas(runs) {
@@ -41,15 +53,16 @@ function buildDeltas(runs) {
     durationMs: run.durationMs !== null && baseline.durationMs !== null
       ? run.durationMs - baseline.durationMs
       : null,
-    llmTokens: run.cost.llmTokens - baseline.cost.llmTokens,
-    searchRequests: run.cost.searchRequests - baseline.cost.searchRequests,
-    sourceReads: run.cost.sourceReads - baseline.cost.sourceReads,
-    rerankRequests: run.cost.rerankRequests - baseline.cost.rerankRequests,
-    sourceCount: run.counts.sourceCount - baseline.counts.sourceCount,
-    completedSlots: completedSlotCount(run.audit) - completedSlotCount(baseline.audit),
-    resolvedCitations: resolvedCitationCount(run.audit) - resolvedCitationCount(baseline.audit),
-    realBodies: realBodyCount(run.audit) - realBodyCount(baseline.audit),
-    processContractPass: Boolean(run.audit?.processContract?.pass) === Boolean(baseline.audit?.processContract?.pass)
+    llmTokens: costDifference(run, baseline, 'llmTokens'),
+    searchRequests: costDifference(run, baseline, 'searchRequests'),
+    sourceReads: costDifference(run, baseline, 'sourceReads'),
+    rerankRequests: costDifference(run, baseline, 'rerankRequests'),
+    sourceCount: difference(run.counts.sourceCount, baseline.counts.sourceCount),
+    completedSlots: difference(completedSlotCount(run.audit), completedSlotCount(baseline.audit)),
+    resolvedCitations: difference(resolvedCitationCount(run.audit), resolvedCitationCount(baseline.audit)),
+    realBodies: difference(realBodyCount(run.audit), realBodyCount(baseline.audit)),
+    processContractPass: typeof run.audit?.processContract?.pass !== 'boolean' || typeof baseline.audit?.processContract?.pass !== 'boolean'
+      ? null : run.audit.processContract.pass === baseline.audit.processContract.pass
       ? 0
       : (run.audit?.processContract?.pass ? 1 : -1),
     status: run.audit?.status || null,
@@ -62,15 +75,19 @@ export async function compareStrategySessions({
   researchIds = [],
   engine = null,
   strictPlatform = null,
-  llm = null,
   llmEnabled = false,
   wallClockByWorkDir = new Map(),
 }) {
+  if (llmEnabled !== false) {
+    throw new Error('Strategy artifact comparison is offline. Use benchmark:quality score --mode model-observation for independent model assessment.');
+  }
   const targets = [];
 
   for (const session of sessions) {
-    const [label, workDir] = session.includes('=')
-      ? session.split('=').map((part) => part.trim())
+    const separator = session.indexOf('=');
+    const labelled = separator > 0 && !/[\\/]/.test(session.slice(0, separator));
+    const [label, workDir] = labelled
+      ? [session.slice(0, separator).trim(), session.slice(separator + 1).trim()]
       : [null, session.trim()];
     targets.push({ label, workDir, researchId: null });
   }
@@ -94,12 +111,9 @@ export async function compareStrategySessions({
     if (target.label) stats.strategyLabel = target.label;
 
     const benchmark = await runBenchmark({
-      workDir: target.workDir,
-      researchId: target.researchId,
-      engine,
+      artifacts,
       strictPlatform,
-      llm,
-      llmEnabled,
+      llmEnabled: false,
     });
 
     const audit = auditStrategyRun({
@@ -110,6 +124,8 @@ export async function compareStrategySessions({
       sources: artifacts.sources,
       claims: artifacts.claims,
       passages: artifacts.passages,
+      citationRegistry: artifacts.citationRegistry,
+      evidenceStore: artifacts.evidenceStore,
       gaps: artifacts.gaps,
       brief: artifacts.brief,
       quality: artifacts.quality,
@@ -117,14 +133,22 @@ export async function compareStrategySessions({
       meta: artifacts.meta,
       usage: artifacts.quality?.budget?.usage || stats.cost,
     });
+    audit.scope = 'legacy_heuristic_diagnostics';
+    audit.authoritative = false;
 
     runs.push({
       ...stats,
       displayLabel,
+      runtimeDiagnostics: audit,
       audit,
       effectiveness: audit,
       benchmark: {
-        evaluation: benchmark.evaluation,
+        schemaVersion: benchmark.schemaVersion,
+        origin: benchmark.origin,
+        artifactVerification: benchmark.artifactVerification,
+        artifactMetadata: benchmark.artifactMetadata,
+        modelAssessment: benchmark.modelAssessment,
+        modelThresholdsMet: benchmark.modelThresholdsMet,
         metrics: benchmark.metrics,
         artifactsHealth: benchmark.artifactsHealth,
       },
@@ -133,7 +157,11 @@ export async function compareStrategySessions({
 
   const warnings = collectWarnings(runs);
   return {
-    query: warnings.includes('Compared runs use different queries.') ? null : runs[0]?.query || null,
+    schemaVersion: 2,
+    origin: 'program_check',
+    modelAssessment: { origin: 'model_assessment', observed: false, modelThresholdsMet: null },
+    modelThresholdsMet: null,
+    query: warnings.some((warning) => /queries|no recorded query/.test(warning)) ? null : runs[0]?.query || null,
     comparedAt: new Date().toISOString(),
     warnings,
     runs,
