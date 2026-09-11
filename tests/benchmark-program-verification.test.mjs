@@ -12,8 +12,8 @@ import { VERIFICATION_SCENARIOS, scenarioResults } from '../scripts/benchmark/qu
 
 const temporary = t => { const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jdr-program-verification-')); t.after(() => fs.rmSync(dir, { recursive: true, force: true })); return dir; };
 const events = () => {
-  const rows = VERIFICATION_SCENARIOS.flatMap(s => s.tests.map(({ file, name }) => ({ type: 'test:pass', file, name, skip: false, todo: false })));
-  rows.push({ type: 'test:plan', count: rows.length });
+  const rows = VERIFICATION_SCENARIOS.flatMap(s => s.tests.map(({ file, name }) => ({ type: 'test:pass', file, name, skip: false, todo: false, nesting: 0 })));
+  rows.push({ type: 'test:plan', count: rows.length, nesting: 0 });
   return [...rows, { type: 'verification:stream_end', eventCount: rows.length, planCount: 1 }];
 };
 const log = rows => rows.map(r => 'JDR_VERIFY_EVENT ' + JSON.stringify(r)).join('\n');
@@ -47,17 +47,56 @@ test('[V20] verification bootstrap executes every fixed check before a certifica
   fs.mkdirSync(path.dirname(fixtureFile), { recursive: true });
   fs.writeFileSync(fixtureFile, `import test from 'node:test'; test(${JSON.stringify(required.name)}, () => { const error = new Error('PRIVATE_ERROR'); error.verificationFailure = ${JSON.stringify({ ...safe, prompt: 'PRIVATE_PROMPT' })}; throw error; });`);
   const reporterArgs = process.env.NODE_OPTIONS?.includes('verification-reporter.mjs') ? [] : ['--test-reporter=' + path.resolve('scripts/benchmark/quality/verification-reporter.mjs')];
-  const child = spawnSync(process.execPath, ['--test', ...reporterArgs, fixtureFile],
+  const child = spawnSync(process.execPath, ['--test', '--test-force-exit', ...reporterArgs, fixtureFile],
     { encoding: 'utf8', timeout: 5000, env: { ...process.env, NODE_TEST_CONTEXT: undefined, JDR_VERIFY_ROOT: fixtureRoot } });
   assert.equal(child.status, 1);
   assert.deepEqual(parseVerificationEvents(child.stdout).find(e => e.type === 'test:fail').verificationFailure, safe);
   assert.doesNotMatch(child.stdout + child.stderr, /PRIVATE/);
+  assert.equal(verificationStreamsComplete(parseVerificationEvents(child.stdout)), true,
+    'A force-exited test process must report its complete failed run without waiting for reporter EOF');
+  const sourceEvents = [
+    { type: 'test:pass', data: { name: 'completed', file: fixtureFile, nesting: 0 } },
+    { type: 'test:summary', data: { success: true } },
+    { type: 'test:plan', data: { count: 1, nesting: 0 } },
+  ];
+  let reads = 0;
+  const openSource = { [Symbol.asyncIterator]() { return this; },
+    async next() { return reads < sourceEvents.length ? { value: sourceEvents[reads++], done: false } : new Promise(() => {}); } };
+  const iterator = reporter(openSource);
+  const beforePlan = await iterator.next();
+  let timeout;
+  try {
+    const terminal = await Promise.race([iterator.next(), new Promise((_, reject) => {
+      timeout = setTimeout(() => reject(new Error('Reporter waited for EOF after the root plan')), 1000);
+    })]);
+    const terminalEvents = parseVerificationEvents(terminal.value);
+    assert.deepEqual(terminalEvents.map(e => e.type), ['test:plan', 'verification:stream_end'],
+      'Root plan and closure must be delivered together before requesting another source event');
+    assert.equal(reads, sourceEvents.length);
+    assert.equal(verificationStreamsComplete(parseVerificationEvents(beforePlan.value + terminal.value)), true);
+  } finally { clearTimeout(timeout); }
+  await iterator.return();
 });
 
 test('[V02] model scores are absent from program decisions; missing or skipped required checks remain incomplete', async t => {
   assert.equal(verificationStreamsComplete(events()), true, 'Completion uses actual plan and closed event stream, independently of optional summary events');
   assert.equal(verificationStreamsComplete(events().slice(0, -1)), false);
   assert.equal(verificationStreamsComplete(events().slice(1)), false);
+  assert.equal(verificationStreamsComplete([...events(), ...events()]), true, 'Independent test commands each close their own root plan');
+  const missingPlan = events().filter(e => e.type !== 'test:plan');
+  missingPlan.at(-1).eventCount--; missingPlan.at(-1).planCount = 0;
+  assert.equal(verificationStreamsComplete(missingPlan), false);
+  const nestedOnly = events(); nestedOnly.at(-2).file = 'tests/nested.test.mjs'; nestedOnly.at(-2).nesting = 1;
+  assert.equal(verificationStreamsComplete(nestedOnly), false, 'A file or suite plan cannot close the whole command');
+  const wrongPlanCount = events(); wrongPlanCount.at(-2).count++;
+  assert.equal(verificationStreamsComplete(wrongPlanCount), false);
+  const prematurePlan = events(); prematurePlan.unshift(prematurePlan.splice(-2, 1)[0]);
+  assert.equal(verificationStreamsComplete(prematurePlan), false);
+  const afterPlan = events(); afterPlan.splice(-1, 0, { ...afterPlan[0] }); afterPlan.at(-1).eventCount++;
+  assert.equal(verificationStreamsComplete(afterPlan), false, 'A root plan must be immediately followed by its closure');
+  assert.equal(verificationStreamsComplete([...events(), { ...events()[0] }]), false, 'A trailing partial stream stays incomplete');
+  const wrongClosureCount = events(); wrongClosureCount.at(-1).eventCount++;
+  assert.equal(verificationStreamsComplete(wrongClosureCount), false);
   const requiredEngine = VERIFICATION_SCENARIOS.find(s => s.id === 'V22');
   assert.equal(requiredEngine.tests.length, 4);
   assert.equal(scenarioResults(events().filter(e => e.name !== requiredEngine.tests[0].name)).find(s => s.id === 'V22').status, 'incomplete');

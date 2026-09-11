@@ -67,14 +67,19 @@ export function parseVerificationEvents(log) {
   });
 }
 export function verificationStreamsComplete(events) {
-  let count = 0, plans = 0, streams = 0;
+  let count = 0, plans = 0, streams = 0, topLevelCompleted = 0, rootPlan = null;
   for (const event of events) {
     if (event.type === 'verification:stream_end') {
-      if (!count || !plans || event.eventCount !== count || event.planCount !== plans) return false;
-      streams++; count = 0; plans = 0;
+      if (!count || !plans || !rootPlan || rootPlan.count !== topLevelCompleted
+        || event.eventCount !== count || event.planCount !== plans) return false;
+      streams++; count = 0; plans = 0; topLevelCompleted = 0; rootPlan = null;
     } else {
-      if (!['test:pass', 'test:fail', 'test:plan', 'test:summary'].includes(event.type)) return false;
-      if (event.type === 'test:plan') { if (!Number.isInteger(event.count) || event.count < 0) return false; plans++; }
+      if (rootPlan || !['test:pass', 'test:fail', 'test:plan'].includes(event.type)) return false;
+      if (event.type === 'test:plan') {
+        if (!Number.isInteger(event.count) || event.count < 0) return false;
+        plans++;
+        if (event.nesting === 0 && !event.file) rootPlan = event;
+      } else if (event.nesting === 0) topLevelCompleted++;
       count++;
     }
   }
