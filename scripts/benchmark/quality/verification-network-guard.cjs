@@ -77,10 +77,15 @@ for (const protocol of ['node:http', 'node:https']) {
 }
 const http2 = require('node:http2'), originalHttp2 = http2.connect;
 http2.connect = function (authority, ...args) { urlCheck(authority); return originalHttp2.call(this, authority, ...args); };
-// Keep this allowlist identical to package.json. Node 22 applies --test-timeout
-// to the test file itself, so the V12 recovery file cannot keep a 15s default.
-const testScript = require('../../../package.json').scripts.test.split(' && ').at(-1);
-const shellScripts = new Set([testScript, require('../../../package.json').scripts.test, 'eslint .', 'vite build']);
+// Keep this allowlist identical to each package.json test script. The root
+// suite needs 120s so Node 22 does not time out the V12 recovery file; the
+// workspace packages still use a 15s default.
+const rootTest = require('../../../package.json').scripts.test;
+const workspaceTests = [
+  require('../../../packages/js-deepresearch-engine/package.json').scripts.test,
+  require('../../../packages/js-wiki-engine/package.json').scripts.test,
+];
+const shellScripts = new Set([rootTest, rootTest.split(' && ').at(-1), ...workspaceTests, 'eslint .', 'vite build']);
 function shellWords(script) {
   const words = [], token = /(?:'([^']*)'|"([^"$`\\]*)"|([a-zA-Z0-9_./:=*-]+))/y;
   let cursor = 0;
@@ -133,4 +138,5 @@ const originalExists = fs.existsSync;
 fs.existsSync = function (file) { return path.resolve(String(file)) === privateEnv ? false : originalExists(file); };
 fs.readFileSync = function (file, ...args) { if (typeof file !== 'number' && path.resolve(String(file)) === privateEnv) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); return read(file, ...args); };
 syncBuiltinESMExports();
-module.exports = { withExpectedBlockedAttempt: async fn => { expectedDepth++; try { return await fn(); } finally { expectedDepth--; } }, record };
+module.exports = { withExpectedBlockedAttempt: async fn => { expectedDepth++; try { return await fn(); } finally { expectedDepth--; } }, record,
+  allowedShellScripts: () => [...shellScripts] };
