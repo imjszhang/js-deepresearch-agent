@@ -77,8 +77,10 @@ for (const protocol of ['node:http', 'node:https']) {
 }
 const http2 = require('node:http2'), originalHttp2 = http2.connect;
 http2.connect = function (authority, ...args) { urlCheck(authority); return originalHttp2.call(this, authority, ...args); };
-const testScript = 'node --test --test-force-exit --test-timeout=15000 tests/*.test.mjs';
-const shellScripts = new Set([testScript, 'npm run test -w js-deepresearch-engine && npm run test -w js-wiki-engine && ' + testScript, 'eslint .', 'vite build']);
+// Keep this allowlist identical to package.json. Node 22 applies --test-timeout
+// to the test file itself, so the V12 recovery file cannot keep a 15s default.
+const testScript = require('../../../package.json').scripts.test.split(' && ').at(-1);
+const shellScripts = new Set([testScript, require('../../../package.json').scripts.test, 'eslint .', 'vite build']);
 function shellWords(script) {
   const words = [], token = /(?:'([^']*)'|"([^"$`\\]*)"|([a-zA-Z0-9_./:=*-]+))/y;
   let cursor = 0;

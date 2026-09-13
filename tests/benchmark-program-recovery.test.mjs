@@ -15,6 +15,13 @@ function parameters(judge, id, version, maxTokens = 100) {
     validateItem: value => assert.equal(value.ok, true), pendingItem: (item, pendingReason) => ({ id: item.id, pendingReason }) };
 }
 
+test('root test file timeout covers the V12 recovery file on Node 22', () => {
+  const rootTest = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url))).scripts.test;
+  const fileTimeout = Number(/--test-timeout=(\d+)/.exec(rootTest)?.[1] || 0);
+  // Node 22 applies --test-timeout to the file itself; a child { timeout } does not override it.
+  assert.ok(fileTimeout >= 120000, `root test file timeout must cover V12, got ${fileTimeout}`);
+});
+
 test('[V13] saved receipt replays through the production Judge with a dispatch-forbidden provider', async t => {
   const directory = temporary(t), provider = new ScriptedProvider([{ purpose: 'program_fixture', instructions: 'Fixed program recovery fixture.',
     field: 'checks', ids: ['one'], attempt: 1, response: { checks: [{ id: 'one', ok: true }] }, tokens: 7 }]);
