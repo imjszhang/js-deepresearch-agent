@@ -373,7 +373,13 @@ export function wrapProvidersWithBudget({
           const recovered = budget.executionVersion === 2 ? recorder.recoverCall?.('llm', recordedRequest, purpose) : null;
           if (recovered) {
             budget.settleAttempt(recovered.callId, recovered.response.usage);
-            lastLlmCall = { callId: recovered.callId, purpose, status: 'completed', recovered: true };
+            lastLlmCall = { callId: recovered.callId, purpose, status: 'completed', recovered: true,
+              finishReason: recovered.response.finishReason || recovered.response.metadata?.finishReason || null,
+              usageKnown: Number.isFinite(Number(recovered.response.usage?.totalTokens ?? recovered.response.usage?.total_tokens))
+                && Number(recovered.response.usage?.totalTokens ?? recovered.response.usage?.total_tokens) >= 0,
+              outputChars: String(recovered.response.text || '').length,
+              hasContent: Boolean(String(recovered.response.text || '').trim()),
+              hasReasoningContent: Boolean(recovered.response.metadata?.hasReasoningContent) };
             onLlmEvent(lastLlmCall);
             return String(recovered.response.text || '');
           }
@@ -431,6 +437,8 @@ export function wrapProvidersWithBudget({
             responseType: typeof result === 'string' ? 'string' : 'object',
             responseFields: result && typeof result === 'object' ? Object.keys(result).filter((key) => !['prompt', 'messages'].includes(key)) : [],
             finishReason: result?.finishReason || result?.metadata?.finishReason || null,
+            usageKnown: Number.isFinite(Number(result?.usage?.totalTokens ?? result?.usage?.total_tokens))
+              && Number(result?.usage?.totalTokens ?? result?.usage?.total_tokens) >= 0,
             hasContent: Boolean(String(text || '').trim()),
             hasReasoningContent: Boolean(result?.metadata?.hasReasoningContent),
             providerResponseFields: Array.isArray(result?.metadata?.responseFields) ? result.metadata.responseFields : [],

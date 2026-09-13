@@ -1,5 +1,273 @@
 // Fixed required cases are reviewed with the contract; never inferred from this run's pass events.
 const REQUIRED_TEST_CASES = {
+  "V25": [
+  {
+    "file": "packages/js-deepresearch-engine/tests/sandbox-transport.test.mjs",
+    "name": "[V25] sandbox observes real loopback SSE with split UTF-8, CRLF, multiline data and trailing usage"
+  },
+  {
+    "file": "packages/js-deepresearch-engine/tests/sandbox-transport.test.mjs",
+    "name": "[V25] sandbox supports Ollama NDJSON including last record without newline"
+  },
+  {
+    "file": "packages/js-deepresearch-engine/tests/sandbox-transport.test.mjs",
+    "name": "[V25] sandbox headers timeout makes one request and does not disclose transport errors"
+  },
+  {
+    "file": "packages/js-deepresearch-engine/tests/sandbox-transport.test.mjs",
+    "name": "[V25] sandbox heartbeat and role events do not satisfy first effective event timeout"
+  },
+  {
+    "file": "packages/js-deepresearch-engine/tests/sandbox-transport.test.mjs",
+    "name": "[V25] sandbox reasoning resets idle timeout without persisting reasoning text"
+  },
+  {
+    "file": "packages/js-deepresearch-engine/tests/sandbox-transport.test.mjs",
+    "name": "[V25] sandbox idle timeout fires despite heartbeat traffic after content"
+  },
+  {
+    "file": "packages/js-deepresearch-engine/tests/sandbox-transport.test.mjs",
+    "name": "[V25] sandbox total timeout bounds an otherwise progressing stream"
+  },
+  {
+    "file": "packages/js-deepresearch-engine/tests/sandbox-transport.test.mjs",
+    "name": "[V25] sandbox timeout is enforced even when an injected fetch ignores abort"
+  },
+  {
+    "file": "packages/js-deepresearch-engine/tests/sandbox-transport.test.mjs",
+    "name": "[V25] sandbox complete JSON must be exactly one envelope without prose or duplicate keys"
+  },
+  {
+    "file": "tests/model-sandbox-artifacts.test.mjs",
+    "name": "[V25] summary separates warmup, streaming modes and group concurrency while including warmup usage"
+  },
+  {
+    "file": "tests/model-sandbox-artifacts.test.mjs",
+    "name": "[V25] confirmed zero, unknown usage and event counts never become fabricated token throughput"
+  },
+  {
+    "file": "tests/model-sandbox-artifacts.test.mjs",
+    "name": "[V25] failures, unknown calls and unsent structure cases remain in planned denominators"
+  },
+  {
+    "file": "tests/model-sandbox-artifacts.test.mjs",
+    "name": "[V25] provider duration metrics remain separately labeled nanoseconds without inferring environment state"
+  },
+  {
+    "file": "tests/model-sandbox-artifacts.test.mjs",
+    "name": "[V25] publish and inspect verify a complete plan-derived manifest including every planned call"
+  },
+  {
+    "file": "tests/model-sandbox-artifacts.test.mjs",
+    "name": "[V25] removing manifest call entries cannot conceal omitted, deleted or unlisted outcomes"
+  },
+  {
+    "file": "tests/model-sandbox-artifacts.test.mjs",
+    "name": "[V25] summary changes cannot be legitimized just by updating its manifest hash"
+  },
+  {
+    "file": "tests/model-sandbox-artifacts.test.mjs",
+    "name": "[V25] publish rejects missing planned outcomes and inspect rejects symbolic-link substitution"
+  },
+  {
+    "file": "tests/model-sandbox-artifacts.test.mjs",
+    "name": "[V25] running inspection returns only safe status counters without claiming process liveness"
+  },
+  {
+    "file": "tests/model-sandbox-artifacts.test.mjs",
+    "name": "[V25] comparison exposes changed parameters and input hashes instead of ranking different plans"
+  },
+  {
+    "file": "tests/model-sandbox-artifacts.test.mjs",
+    "name": "[V25] resource isolation is persisted from the run and cannot be erased in the summary"
+  },
+  {
+    "file": "tests/model-sandbox-artifacts.test.mjs",
+    "name": "[V25] complete artifact names support all safe plan identifiers including dots and colons"
+  },
+  {
+    "file": "tests/model-sandbox-cli.test.mjs",
+    "name": "[V25] sandbox help and plan avoid research storage and exclude credentials"
+  },
+  {
+    "file": "tests/model-sandbox-cli.test.mjs",
+    "name": "[V25] sandbox rejects missing live and unknown flags before dispatch"
+  },
+  {
+    "file": "tests/model-sandbox-cli.test.mjs",
+    "name": "[V25] sandbox frozen identity is checked before transport and errors stay safe"
+  },
+  {
+    "file": "tests/model-sandbox-cli.test.mjs",
+    "name": "[V25] sandbox live loopback CLI emits one result and inspect compare remain isolated"
+  },
+  {
+    "file": "tests/model-sandbox-cli.test.mjs",
+    "name": "[V25] sandbox unknown resource resolution requires explicit server idle confirmation"
+  },
+  {
+    "file": "tests/model-sandbox-lifecycle.test.mjs",
+    "name": "[V25] durable call outcome precedes releasing its resource reservation"
+  },
+  {
+    "file": "tests/model-sandbox-lifecycle.test.mjs",
+    "name": "[V25] persistence failure drains active workers before closing the resource lock"
+  },
+  {
+    "file": "tests/model-sandbox-lifecycle.test.mjs",
+    "name": "[V25] SIGINT cancels the active sandbox request and leaves undispatched cases untouched"
+  },
+  {
+    "file": "tests/model-sandbox-lifecycle.test.mjs",
+    "name": "[V25] run duration deadline aborts active work without dispatching remaining cases"
+  },
+  {
+    "file": "tests/model-sandbox-lifecycle.test.mjs",
+    "name": "[V25] sandbox events and outcome artifacts allow only safe fields from execution"
+  },
+  {
+    "file": "tests/model-sandbox-lifecycle.test.mjs",
+    "name": "[V25] baseline separates buffered and streaming observations without claiming cache or cold start"
+  },
+  {
+    "file": "tests/model-sandbox-runner.test.mjs",
+    "name": "[V25] sandbox obeys measured concurrency and never retries structure failures"
+  },
+  {
+    "file": "tests/model-sandbox-runner.test.mjs",
+    "name": "[V25] unresolved execution persists across runs and explicit resolution is required"
+  },
+  {
+    "file": "tests/model-sandbox-runner.test.mjs",
+    "name": "[V25] complete responses without usage release capacity while keeping usage unknown"
+  },
+  {
+    "file": "tests/model-sandbox-runner.test.mjs",
+    "name": "[V25] queued cancellation sends no model request and preserves all planned cases"
+  },
+  {
+    "file": "tests/model-sandbox-runner.test.mjs",
+    "name": "[V25] process death releases the OS lock but not unresolved model execution"
+  },
+  {
+    "file": "tests/model-sandbox-runner.test.mjs",
+    "name": "[V25] exact and stream replays preserve archived hashes and production claim contracts"
+  },
+  {
+    "file": "tests/model-sandbox-runner.test.mjs",
+    "name": "[V25] plan identity and archived changes are rejected before dispatch"
+  },
+  {
+    "file": "tests/model-sandbox-runner.test.mjs",
+    "name": "[V25] replay protects source directories and records actual endpoint variants"
+  },
+  {
+    "file": "tests/cli-package.test.mjs",
+    "name": "[V25] packaged sandbox CLI loads without development scripts or research storage"
+  }
+],
+  "V24": [
+    {
+      "file": "packages/js-deepresearch-engine/tests/structured-validation.test.mjs",
+      "name": "[V24] claim_validation accepts prose braces and identical fenced answers through production"
+    },
+    {
+      "file": "packages/js-deepresearch-engine/tests/structured-validation.test.mjs",
+      "name": "[V24] report accepts prose braces and identical fenced answers through production"
+    },
+    {
+      "file": "packages/js-deepresearch-engine/tests/structured-validation.test.mjs",
+      "name": "[V24] narrative_validation accepts prose braces and identical fenced answers through production"
+    },
+    {
+      "file": "packages/js-deepresearch-engine/tests/structured-validation.test.mjs",
+      "name": "[V24] exact claim and task IDs remain strict before any text cleanup"
+    },
+    {
+      "file": "packages/js-deepresearch-engine/tests/structured-validation.test.mjs",
+      "name": "[V24] bounded retries give safe categories and preserve control flow errors"
+    },
+    {
+      "file": "packages/js-deepresearch-engine/tests/structured-validation.test.mjs",
+      "name": "[V24] response recovery preserves truncation and settles known usage once"
+    },
+    {
+      "file": "packages/js-deepresearch-engine/tests/structured-validation.test.mjs",
+      "name": "[V24] older parsing protocol revalidates frozen claims and completed revisions stay stable"
+    },
+    {
+      "file": "packages/js-deepresearch-engine/tests/structured-validation.test.mjs",
+      "name": "[V24] returned invalid output with unknown usage pauses before retry and keeps its reservation"
+    },
+    {
+      "file": "tests/benchmark-structured-response.test.mjs",
+      "name": "[V24] benchmark rejects differences hidden by projection before projection and sends safe retry feedback"
+    },
+    {
+      "file": "tests/benchmark-structured-response.test.mjs",
+      "name": "[V24] persisted parse failures stay rejected after restart without redispatch or erased ID diagnostics"
+    },
+    {
+      "file": "tests/benchmark-structured-response.test.mjs",
+      "name": "[V24] component-owned retry receives the structural reason without replaying model prose"
+    },
+    {
+      "file": "tests/benchmark-structured-response.test.mjs",
+      "name": "[V24] parsing and calibration identities reject old protocol without rewriting history"
+    },
+    {
+      "file": "tests/benchmark-structured-response.test.mjs",
+      "name": "[V24] known candidate parsing failure still falls back to complete material after bounded retries"
+    },
+    {
+      "file": "packages/js-deepresearch-engine/tests/structured-response.test.mjs",
+      "name": "rejects duplicate keys at every nesting level, including escaped aliases"
+    },
+    {
+      "file": "packages/js-deepresearch-engine/tests/structured-response.test.mjs",
+      "name": "does not promote a valid nested answer out of a schema-invalid root"
+    },
+    {
+      "file": "packages/js-deepresearch-engine/tests/structured-response.test.mjs",
+      "name": "preserves array order and extra fields when detecting conflicts"
+    },
+    {
+      "file": "packages/js-deepresearch-engine/tests/structured-callers.test.mjs",
+      "name": "[V24] Markdown fallback cannot bypass ambiguous JSON with escaped field names"
+    },
+    {
+      "file": "packages/js-deepresearch-engine/tests/structured-callers.test.mjs",
+      "name": "[V24] invalid wrapped responses stop before retry or fallback while preserving reservations"
+    },
+    {
+      "file": "packages/js-deepresearch-engine/tests/structured-response.test.mjs",
+      "name": "enforces input, scan, nesting and candidate limits before accepting a prefix"
+    },
+    {
+      "file": "packages/js-deepresearch-engine/tests/structured-response.test.mjs",
+      "name": "bounds scans of unfinished fence runs and repeated malformed reasoning tags"
+    },
+    {
+      "file": "packages/js-deepresearch-engine/tests/structured-response.test.mjs",
+      "name": "does not ignore whole or fenced arrays under the narrative citation policy"
+    },
+    {
+      "file": "packages/js-deepresearch-engine/tests/evidence-store.test.mjs",
+      "name": "[V24] inspection parser identity preserves older records without skipping current checks"
+    },
+    {
+      "file": "packages/js-deepresearch-engine/tests/evidence-store.test.mjs",
+      "name": "[V24] local gap inspection revisits old parsing results once and freezes the new identity"
+    },
+    {
+      "file": "packages/js-deepresearch-engine/tests/evidence-store.test.mjs",
+      "name": "[V24] gap cache identity differs from the frozen pre-parser fingerprint"
+    },
+    {
+      "file": "packages/js-deepresearch-engine/tests/source-enricher-relevance.test.mjs",
+      "name": "[V24] assessment unknown usage cannot be converted to failed transport or retried"
+    }
+  ],
   "V01": [
     {
       "file": "tests/benchmark-verification-contract.test.mjs",
@@ -340,6 +608,8 @@ export const VERIFICATION_SCENARIOS = [
   ['V19', 'paired comparison'], ['V20', 'verification record and bootstrap'], ['V21', 'network isolation'],
   ['V22', 'research engine contracts'],
   ['V23', 'legacy entrypoint migration'],
+  ['V24', 'structured response boundary and recovery'],
+  ['V25', 'local model sandbox isolation, transport, lifecycle and artifacts'],
 ].map(([id, contract]) => ({ id, contract, required: true, titlePrefix: `[${id}]`, tests: REQUIRED_TEST_CASES[id] }));
 
 export function scenarioResults(events) {

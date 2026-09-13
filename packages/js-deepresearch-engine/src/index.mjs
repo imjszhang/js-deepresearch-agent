@@ -365,3 +365,7 @@ export { EvidenceStore } from './research/evidence-store.mjs';
 export { readArtifactEvidence } from './research/result-artifacts.mjs';
 export { createRunExecutionConfig, resolveRunExecutionSettings, validateRunExecutionConfig } from './research/run-execution-config.mjs';
 export { SearchHealth, SearchUnavailableError, isExecutionInterruption } from './search/search-health.mjs';
+
+export { STRUCTURED_RESPONSE_VERSION, parseStructuredResponse, buildStructuredRetryMessages } from './research/structured-response.mjs';
+export { executeSandboxRequest, SANDBOX_TIMEOUTS } from './llm/sandbox-transport.mjs';
+export { acceptsClaimValidation } from './research/claim-validation.mjs';

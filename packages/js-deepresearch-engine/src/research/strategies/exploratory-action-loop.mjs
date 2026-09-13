@@ -74,7 +74,7 @@ export async function runActionExploration({ state, loopLocal, query, llm, searc
     const graph = buildClaimGraph({ gaps: state.gaps, passages: [...state.evidenceStore.passages.values()] });
     if (graph.records.length) {
       const validation = await validateResearchClaims({ graph, store: state.evidenceStore, gaps: state.gaps, query,
-        llm, signal, recorder, budget, constraints: state.brief.constraints || [], cache: state.claimValidationCache });
+        llm, signal, recorder, budget, researchPhase: 'exploratory', constraints: state.brief.constraints || [], cache: state.claimValidationCache });
       applyValidatedBindings(state.gaps, validation.graph);
       state.claimValidationCache = validation.cache;
       state.validatedClaimIds = [...new Set(graph.bindings.filter(deliverableBinding).map(b => b.claimId))].sort();

@@ -1,3 +1,5 @@
+import { assertKnownStructuredUsage } from './structured-response-usage.mjs';
+import { buildStructuredRetryMessages } from './structured-response.mjs';
 import { createHash } from 'node:crypto';
 import { reportPrompt, reportRetryPrompt, reportRevisionRetryPrompt } from './prompts.mjs';
 import { parseCitations, parseInternalReferenceTokens } from './citations.mjs';
@@ -59,6 +61,16 @@ const SAFE_DIAGNOSTIC_KEYS = new Set([
   'supportable',
   'quoteAnchored',
   'citationCount',
+  'structuredReason',
+  'protocolVersion',
+  'candidateCount',
+  'distinctCandidateCount',
+  'invalidCandidateCount',
+  'incompleteCandidateCount',
+  'excludedRegionCount',
+  'inputChars',
+  'scannedChars',
+  'duplicateCount',
 ]);
 const SAFE_DIAGNOSTIC_ENUMS = new Set([
   'gap',
@@ -77,6 +89,7 @@ function sanitizeDiagnosticValue(value, key = '') {
   if (value == null || typeof value === 'boolean' || typeof value === 'number') return value;
   if (typeof value === 'string') {
     if (key.endsWith('Sha256') && /^[a-f0-9]{64}$/i.test(value)) return value.toLowerCase();
+    if (key === 'structuredReason' && ['empty', 'truncated', 'no_complete_json', 'invalid_json', 'ambiguous_result', 'schema_invalid', 'resource_limit'].includes(value)) return value;
     if ((key === 'endingCategory' || key === 'internalReferenceKind') && SAFE_DIAGNOSTIC_ENUMS.has(value)) {
       return value;
     }
@@ -176,6 +189,8 @@ export class ReportGenerationError extends Error {
     phase = null,
     contract = null,
     attemptCounts = null,
+    purpose = null,
+    researchPhase = null,
   }) {
     const reasoningHint = diagnostic?.hasReasoningContent && !diagnostic?.hasContent
       ? ' The provider returned reasoning metadata but no final content.'
@@ -186,7 +201,10 @@ export class ReportGenerationError extends Error {
     const safePhase = REPORT_FAILURE_PHASES.includes(phase) ? phase : null;
     const phaseLabel = safePhase || 'unknown';
     const normalizedChecks = sanitizeReportFailedChecks(unsafeChecks, { phase: safePhase });
-    super(`Report generation failed after ${attempts} report attempts during ${phaseLabel}. Failing checks: ${formatFailedChecks(normalizedChecks)}.${reasoningHint}`);
+    const safePurpose = ['claim_validation', 'report', 'narrative_validation'].includes(purpose) ? purpose : null;
+    const safeResearchPhase = ['exploratory', 'report'].includes(researchPhase) ? researchPhase : null;
+    const activity = safePurpose ? `${safeResearchPhase ? safeResearchPhase + ' ' : ''}${safePurpose}` : 'Report generation';
+    super(`${activity} failed after ${attempts} ${safePurpose ? 'structured' : 'report'} attempts during ${phaseLabel}. Failing checks: ${formatFailedChecks(normalizedChecks)}.${reasoningHint}`);
     this.name = 'ReportGenerationError';
     this.code = 'REPORT_OUTPUT_INVALID';
     this.attempts = attempts;
@@ -198,6 +216,8 @@ export class ReportGenerationError extends Error {
     this.phase = safePhase;
     this.contract = contract;
     this.attemptCounts = attemptCounts || null;
+    this.purpose = safePurpose;
+    this.researchPhase = safeResearchPhase;
   }
 }
 
@@ -502,6 +522,7 @@ export async function buildReport({
   let providerCalls = 0;
   let consecutiveEmptyResponses = 0;
   let lastPhase;
+  let parseReason = null;
   const promptArgs = {
     query, findings, limitations, strategy, passages, maxPassageChars, gaps, brief, contract,
   };
@@ -531,10 +552,11 @@ export async function buildReport({
       attemptCounts: { ...attemptCounts },
     });
     const startedAt = Date.now();
+    const messages = retryContext
+      ? reportRevisionRetryPrompt({ ...promptArgs, ...retryContext })
+      : (attempt === 1 ? reportPrompt(promptArgs) : reportRetryPrompt(promptArgs));
     const report = await llm.complete({
-      messages: retryContext
-        ? reportRevisionRetryPrompt({ ...promptArgs, ...retryContext })
-        : (attempt === 1 ? reportPrompt(promptArgs) : reportRetryPrompt(promptArgs)),
+      messages: parseReason ? buildStructuredRetryMessages(messages, parseReason) : messages,
       signal,
       temperature: attempt === 1 ? 0.2 : 0,
       purpose,
@@ -547,6 +569,7 @@ export async function buildReport({
     const diagnostic = llm.getLastCallMetadata?.() || null;
 
     if (!cleaned) {
+      assertKnownStructuredUsage(diagnostic);
       consecutiveEmptyResponses += 1;
       attemptCounts.provider += 1;
       lastPhase = 'provider';
@@ -568,12 +591,21 @@ export async function buildReport({
     }
 
     consecutiveEmptyResponses = 0;
-    const structured = looksLikeStructuredNarrative(cleaned);
-    const parsed = parseNarrativeResponse(cleaned, {
+    const parsed = parseNarrativeResponse(raw, {
+      metadata: diagnostic,
       requireCitedKeyFindings: false,
     });
+    // The Markdown fallback cannot override a detected structured candidate.
+    // Field spelling (including JSON escapes) and display cleanup are not gates
+    // around the parser's ambiguity, malformed-output or resource checks.
+    const structured = looksLikeStructuredNarrative(cleaned)
+      || parsed.ok || parsed.parseReason === 'schema_invalid'
+      || ['ambiguous_result', 'invalid_json', 'truncated', 'resource_limit'].includes(parsed.parseReason)
+      || parsed.diagnostics?.incompleteCandidateCount > 0;
 
     if (structured && parsed.flags?.includes('narrative_not_json')) {
+      assertKnownStructuredUsage(diagnostic);
+      parseReason = parsed.parseReason;
       attemptCounts.parse += 1;
       lastPhase = 'parse';
       validation = {
@@ -603,6 +635,7 @@ export async function buildReport({
       continue;
     }
 
+    parseReason = null;
     const document = parsed.narrative || parseMarkdownNarrative(cleaned);
     const origin = parsed.narrative ? 'json' : 'markdown';
     const rendered = renderNarrativeMarkdown(document);
@@ -619,6 +652,7 @@ export async function buildReport({
     }, structured ? parsed.flags : []);
     lastPhase = validation.ok ? null : classifyReportFailurePhase(validation);
     if (!validation.ok) {
+      assertKnownStructuredUsage(diagnostic);
       if (lastPhase === 'render') attemptCounts.render += 1;
       else attemptCounts.semanticContract += 1;
     }

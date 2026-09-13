@@ -1,3 +1,4 @@
+import { isExecutionInterruption } from '../../search/search-health.mjs';
 import { classifyResearchQuery } from './exploratory-sufficiency.mjs';
 import { inferEvidenceScope, listLocalCorpusChannels } from './source-policy.mjs';
 import { mergeResearchBrief, sanitizeResearchBrief, slotsFromPlannerGaps } from '../research-brief.mjs';
@@ -331,7 +332,7 @@ export async function planResearchProfile({ llm, query, profile, signal, setting
       contractRetried: result.retried,
     }, { evidenceScope: scope, settings, query });
   } catch (error) {
-    if (error?.name === 'AbortError') throw error;
+    if (error?.name === 'AbortError' || error?.name === 'BudgetExceededError' || signal?.aborted || isExecutionInterruption(error)) throw error;
     const userSlots = scoped.brief?.requiredAnswerSlots || [];
     return sanitizeEvidenceProfile({
       ...scoped,

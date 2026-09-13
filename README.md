@@ -318,7 +318,7 @@ web/          Vite frontend
 tests/        Agent integration tests
 ```
 
-After `npm install`, the agent links the local engine package via `workspace:*`. Changes to the engine are picked up without publishing to npm.
+After `npm install`, the agent links the matching local engine package through npm workspaces. Changes to the engine are picked up without publishing to npm.
 
 ## Git Hygiene
 
@@ -343,4 +343,50 @@ The subsequent review fixes deduplicate task/claim bindings, preserve startup re
 
 Historical v8 observations used `quality-judge-8` (evaluation schema 6, calibration schema 5). Candidate discovery is separate from full-material decisions and basis/omission review; empty candidate sets take the same review path. Explicit flaws permit one bounded repair. Each report assertion occurrence also needs a fragment-only attribution check; missing context can be bound across report blocks before a final check. Truth and individual citations retain independent recovery and conservative budget reservations. Calibration freezes source, tests, plan, model, fixtures and stage budgets. V8 actual-model acceptance did not pass: 20/24 boundary diagnostics, and 16/20 development matches with two pending cases and two unexecuted after the stage reservation budget paused the run. All 34 holdouts remain unexecuted. Local tests passed 1,155/1,155; same-directory resume added zero calls or tokens. See the [round 5 results](journal/2026-09-11/calibration-round-5-results.md) and [frozen plan](journal/2026-09-11/calibration-round-5-plan.md).
 
-The current evaluator is `quality-judge-9` (evaluation schema 7); scoring formula version remains 2. Unchanged repair evidence cannot clear prior disagreement, and binding repair only rechecks genuinely added UTF-16 ranges. Program verification is independently versioned and runs with external network isolation. Failed or unavailable isolation is reported as incomplete. The current implementation plan is [programmatic verification](journal/2026-09-11/programmatic-verification-plan.md).
+The current evaluator is `quality-judge-10` (evaluation schema 7); scoring formula version remains 2. Unchanged repair evidence cannot clear prior disagreement, and binding repair only rechecks genuinely added UTF-16 ranges. Program verification is independently versioned and runs with external network isolation. Failed or unavailable isolation is reported as incomplete. The current implementation plan is [programmatic verification](journal/2026-09-11/programmatic-verification-plan.md). Structured model responses now share a versioned parsing boundary; see [parsing and recovery repair](journal/2026-09-12/structured-response-repair.md).
+
+## 本地模型测试沙盒
+
+`jdr model-sandbox` 独立测量本地模型的等待时间、流式进度、输入/输出规模、并发、结构化响应、取消和持续运行表现。它不启动调研，不读取研究设置数据库，不写研究历史、Intel、Wiki 或校准账本，也不自动修改生产配置。
+
+先生成冻结计划；此操作不发送请求：
+
+```bash
+npm exec --package=. -- jdr model-sandbox plan \
+  --provider openai-compatible --model local-model \
+  --base-url http://127.0.0.1:8080/v1 \
+  --suite baseline --repeats 3 --output local-model-plan.json
+```
+
+计划保存实际案例、输入、生成参数、并发、超时和请求数量上限。`baseline` 包含一次预热以及重复的非流式/流式对照；其他可选套件为 `input`、`output`、`concurrency`、`structure`、`cancellation`、`stability`。默认并发阶梯是 1、2，可用 `--concurrency 1,2,4` 显式扩大。输入规模以字符数表达；未取得 provider 用量时不会冒充精确 token 数。
+
+显式执行计划并查看安全摘要：
+
+```bash
+npm exec --package=. -- jdr model-sandbox run \
+  --plan-file local-model-plan.json --live \
+  --output-dir work_dir/model-sandbox/my-baseline --json
+npm exec --package=. -- jdr model-sandbox inspect work_dir/model-sandbox/my-baseline --json
+```
+
+配置来自 flags、计划和当前环境；`OPENAI_API_KEY` 可为空以适配本地无鉴权服务，代理读取 `JDR_HTTP_PROXY`。凭据不保存到计划或报告。运行严格使用冻结计划的模型和地址，环境中的模型/地址不覆盖计划，显式身份覆盖不一致会在发送前失败。`--json` 的 stdout 只输出一个结果对象，安全进度走 stderr。
+
+`replay` 支持只读复现已记录的请求；`exact` 保持请求体和服务地址，`stream` 记录实际发生的流式、用量返回及显式目标地址变更，二者均需 `--live`。旧调研产物和旧失败状态保持不变：
+
+```bash
+npm exec --package=. -- jdr model-sandbox replay <sessionDir> \
+  --call llm-185 --mode stream --base-url http://127.0.0.1:8080/v1 --live
+```
+
+同一资源的沙盒运行共享资源锁；连接中断后若服务端执行状态未知，会停止后续派发并保留未知状态。只有确认服务端已结束或已清理对应请求后，才可显式解除隔离：
+
+```bash
+npm exec --package=. -- jdr model-sandbox resolve-unknown \
+  --resource-id <plan.resourceId> --confirmation server-idle-confirmed
+```
+
+资源目录默认 `work_dir/model-sandbox/.resources`；使用不同工作目录的进程可传相同 `--resource-dir`，同一设备经不同地址访问时应在计划中指定同一个 `--resource-id`。此锁协调沙盒进程，不声称能限制其他客户端或生产调研调用。
+
+产物独立保存在本地沙盒目录，包含安全时间线、逐调用指标、汇总报告和哈希 manifest。性能观察、传输完整性、结构合同结果与程序化验收分别统计；结构正确不证明内容正确，超时后的未知用量也不计为零。工程验收使用 `npm run verify:programmatic -- --output-dir <new-local-dir>`，只调用测试自建的模拟服务，不对真实设备速度设置通过门槛。
+
+可通过 `npm exec --package=. -- jdr model-sandbox compare <runDirA> <runDirB> --json` 离线比较两次测试。不同计划只作描述性比较，保留参数与输入哈希差异。实现和验收说明见 [本地模型沙盒实施记录](journal/2026-09-13/local-model-sandbox.md)。

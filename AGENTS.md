@@ -26,10 +26,11 @@
 - 新 run 冻结脱敏 executionConfig/configHash；恢复沿用已保存报告输出上限和账本，凭据从当前环境绑定。配置损坏、身份漂移或必要历史身份无法确认需显式报错，不能冒充预算不足。
 - requestContractVersion=2 保留受限语法识别的独立交付项、原文范围与共享上下文；未解析的剩余指令继续作为 unresolved_request_constraint。原子结论通过真值与回答关系校验后可部分交付，不能据此把未完成槽位标为完整。
 - claim_validation 在探索与报告中共用按依赖和协议版本缓存的判断，始终归入校验用量，不补探索下限。新相关反证、条件/版本或协议变化要求重新验证。
-- benchmark 的 quality-judge-9 / quality-scoring-2 使用独立 evaluationRevision，旧分数和 v5–v8 实模失败记录保持原样。工程验收使用 `npm run verify:programmatic -- --output-dir <new-local-dir>`，由真实离线测试、lint/build/diff 和固定场景生成验收记录，不依赖模型准确率；不得以手写 passed 布尔值或模型满分代替。产物完整性、程序验收、模型语义观察分开；`modelThresholdsMet` 仅描述模型判断的聚合，不能证明内容正确。程序/人工来源不能由 provider 声明。
+- 模型结构化响应使用 structuredResponseVersion=1：先解析完整 JSON，再校验业务结构，最后清洗展示字段。相同完整候选可去重，不同候选、重复对象键及截断响应拒绝；未知用量的结构失败保留预约并暂停。解析版本参与主张缓存、正文检查及报告恢复身份；已完成历史 revision 保持原样。
+- benchmark 的 quality-judge-10 / quality-scoring-2 使用独立 evaluationRevision，旧分数和 v5–v9 实模失败记录保持原样。工程验收使用 `npm run verify:programmatic -- --output-dir <new-local-dir>`，由真实离线测试、lint/build/diff 和固定场景生成验收记录，不依赖模型准确率；不得以手写 passed 布尔值或模型满分代替。产物完整性、程序验收、模型语义观察分开；`modelThresholdsMet` 仅描述模型判断的聚合，不能证明内容正确。程序/人工来源不能由 provider 声明。
 - 新 benchmark `score --mode model-observation --program-verification <file>` 和 `rebuild --program-verification <file>` 不要求真实校准命中；真实操作仍需用户明确要求。旧 `--calibration`、`validationGate` 保留原严格语义，禁止与新门槛混用或静默改写。普通 `jdr research` / API 不新增验收文件要求。artifact_rebuild 只用既有正文，不搜索或抓取，floorApplicable=false，不混入正式 Google 批次；旧失败不能因新工程验收通过而改成成功。
 - 模型提取、回答关系和出处忠实性仍是模型观察，待审保留分母；相同关系修复不能通过重复审核消除原分歧，绑定按 UTF-16 区间并集判断真正新增，合法零新增结束修复并保留原判断。候选结构失败仅在用量已知、正文完整时退到空提示全文判断；未知调用、预算和完整性错误仍暂停。脚本化 fixture 只验证程序行为，不进入真实观察/曝光账本。
-- 如另行执行真实 calibrate，仍须提供当前版本 --suite、--plan-file、--validation-file 并遵守冻结阶段和预算。v8 suite 只能由其冻结代码继续，不能冒充 v9 留出。已暴露材料不能冒充新留出，首次实模调用后不得改冻结代码、输入、oracle 或预算。
+- 如另行执行真实 calibrate，仍须提供当前版本 --suite、--plan-file、--validation-file 并遵守冻结阶段和预算。旧版本 suite 只能由其冻结代码继续，不能冒充当前 v10 留出。已暴露材料不能冒充新留出，首次实模调用后不得改冻结代码、输入、oracle 或预算。
 - v2 manifest 在原文件外包含 `evidence-index.json / citations.json / evidence.md` 及 `evidence-bodies/<hash>.txt`。使用 `readArtifactManifest` / `readArtifactEvidence` 校验；不得回退嵌套 findings 正文来掩盖损坏。无 work-dir 时 result.evidenceStore 带按 hash 去重的内联正文。
 - API 用数据库已提交的 `resultRevision / resultManifestPath` 读取同版本引用和证据，不能用可能滞后的 result-current 指针拼接。`GET /api/research/:id/evidence` 提供独立证据附件；缺失返回完整性错误。
 - 探索下限仍为 600000、探索上限 1000000；`floorStatus=met|unmet|unknown` 独立于保存状态/证据充分性，报告与评估不补探索下限。`action_frontier_exhausted / no_state_change` 如实标记安全停止。禁止空转凑 token。
@@ -1025,3 +1026,11 @@ npm exec --package=. -- jdr wiki ask "问题" --vault wiki
 # Web 服务
 npm exec --package=. -- jdr serve --port 3000
 ```
+# 本地模型沙盒补充规则
+
+- `npm exec --package=. -- jdr model-sandbox help` 查看独立沙盒入口。`plan / inspect / compare` 不发送模型请求；`run / replay` 必须显式 `--live`，真实调用仍需用户授权。
+- 沙盒只用 flags、冻结计划与当前环境配置，不读取 `SettingsStore` 或研究 SQLite；不写研究历史、研究预算、Intel、Wiki 或 benchmark 校准/曝光账本。凭据仅从当前环境绑定，计划和安全产物不含凭据或推理正文。
+- `run --plan-file` 使用计划内的模型和 endpoint，不能被环境模型/地址静默替换。真实重放 `replay --mode exact|stream` 只读旧请求，记录原始和实际请求身份，流式变体不得冒充字节不变的原样重放。
+- 默认产物为 `work_dir/model-sandbox/` 下的独立目录，不提交或展示原始产物。CLI `--json` 只输出单个安全结果对象，进度走 stderr；错误只输出稳定安全 code。
+- 同一设备需共享 `resourceId` 和资源目录；默认目录为 cwd 下 `work_dir/model-sandbox/.resources`。沙盒锁只协调使用该目录的沙盒进程，不能声称管理其他客户端。未知执行暂停后续派发；仅用户已确认服务端不再执行该请求时，使用 `resolve-unknown --resource-id <id> --confirmation server-idle-confirmed` 解除隔离，不能靠等待时间推定服务端已结束。
+- 沙盒测试分开传输完整性、结构合同结果、已知/未知用量和性能观察；fixture 不进入真实研究/评测账本。工程验收继续使用真实离线测试及 `verify:programmatic`，不以硬件性能阈值、模型语义准确率或手写 passed 作为验收。

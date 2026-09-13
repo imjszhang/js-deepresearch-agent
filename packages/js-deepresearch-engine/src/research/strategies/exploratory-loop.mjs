@@ -426,7 +426,7 @@ export async function runExploratoryLoop(context) {
             limit: maxQueriesPerStep,
           });
         } catch (error) {
-          if (error?.name === 'AbortError' || error?.name === 'BudgetExceededError') throw error;
+          if (error?.name === 'AbortError' || error?.name === 'BudgetExceededError' || isExecutionInterruption(error)) throw error;
           planned = {
             action: {
               ...action,
