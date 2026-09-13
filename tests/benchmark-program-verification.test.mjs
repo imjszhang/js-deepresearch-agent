@@ -130,6 +130,17 @@ test('[V20] hand-written passes and historical model calibration cannot become p
   assert.equal(fs.existsSync(path.resolve('tests/never-create-verification')), false);
 });
 
+test('verification guard allows every package.json test script', t => {
+  const directory = temporary(t), logFile = path.join(directory, 'network.jsonl'); fs.writeFileSync(logFile, '');
+  const guard = path.resolve('scripts/benchmark/quality/verification-network-guard.cjs');
+  const result = spawnSync(process.execPath, ['-e', `const allowed=new Set(require(${JSON.stringify(guard)}).allowedShellScripts());
+    for (const file of ['package.json','packages/js-deepresearch-engine/package.json','packages/js-wiki-engine/package.json']) {
+      if (!allowed.has(require('./'+file).scripts.test)) process.exit(2);
+    }`], { encoding: 'utf8', timeout: 3000, cwd: process.cwd(),
+    env: { PATH: process.env.PATH, JDR_VERIFY_NETWORK_LOG: logFile, JDR_VERIFY_ROOT: process.cwd() } });
+  assert.equal(result.status, 0, result.stderr);
+});
+
 test('[V21] registered negative probes stop before transport and owned loopback remains available', t => {
   const directory = temporary(t), logFile = path.join(directory, 'network.jsonl'); fs.writeFileSync(logFile, '');
   const guard = path.resolve('scripts/benchmark/quality/verification-network-guard.cjs');
