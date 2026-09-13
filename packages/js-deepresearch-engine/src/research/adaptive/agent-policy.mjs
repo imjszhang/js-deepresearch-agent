@@ -1,3 +1,6 @@
+import { assertKnownStructuredUsage } from '../structured-response-usage.mjs';
+import { parseStructuredResponse } from '../structured-response.mjs';
+import { isExecutionInterruption } from '../../search/search-health.mjs';
 import { classifyInvalidReason } from '../../search/search-provider-error.mjs';
 import { hostnameOf } from './research-state.mjs';
 import { isOrthogonalGap } from './exploratory-sufficiency.mjs';
@@ -5,12 +8,14 @@ import { nextSlotRepairAction } from './slot-repair-scheduler.mjs';
 
 const ACTION_SCHEMA = '{"action":"search|read|reflect|draft|finalize","reasonCode":"short_code","gapId":"gap-1","plannerMode":"initial|repair|challenge|angle_change|recovery|site_fallback|required_host_recovery","sourceIds":["..."],"gapQuestion":"..."}';
 
-function extractJson(text) {
-  const raw = String(text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
-  const start = raw.indexOf('{');
-  const end = raw.lastIndexOf('}');
-  if (start < 0 || end < start) return null;
-  try { return JSON.parse(raw.slice(start, end + 1)); } catch { return null; }
+function parseModelAnswer(raw, llm, accept) {
+  const result = parseStructuredResponse(raw, { accept, metadata: llm.getLastCallMetadata?.() });
+  if (!result.ok) assertKnownStructuredUsage(llm.getLastCallMetadata?.());
+  return result.ok ? result.parsed : null;
+}
+
+function rethrowInterruption(error, signal) {
+  if (error?.name === 'AbortError' || error?.name === 'BudgetExceededError' || signal?.aborted || isExecutionInterruption(error)) throw error;
 }
 
 function normalizeDecision(parsed) {
@@ -60,7 +65,9 @@ export async function decideAdaptiveAction({ llm, state, signal }) {
       `Return JSON only: ${ACTION_SCHEMA}`,
     ].filter(Boolean).join('\n') }, { role: 'user', content: JSON.stringify(snapshot) }],
   });
-  return normalizeDecision(extractJson(response));
+  return normalizeDecision(parseModelAnswer(response, llm, (candidate) => (
+    ['search', 'read', 'reflect', 'draft', 'finalize', 'answer', 'stop'].includes(candidate?.action)
+  )));
 }
 
 export async function decomposeQuery({ llm, state, signal, maxSubQuestions = 3 }) {
@@ -77,13 +84,14 @@ export async function decomposeQuery({ llm, state, signal, maxSubQuestions = 3 }
         'Return JSON only: {"subQuestions":["...","..."]}',
       ].join('\n') }, { role: 'user', content: state.query }],
     });
-    const parsed = extractJson(response);
-    if (!Array.isArray(parsed?.subQuestions)) return [];
+    const parsed = parseModelAnswer(response, llm, (candidate) => Array.isArray(candidate?.subQuestions));
+    if (!parsed) return [];
     return parsed.subQuestions
       .map((question) => String(question || '').trim())
       .filter(Boolean)
       .slice(0, maxSubQuestions);
-  } catch {
+  } catch (error) {
+    rethrowInterruption(error, signal);
     return [];
   }
 }
@@ -240,15 +248,16 @@ export async function evaluateAnswerReadiness({ llm, state, signal }) {
         sufficiency: state.sufficiency,
       }) }],
     });
-    const parsed = extractJson(response);
-    if (!parsed || typeof parsed.pass !== 'boolean') return null;
+    const parsed = parseModelAnswer(response, llm, (candidate) => typeof candidate?.pass === 'boolean');
+    if (!parsed) return null;
     const gatePass = Boolean(state.readiness?.pass);
     return {
       pass: parsed.pass && gatePass,
       llmPass: parsed.pass,
       missingAspect: String(parsed.missingAspect || '').trim(),
     };
-  } catch {
+  } catch (error) {
+    rethrowInterruption(error, signal);
     return null;
   }
 }

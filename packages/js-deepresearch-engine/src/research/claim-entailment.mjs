@@ -1,5 +1,7 @@
+import { assertKnownStructuredUsage } from './structured-response-usage.mjs';
 import { createHash } from 'node:crypto';
-import { extractJsonObject } from './report-narrative.mjs';
+import { parseStructuredResponse, STRUCTURED_RESPONSE_VERSION } from './structured-response.mjs';
+import { isExecutionInterruption } from '../search/search-health.mjs';
 import { claimEntailmentPrompt } from './prompts.mjs';
 import { buildClaimEvaluation, CLAIM_VERDICTS } from './claim-quality.mjs';
 
@@ -100,7 +102,7 @@ export function entailmentCacheKey(claim, passages = []) {
     .map((passage) => createHash('sha256').update(String(passage?.text || '')).digest('hex'))
     .sort()
     .join(',');
-  return `${String(claim?.text || '').normalize('NFKC').trim()}\0${fingerprints}`;
+  return `${STRUCTURED_RESPONSE_VERSION}\0${String(claim?.text || '').normalize('NFKC').trim()}\0${fingerprints}`;
 }
 
 export async function applyClaimEntailment(claims = [], {
@@ -136,11 +138,17 @@ export async function applyClaimEntailment(claims = [], {
         maxTokens: 400,
         messages: claimEntailmentPrompt({ claim, passages: cited }),
       });
-      const judgment = extractJsonObject(raw);
-      store.set(key, judgment);
+      const result = parseStructuredResponse(raw, {
+        metadata: llm.getLastCallMetadata?.(),
+        accept: (candidate) => ALLOWED_VERDICTS.has(candidate?.verdict)
+          && candidate.verdict !== 'conflicting' && passageContainsQuote(cited, candidate.quote),
+      });
+      if (!result.ok) assertKnownStructuredUsage(llm.getLastCallMetadata?.());
+      const judgment = result.ok ? result.parsed : null;
+      if (result.ok) store.set(key, judgment);
       next.push(applyEntailmentVerdict(claim, judgment, cited));
     } catch (error) {
-      if (error?.name === 'AbortError' || signal?.aborted) throw error;
+      if (error?.name === 'AbortError' || error?.name === 'BudgetExceededError' || signal?.aborted || isExecutionInterruption(error)) throw error;
       next.push(claim);
     }
   }

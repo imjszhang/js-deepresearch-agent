@@ -1,3 +1,6 @@
+import { assertKnownStructuredUsage } from './structured-response-usage.mjs';
+import { parseStructuredResponse } from './structured-response.mjs';
+
 function dedupeSources(sources = []) {
   const seen = new Set();
   const unique = [];
@@ -44,28 +47,31 @@ function buildFilterPrompt(query, batch) {
   ];
 }
 
-function parseFilterResponse(raw = '', batchSize) {
-  const match = String(raw).match(/\[[\s\S]*\]/);
-  if (!match) return null;
-
-  try {
-    const parsed = JSON.parse(match[0]);
-    if (!Array.isArray(parsed)) return null;
-
-    const decisions = new Map();
-    for (const item of parsed) {
-      const index = Number(item.index);
-      if (!Number.isFinite(index) || index < 1 || index > batchSize) continue;
-      decisions.set(index, {
-        keep: item.keep !== false,
-        score: Number.isFinite(Number(item.score)) ? Number(item.score) : 0,
-        reason: String(item.reason || '').trim(),
-      });
-    }
-    return decisions;
-  } catch {
+function parseFilterResponse(raw = '', batchSize, metadata) {
+  const result = parseStructuredResponse(raw, {
+    rootType: 'array',
+    metadata,
+    // Partial and repeated indices retain the existing filter semantics. A
+    // candidate must still be a source decision array, not an unrelated list.
+    accept: (candidate) => Array.isArray(candidate) && candidate.every((item) => (
+      item && typeof item === 'object' && !Array.isArray(item) && Object.hasOwn(item, 'index')
+    )),
+  });
+  if (!result.ok) {
+    assertKnownStructuredUsage(metadata);
     return null;
   }
+  const decisions = new Map();
+  for (const item of result.parsed) {
+    const index = Number(item.index);
+    if (!Number.isFinite(index) || index < 1 || index > batchSize) continue;
+    decisions.set(index, {
+      keep: item.keep !== false,
+      score: Number.isFinite(Number(item.score)) ? Number(item.score) : 0,
+      reason: String(item.reason || '').trim(),
+    });
+  }
+  return decisions;
 }
 
 async function scoreBatch({ query, batch, llm, signal }) {
@@ -76,7 +82,7 @@ async function scoreBatch({ query, batch, llm, signal }) {
     maxTokens: 800,
   });
 
-  const decisions = parseFilterResponse(raw, batch.length);
+  const decisions = parseFilterResponse(raw, batch.length, llm.getLastCallMetadata?.());
   if (!decisions) {
     return batch.map((source) => ({ ...source, relevanceScore: 0.5 }));
   }

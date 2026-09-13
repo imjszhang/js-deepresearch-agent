@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import { atomicWriteResultFile } from '../../../packages/js-deepresearch-engine/src/research/result-artifacts.mjs';
 
 export const SCHEMA_VERSION = 1;
-export const JUDGE_VERSION = 'quality-judge-9';
+export const JUDGE_VERSION = 'quality-judge-10';
 export const EVALUATION_SCHEMA_VERSION = 7;
 export const CALIBRATION_SCHEMA_VERSION = 5;
 export const SCORING_VERSION = 'quality-scoring-2';

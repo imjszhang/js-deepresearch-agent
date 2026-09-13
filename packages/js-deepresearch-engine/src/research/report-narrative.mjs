@@ -1,5 +1,8 @@
+import { parseStructuredResponse } from './structured-response.mjs';
 import { classifyClaimSection } from './claim-quality.mjs';
 import { parseCitations, stripInternalReferenceTokens } from './citations.mjs';
+
+export { extractJsonObject } from './structured-response.mjs';
 
 export const SOURCE_DUMP_LINE = /\[[0-9]+(?:\.[0-9]+)?\][^\n]*\((?:source body|snippet only|source summary)\)\s*:/i;
 const LEADING_THINK_BLOCK = /^\s*<think\b[^>]*>[\s\S]*?<\/think\s*>\s*/i;
@@ -28,18 +31,6 @@ export function sanitizeNarrativeResponse(text = '') {
 
 export function containsSourceDump(text = '') {
   return SOURCE_DUMP_LINE.test(String(text));
-}
-
-export function extractJsonObject(text = '') {
-  const raw = String(text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
-  const start = raw.indexOf('{');
-  const end = raw.lastIndexOf('}');
-  if (start < 0 || end < start) return null;
-  try {
-    return JSON.parse(raw.slice(start, end + 1));
-  } catch {
-    return null;
-  }
 }
 
 function asStringList(value) {
@@ -256,13 +247,23 @@ export function normalizeNarrativeDocument(value = {}, { origin = 'object' } = {
 }
 
 export function parseNarrativeResponse(text = '', options = {}) {
-  const parsed = extractJsonObject(text);
-  if (!parsed) return { ok: false, flags: ['narrative_not_json'], markdown: null, narrative: null };
+  const result = parseStructuredResponse(text, {
+    metadata: options.metadata,
+    ignoreStandaloneCitationTokens: true,
+    accept: (candidate) => validateNarrativeObject(candidate, options).ok,
+  });
+  const parsed = result.parsed;
+  if (!parsed) return {
+    ok: false, flags: ['narrative_not_json'], markdown: null, narrative: null,
+    parseReason: result.reason, diagnostics: result.diagnostics,
+  };
   const checked = validateNarrativeObject(parsed, options);
   if (!checked.ok) {
     return {
       ok: false,
       flags: checked.flags,
+      parseReason: result.reason,
+      diagnostics: result.diagnostics,
       markdown: checked.value ? renderNarrativeMarkdown(checked.value) : null,
       narrative: checked.value,
     };
@@ -270,6 +271,8 @@ export function parseNarrativeResponse(text = '', options = {}) {
   return {
     ok: true,
     flags: [],
+    parseReason: null,
+    diagnostics: result.diagnostics,
     markdown: renderNarrativeMarkdown(checked.value),
     narrative: checked.value,
   };

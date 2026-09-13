@@ -89,6 +89,7 @@ export async function reviewRelationComponents({ judge, reportHash, tasks, mater
     for (const row of rows) {
       const knownUsage = judge.usage?.().unknownCalls === 0;
       const structuralFailure = ['structure_pending', 'item_contract_invalid', 'id_set_invalid', 'item_ids_invalid'].includes(row.pendingReason)
+        || /^schema_(?:empty|truncated|no_complete_json|invalid_json|ambiguous_result|schema_invalid|resource_limit)$/.test(row.pendingReason || '')
         || /^locator_[a-z0-9_]+$/.test(row.pendingReason || '');
       const fallback = Boolean(row.pendingReason && structuralFailure && knownUsage);
       discoveries.set(row.id, { ...modelAssessment(row, judge),

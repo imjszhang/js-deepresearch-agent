@@ -49,11 +49,13 @@ const COOKIE_CHALLENGE_STATUSES = new Set([403, 429]);
 function agentOptions({
   http2 = false,
   maxResponseBytes = 0,
+  headersTimeoutMs = PROXY_HEADERS_TIMEOUT_MS,
+  bodyTimeoutMs = PROXY_BODY_TIMEOUT_MS,
   tls,
 } = {}) {
   return {
-    headersTimeout: PROXY_HEADERS_TIMEOUT_MS,
-    bodyTimeout: PROXY_BODY_TIMEOUT_MS,
+    headersTimeout: headersTimeoutMs,
+    bodyTimeout: bodyTimeoutMs,
     ...(http2 ? { allowH2: true } : {}),
     ...(maxResponseBytes > 0 ? { maxResponseSize: maxResponseBytes } : {}),
     ...(tls ? { connect: tls } : {}),
@@ -101,6 +103,8 @@ function dispatcherKey(proxyUrl, options = {}) {
     http2: options.http2 === true,
     maxResponseBytes: Number(options.maxResponseBytes) || 0,
     tls: options.tls || null,
+    headersTimeoutMs: options.headersTimeoutMs ?? PROXY_HEADERS_TIMEOUT_MS,
+    bodyTimeoutMs: options.bodyTimeoutMs ?? PROXY_BODY_TIMEOUT_MS,
   });
 }
 
@@ -120,17 +124,22 @@ function resolveDispatcher(proxyUrl, options) {
  * Empty proxy URL with no transport options returns globalThis.fetch unchanged.
  *
  * @param {string | undefined | null} proxyUrl
- * @param {{ http2?: boolean, maxResponseBytes?: number, tls?: object }} [options]
+ * @param {{ http2?: boolean, maxResponseBytes?: number, tls?: object, headersTimeoutMs?: number, bodyTimeoutMs?: number }} [options]
  * @returns {typeof fetch}
  */
 export function createHttpFetch(proxyUrl, options = {}) {
   const normalized = String(proxyUrl || '').trim();
+  for (const key of ['headersTimeoutMs', 'bodyTimeoutMs']) {
+    if (options[key] !== undefined && (!Number.isSafeInteger(options[key]) || options[key] < 0 || options[key] > 2_147_483_647)) throw new TypeError(`Invalid HTTP ${key}`);
+  }
   const normalizedOptions = {
     http2: options.http2 === true,
     maxResponseBytes: Math.max(0, Number(options.maxResponseBytes) || 0),
     ...(options.tls ? { tls: options.tls } : {}),
+    headersTimeoutMs: options.headersTimeoutMs ?? PROXY_HEADERS_TIMEOUT_MS,
+    bodyTimeoutMs: options.bodyTimeoutMs ?? PROXY_BODY_TIMEOUT_MS,
   };
-  if (!normalized && !normalizedOptions.http2 && !normalizedOptions.maxResponseBytes && !normalizedOptions.tls) {
+  if (options.headersTimeoutMs === undefined && options.bodyTimeoutMs === undefined && !normalized && !normalizedOptions.http2 && !normalizedOptions.maxResponseBytes && !normalizedOptions.tls) {
     return globalThis.fetch;
   }
 
@@ -143,16 +152,16 @@ export function createHttpFetch(proxyUrl, options = {}) {
   const fetchFn = (input, init = {}) => undiciFetch(input, {
     ...init,
     dispatcher,
-    headersTimeout: init.headersTimeout ?? PROXY_HEADERS_TIMEOUT_MS,
-    bodyTimeout: init.bodyTimeout ?? PROXY_BODY_TIMEOUT_MS,
+    headersTimeout: init.headersTimeout ?? normalizedOptions.headersTimeoutMs,
+    bodyTimeout: init.bodyTimeout ?? normalizedOptions.bodyTimeoutMs,
   });
   Object.defineProperty(fetchFn, 'transportOptions', {
     value: Object.freeze({
       proxy: Boolean(normalized),
       http2: normalizedOptions.http2,
       maxResponseBytes: normalizedOptions.maxResponseBytes || null,
-      headersTimeoutMs: PROXY_HEADERS_TIMEOUT_MS,
-      bodyTimeoutMs: PROXY_BODY_TIMEOUT_MS,
+      headersTimeoutMs: normalizedOptions.headersTimeoutMs,
+      bodyTimeoutMs: normalizedOptions.bodyTimeoutMs,
     }),
     enumerable: false,
   });

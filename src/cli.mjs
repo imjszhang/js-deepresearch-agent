@@ -13,7 +13,6 @@ import {
   loadSourcesFromIntelStore,
 } from 'js-wiki-engine';
 import { createServices } from './bootstrap.mjs';
-import { createApp } from './api/app.mjs';
 import { getDb } from './storage/db.mjs';
 import {
   createIntelStoreEngine,
@@ -34,7 +33,9 @@ import {
   setDeepValue,
 } from './cli-utils.mjs';
 
-const services = createServices(getDb());
+// Commands that only inspect local artifacts or prepare a model sandbox must
+// not initialize research storage (which also performs database migrations).
+let services;
 
 main(process.argv.slice(2)).catch((error) => {
   console.error(error.message);
@@ -49,6 +50,14 @@ async function main(argv) {
     printHelp();
     return;
   }
+
+  if (command === 'model-sandbox') {
+    const { runModelSandboxCli } = await import('./model-sandbox/cli.mjs');
+    process.exitCode = await runModelSandboxCli(rest);
+    return;
+  }
+
+  services = createServices(getDb());
 
   if (command === 'research') {
     await researchCommand(rest);
@@ -81,7 +90,7 @@ async function main(argv) {
   }
 
   if (command === 'serve') {
-    serveCommand(rest);
+    await serveCommand(rest);
     return;
   }
 
@@ -368,7 +377,8 @@ async function wikiCommand(argv) {
   throw new Error(`Unknown wiki command: ${subcommand}`);
 }
 
-function serveCommand(argv) {
+async function serveCommand(argv) {
+  const { createApp } = await import('./api/app.mjs');
   const { flags } = parseArgs(argv);
   const port = Number(flags.port || process.env.PORT || 3000);
   const app = createApp(getDb());
@@ -477,6 +487,7 @@ Commands:
   history [list]
   history show <researchId>
   replay <sessionDir> --call <llm-call-id> (--live|--offline) [--json]
+  model-sandbox help                 Independent local-model performance tests
   intel list [--limit 20] [--intel-dir data/intel] [--json]
   intel show <researchId> [--json]
   intel sources <researchId> [--limit 20] [--json]

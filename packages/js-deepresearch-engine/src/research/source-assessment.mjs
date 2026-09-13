@@ -1,3 +1,4 @@
+import { isExecutionInterruption } from '../search/search-health.mjs';
 import { completeStructuredJson } from './structured-llm.mjs';
 import { sourceAssessmentPrompt } from './prompts.mjs';
 
@@ -126,7 +127,7 @@ export async function assessSourceBody({
       }),
     });
   } catch (error) {
-    if (error?.name === 'AbortError' || error?.name === 'BudgetExceededError' || signal?.aborted) throw error;
+    if (error?.name === 'AbortError' || error?.name === 'BudgetExceededError' || signal?.aborted || isExecutionInterruption(error)) throw error;
     const reason = error?.code
       ? `assessment_provider_${String(error.code).toLowerCase()}`
       : 'assessment_provider_error';

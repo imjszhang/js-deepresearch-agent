@@ -1,3 +1,4 @@
+import { isExecutionInterruption } from '../search/search-health.mjs';
 import { resolveUrlContent } from './content-resolver.mjs';
 import { focusedSourceSelection } from './focused-settings.mjs';
 import { selectRelevantPassages } from './passage-selector.mjs';
@@ -484,7 +485,7 @@ export async function enrichFindingSources(finding, options = {}) {
           enrichedCount.value += 1;
         }
       } catch (error) {
-        if (isAbortError(error)) throw error;
+        if (isAbortError(error) || error?.name === 'BudgetExceededError' || signal?.aborted || isExecutionInterruption(error)) throw error;
         enrichedByUrl.set(source.url, {
           ...source,
           fetchStatus: 'failed',

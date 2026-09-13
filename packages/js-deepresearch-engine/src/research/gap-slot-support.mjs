@@ -13,6 +13,7 @@ import { isRequiredSlot, needsSemanticClose } from './gap-state.mjs';
 import { splitContentForPassages, tokenOverlapScore } from './passage-utils.mjs';
 import { gapSlotSupportPrompt } from './prompts.mjs';
 import { completeStructuredJson } from './structured-llm.mjs';
+import { STRUCTURED_RESPONSE_VERSION } from './structured-response.mjs';
 import { normalizeClaimCandidates, VALIDATION_PROTOCOL_VERSION } from './claim-candidates.mjs';
 import { isExecutionInterruption } from '../search/search-health.mjs';
 
@@ -138,7 +139,8 @@ export function selectSlotPassages(gap, findings = [], {
       }));
     })
     .filter((passage) => !inspectUnseen || !evidenceStore?.checked(gap.id, passage, { questionRevision: gap.questionRevision || 1,
-      criterionRevision: gap.criterionRevision || 1, validationProtocolVersion: VALIDATION_PROTOCOL_VERSION }))
+      criterionRevision: gap.criterionRevision || 1, validationProtocolVersion: VALIDATION_PROTOCOL_VERSION,
+      structuredResponseVersion: STRUCTURED_RESPONSE_VERSION }))
     .sort((left, right) => (right.retrievalScore || 0) - (left.retrievalScore || 0));
   const selected = [];
   const used = new Set();
@@ -182,6 +184,7 @@ export function slotSupportFingerprint(gap, passages = [], extras = {}) {
     taskType: gap?.taskType || 'fact',
     questionRevision: gap?.questionRevision || 1,
     criterionRevision: gap?.criterionRevision || 1,
+    structuredResponseVersion: STRUCTURED_RESPONSE_VERSION,
     inspectionProtocol: passages.some((passage) => passage.documentVersionId) ? VALIDATION_PROTOCOL_VERSION : 1,
     previousSupport: passages.some((passage) => passage.documentVersionId) && gap?.slotSupport?.quoteAnchored
       ? { verdict: gap.slotSupport.verdict, answer: gap.slotSupport.answer, quote: gap.slotSupport.quote, passageIds: gap.slotSupport.supportingPassageIds, counterPassageIds: gap.slotSupport.contradictingPassageIds } : null,
@@ -612,7 +615,7 @@ export async function judgeOpenSlotSupport({
         const passages = target.passages.filter((passage) => passage.documentVersionId === documentVersionId);
         evidenceStore.recordInspection({ taskId: target.gap.id, documentVersionId, passageIds: passages.map((passage) => passage.id),
           questionRevision: target.gap.questionRevision || 1, criterionRevision: target.gap.criterionRevision || 1,
-          validationProtocolVersion: VALIDATION_PROTOCOL_VERSION,
+          validationProtocolVersion: VALIDATION_PROTOCOL_VERSION, structuredResponseVersion: STRUCTURED_RESPONSE_VERSION,
           verdict: passages.some((passage) => (judgment.contradictingPassageIds || []).includes(passage.id)) ? 'contradicted'
             : passages.some((passage) => (judgment.supportingPassageIds || []).includes(passage.id)) && ['supported', 'partially_supported'].includes(judgment.verdict) ? 'supported' : 'checked_without_support', missingFacets: judgment.missingFacets });
       }

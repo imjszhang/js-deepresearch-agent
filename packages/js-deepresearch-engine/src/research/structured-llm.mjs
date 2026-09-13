@@ -1,4 +1,5 @@
-import { extractJsonObject } from './report-narrative.mjs';
+import { assertKnownStructuredUsage } from './structured-response-usage.mjs';
+import { extractJsonObject, parseStructuredResponse, buildStructuredRetryMessages } from './structured-response.mjs';
 
 export { extractJsonObject };
 
@@ -42,55 +43,54 @@ export async function completeStructuredJson({
       maxTokens: tokens,
       messages: attemptMessages,
     });
-    const parsed = extractJsonObject(raw);
     const metadata = lastCallMetadata(llm);
-    const truncated = isTruncatedCall(metadata);
-    let accepted;
-    try {
-      accepted = Boolean(accept(parsed)) && !truncated;
-    } catch {
-      accepted = false;
-    }
-    return {
-      raw,
-      parsed,
-      metadata,
-      truncated,
-      accepted,
-    };
+    const result = parseStructuredResponse(raw, { accept, metadata });
+    if (!result.ok) assertKnownStructuredUsage(metadata);
+    return { ...result, metadata };
   };
 
+  // Preserve public reason codes; parseReason and diagnostics identify the
+  // structural failure without persisting model prose.
+  const legacyReason = (reason) => reason === 'truncated'
+    ? 'finish_reason_length' : 'invalid_or_empty_json';
+
   const first = await runAttempt(messages, maxTokens);
-  if (first.accepted) {
+  if (first.ok) {
     return {
       ok: true,
       parsed: first.parsed,
       attempts: 1,
       retried: false,
       reason: null,
+      parseReason: null,
+      diagnostics: first.diagnostics,
       metadata: first.metadata,
     };
   }
 
-  const secondMessages = retryMessages || messages;
+  const secondMessages = buildStructuredRetryMessages(retryMessages || messages, first.reason);
   const second = await runAttempt(secondMessages, retryMaxTokens);
-  if (second.accepted) {
+  if (second.ok) {
     return {
       ok: true,
       parsed: second.parsed,
       attempts: 2,
       retried: true,
-      reason: first.truncated ? 'finish_reason_length' : 'invalid_or_empty_json',
+      reason: legacyReason(first.reason),
+      parseReason: first.reason,
+      diagnostics: second.diagnostics,
       metadata: second.metadata,
     };
   }
 
   return {
     ok: false,
-    parsed: second.parsed || first.parsed,
+    parsed: second.parsed,
     attempts: 2,
     retried: true,
-    reason: second.truncated ? 'finish_reason_length' : 'invalid_or_empty_json',
+    reason: legacyReason(second.reason),
+    parseReason: second.reason,
+    diagnostics: second.diagnostics,
     metadata: second.metadata || first.metadata,
   };
 }

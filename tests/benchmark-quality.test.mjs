@@ -23,7 +23,7 @@ test('production judge responses persist only schema fields, discarding free-for
   const dir = temp(t), judge = new Judge({ directory: dir, identity: {}, llm: { async completeWithMetadata() {
     return { text: JSON.stringify({ facts: [], rationale: 'private explanation', arbitraryNotes: 'private explanation' }), usage: { totalTokens: 10 } };
   } } });
-  await judge.ask('verify_facts', 'fixture', {}, p => assert.deepEqual(p, { facts: [] }));
+  assert.deepEqual(await judge.ask('verify_facts', 'fixture', {}, p => assert.deepEqual(p.facts, [])), { facts: [] });
   const responses = fs.readdirSync(dir).filter(n => n !== 'ledger.json').map(n => fs.readFileSync(path.join(dir, n), 'utf8'));
   assert.ok(responses.every(text => !text.includes('private explanation')));
 });

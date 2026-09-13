@@ -2,7 +2,7 @@ const immediate = new Set(['unauthorized', 'forbidden', 'authentication_required
 const states = new Set(['healthy', 'suspect', 'open', 'half_open']);
 
 export function isExecutionInterruption(error) {
-  return ['SEARCH_PROVIDER_UNAVAILABLE', 'ENOSPC', 'SQLITE_FULL', 'EVIDENCE_INTEGRITY'].includes(error?.code);
+  return ['SEARCH_PROVIDER_UNAVAILABLE', 'ENOSPC', 'SQLITE_FULL', 'EVIDENCE_INTEGRITY', 'LLM_USAGE_UNKNOWN'].includes(error?.code);
 }
 
 export class SearchUnavailableError extends Error {

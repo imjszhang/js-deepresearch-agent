@@ -7,16 +7,13 @@ import { LOCATOR_VERSION } from './locators.mjs';
 import { EXECUTION_METRICS_VERSION } from './execution-metrics.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
+import { parseStructuredResponse, buildStructuredRetryMessages, STRUCTURED_RESPONSE_VERSION } from '../../../packages/js-deepresearch-engine/src/research/structured-response.mjs';
 import { hash, readJson, writeJson, invariant, JUDGE_VERSION, ExactIdSetError } from './schema.mjs';
 
 export function parseJson(text) {
-  const cleaned = cleanStructuredText(text);
-  return JSON.parse(cleaned);
-}
-function cleanStructuredText(text) {
-  return String(text || '').trim().replace(/^<think>[\s\S]*?<\/think>\s*/i, '')
-    .replace(/^<\/think>\s*/i, '').replace(/\s*<\/think>$/i, '')
-    .replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/, '$1');
+  const result = parseStructuredResponse(text);
+  if (!result.ok) throw new SyntaxError(result.reason);
+  return result.parsed;
 }
 const answerFields = {
   extract: new Set(['blocks', 'id', 'classification', 'facts', 'quote', 'unitId', 'fragmentId', 'catalogHash', 'owner', 'contextLocators', 'span', 'contextSpans', 'proposition', 'kind', 'citationKeys', 'replaces']),
@@ -46,8 +43,32 @@ function safeAnswer(value, purpose) {
     .map(([key, child]) => [key, safeAnswer(child, purpose)]));
 }
 
-// Reservations survive ambiguous requests. Responses are written before parsing;
-// retries reuse settled response files and never silently repay the same call.
+function validationFeedback(error) {
+  if (error instanceof ExactIdSetError) return { code: error.code, ...error.details };
+  return /Partial credit/.test(error?.message) ? 'partial_credit_forbidden'
+    : /Truth without checked evidence/.test(error?.message) ? 'correct_requires_checked_evidence_otherwise_use_unverifiable'
+    : /exact/.test(error?.message) ? 'id_set_invalid' : 'schema_invalid';
+}
+
+function parseJudgment(text, validate, metadata) {
+  const errors = [];
+  const result = parseStructuredResponse(text, { metadata, accept: candidate => {
+    try { validate(candidate); return true; } catch (error) { errors.push(error); return false; }
+  } });
+  // Ambiguous answers do not get reduced to whichever candidate's schema error
+  // happened to be checked last. Only a single rejected candidate supplies IDs.
+  const feedback = !result.ok && result.reason === 'schema_invalid' && errors.length === 1
+    ? validationFeedback(errors[0]) : result.reason;
+  return { ...result, feedback };
+}
+
+function parseReceipt(result) {
+  return { version: STRUCTURED_RESPONSE_VERSION, ok: result.ok, reason: result.reason,
+    diagnostics: result.diagnostics, feedback: result.feedback };
+}
+
+// Reservations survive ambiguous requests. Usage and safe parse receipts are
+// durable before retrying; replay never repays the same physical response.
 export class Judge {
   constructor({ llm, directory, limit = 100000, identity, assessmentOrigin = 'model_assessment', timeoutMs = 180000, wallClockMs = 1800000, stages = null, beforeDispatch = () => {} }) {
     this.beforeDispatch = beforeDispatch; this.llm = llm; this.directory = directory; this.limit = limit; this.identity = identity;
@@ -58,7 +79,7 @@ export class Judge {
     fs.mkdirSync(directory, { recursive: true });
     this.ledgerFile = path.join(directory, 'ledger.json');
     this.ledger = fs.existsSync(this.ledgerFile) ? readJson(this.ledgerFile) : { schemaVersion: 1, calls: {} };
-    const policyHash = hash({ relationReviewVersion: RELATION_REVIEW_VERSION, relationDecisionVersion: RELATION_DECISION_VERSION, bindingReviewVersion: BINDING_REVIEW_VERSION, relationAuditVersion: RELATION_AUDIT_VERSION, requestBudgetVersion: REQUEST_BUDGET_VERSION, judgeVersion: JUDGE_VERSION, locatorVersion: LOCATOR_VERSION, executionMetricsVersion: EXECUTION_METRICS_VERSION, identity, assessmentOrigin: this.assessmentOrigin, limit, timeoutMs, wallClockMs, stages });
+    const policyHash = hash({ structuredResponseVersion: STRUCTURED_RESPONSE_VERSION, relationReviewVersion: RELATION_REVIEW_VERSION, relationDecisionVersion: RELATION_DECISION_VERSION, bindingReviewVersion: BINDING_REVIEW_VERSION, relationAuditVersion: RELATION_AUDIT_VERSION, requestBudgetVersion: REQUEST_BUDGET_VERSION, judgeVersion: JUDGE_VERSION, locatorVersion: LOCATOR_VERSION, executionMetricsVersion: EXECUTION_METRICS_VERSION, identity, assessmentOrigin: this.assessmentOrigin, limit, timeoutMs, wallClockMs, stages });
     invariant(!this.ledger.policyHash || this.ledger.policyHash === policyHash, 'JUDGE_POLICY_CHANGED');
     this.ledger.policyHash = policyHash;
     for (const [id, call] of Object.entries(this.ledger.calls)) {
@@ -82,9 +103,9 @@ export class Judge {
     const baseMessages = evaluatorMessages(instructions, input);
     let feedback = null;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      const messages = feedback ? [...baseMessages, { role: 'user', content: JSON.stringify({ structureCorrection: feedback,
+      const messages = feedback ? [...buildStructuredRetryMessages(baseMessages, typeof feedback === 'string' ? feedback : 'schema_invalid'), { role: 'user', content: JSON.stringify({ structureCorrection: feedback,
         instruction: 'Return the required JSON with all exact IDs and only permitted labels. Do not repeat the invalid structure. For criteria forbidding partial credit, missing decisive details score incorrect or missing, never partial.' }) }] : baseMessages;
-      const id = hash({ version: JUDGE_VERSION, identity: this.identity, stage: this.stage, purpose, messages, maxTokens, attempt });
+      const id = hash({ version: JUDGE_VERSION, structuredResponseVersion: STRUCTURED_RESPONSE_VERSION, identity: this.identity, stage: this.stage, purpose, messages, maxTokens, attempt });
       const responseFile = path.join(this.directory, `${id}.json`);
       let response;
       if (fs.existsSync(responseFile)) {
@@ -111,11 +132,13 @@ export class Judge {
         writeJson(this.ledgerFile, this.ledger);
         try {
           const raw = await this.llm.completeWithMetadata({ messages, temperature: 0, maxTokens, purpose: 'benchmark_judge', signal: globalThis.AbortSignal.timeout(Math.max(1, Math.min(this.timeoutMs, remainingMs))) });
-          const cleaned = cleanStructuredText(raw.text);
-          // Persist structured answers only, never free-form reasoning or provider errors.
-          let structured = null;
-          try { structured = JSON.parse(cleaned); } catch { /* counted as a parse failure below */ }
-          response = { text: structured ? JSON.stringify(safeAnswer(structured, purpose)) : '', outputHash: hash(raw.text || ''), usage: raw.usage || null, activeMs: Date.now() - started };
+          const selected = parseJudgment(raw.text, validate, raw);
+          // Select and validate before projection: distinct answers must not
+          // become identical just because privacy filtering drops their fields.
+          const safe = selected.ok ? safeAnswer(selected.parsed, purpose) : null;
+          const projected = selected.ok ? parseJudgment(JSON.stringify(safe), validate, raw) : selected;
+          response = { text: projected.ok ? JSON.stringify(safe) : '', parsing: parseReceipt(projected.ok ? selected : projected),
+            outputHash: hash(raw.text || ''), usage: raw.usage || null, activeMs: Date.now() - started };
           writeJson(responseFile, response);
         } catch {
           Object.assign(this.ledger.calls[id], { status: 'outcome_unknown', activeMs: Date.now() - started }); writeJson(this.ledgerFile, this.ledger);
@@ -127,19 +150,21 @@ export class Judge {
       Object.assign(this.ledger.calls[id], { tokens: Number.isFinite(tokens) && tokens >= 0 ? tokens : null, status: 'responded',
         activeMs: response.activeMs ?? this.ledger.calls[id].activeMs ?? this.timeoutMs });
       writeJson(this.ledgerFile, this.ledger);
-      try { const parsed = parseJson(response.text); validate(parsed); return parsed; } catch (error) {
-        feedback = /Partial credit/.test(error.message) ? 'partial_credit_forbidden'
-          : /Truth without checked evidence/.test(error.message) ? 'correct_requires_checked_evidence_otherwise_use_unverifiable'
-          : /exact/.test(error.message) ? 'id_set_invalid' : error instanceof SyntaxError ? 'invalid_json' : 'schema_invalid';
-        this.ledger.calls[id].validationFailure = feedback;
-        if (error instanceof ExactIdSetError) {
-          feedback = { code: error.code, ...error.details };
-          this.ledger.calls[id].validationDetails = feedback;
-        }
-        writeJson(this.ledgerFile, this.ledger);
-        if (attempt === maxAttempts - 1) throw Object.assign(new Error('JUDGE_STRUCTURE_INVALID', { cause: error }),
-          error instanceof ExactIdSetError ? { code: error.code, details: error.details } : {});
+      // Older manually reconciled receipts in the current ledger are reparsed;
+      // a recorded rejection cannot be turned into acceptance after projection.
+      invariant(!response.parsing || response.parsing.version === STRUCTURED_RESPONSE_VERSION, 'JUDGE_RESPONSE_PROTOCOL_CHANGED');
+      const result = response.parsing?.ok === false ? response.parsing : parseJudgment(response.text, validate);
+      if (result.ok) return result.parsed;
+      feedback = result.feedback || result.reason;
+      this.ledger.calls[id].validationFailure = typeof feedback === 'string' ? feedback : feedback.code;
+      if (typeof feedback === 'object' && feedback?.code === 'id_set_invalid') {
+        this.ledger.calls[id].validationDetails = feedback;
       }
+      writeJson(this.ledgerFile, this.ledger);
+      if (attempt === maxAttempts - 1) throw Object.assign(new Error('JUDGE_STRUCTURE_INVALID'),
+        typeof feedback === 'object' && feedback?.code === 'id_set_invalid' ? { code: feedback.code,
+          details: Object.fromEntries(Object.entries(feedback).filter(([key]) => key !== 'code')) }
+          : { code: `schema_${result.reason}` });
     }
   }
 }

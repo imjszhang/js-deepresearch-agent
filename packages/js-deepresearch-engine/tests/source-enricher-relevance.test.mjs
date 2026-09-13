@@ -4,6 +4,7 @@ import {
   registerContentFetchHandler,
   resetContentFetchHandlers,
 } from '../src/research/content-resolver.mjs';
+import { BudgetManager, wrapProvidersWithBudget } from '../src/research/budget-manager.mjs';
 import { enrichFindings } from '../src/research/source-enricher.mjs';
 
 afterEach(() => resetContentFetchHandlers());
@@ -233,5 +234,36 @@ describe('source enricher relevance gate', () => {
     assert.equal(finding.sources[0].bodyQuality, 'waf');
     assert.equal(finding.sources[0].assessmentStatus, 'ok');
     assert.equal(finding.sources[0].skipReason, 'obfuscated body');
+  });
+});
+
+
+describe('source enrichment interruption boundary', () => {
+  it('[V24] assessment unknown usage cannot be converted to failed transport or retried', async () => {
+    registerContentFetchHandler(async () => ({ status: 'ok', content: 'The official documentation describes the mechanism and its operating assumptions in detail.' }));
+    const budget = new BudgetManager({ research: { strategy: 'focused' } });
+    budget.executionVersion = 2;
+    let calls = 0;
+    const { llm } = wrapProvidersWithBudget({ budget, search: {}, llm: { async completeWithMetadata() {
+      calls++;
+      return { text: 'invalid JSON', finishReason: 'stop' };
+    } } });
+    await assert.rejects(enrichFindings([{ question: 'Mechanism', sources: [{ url: 'https://example.test/mechanism' }] }], {
+      query: 'Mechanism', llm, budget, fetchMode: 'summary', maxUrlsPerIteration: 1, maxUrlsTotal: 1,
+      enrichConcurrency: 1, relevance: { enabled: false },
+    }), { code: 'LLM_USAGE_UNKNOWN' });
+    assert.equal(calls, 1);
+    assert.equal(budget.reservations.size, 1);
+    assert.equal(budget.unknown.llmTokens, true);
+  });
+
+  it('[V24] enrichment preserves budget and evidence-integrity interruptions', async () => {
+    registerContentFetchHandler(async () => ({ status: 'ok', content: 'The official documentation describes the mechanism and its operating assumptions in detail.' }));
+    for (const error of [Object.assign(new Error('budget'), { name: 'BudgetExceededError' }), Object.assign(new Error('integrity'), { code: 'EVIDENCE_INTEGRITY' })]) {
+      await assert.rejects(enrichFindings([{ question: 'Mechanism', sources: [{ url: 'https://example.test/mechanism' }] }], {
+        query: 'Mechanism', llm: { async complete() { throw error; } }, fetchMode: 'summary',
+        maxUrlsPerIteration: 1, maxUrlsTotal: 1, enrichConcurrency: 1, relevance: { enabled: false },
+      }), actual => actual === error);
+    }
   });
 });

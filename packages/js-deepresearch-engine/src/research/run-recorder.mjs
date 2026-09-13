@@ -168,6 +168,8 @@ function errorRecord(error) {
     message: normalized.message || String(normalized),
     code: normalized.code || null,
     phase,
+    purpose: ['claim_validation', 'report', 'narrative_validation'].includes(normalized.purpose) ? normalized.purpose : null,
+    researchPhase: ['exploratory', 'report'].includes(normalized.researchPhase) ? normalized.researchPhase : null,
     failedChecks: sanitizeReportFailedChecks(normalized.failedChecks, { phase }),
     attemptCounts: normalized.attemptCounts || null,
     cause: normalized.cause ? {

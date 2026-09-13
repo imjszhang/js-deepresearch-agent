@@ -87,15 +87,17 @@ export class EvidenceStore {
     return chunks;
   }
 
-  recordInspection({ taskId, questionRevision = 1, criterionRevision = 1, validationProtocolVersion, documentVersionId, passageIds = [], verdict, missingFacets = [] }) {
+  recordInspection({ taskId, questionRevision = 1, criterionRevision = 1, validationProtocolVersion, structuredResponseVersion, documentVersionId, passageIds = [], verdict, missingFacets = [] }) {
     if (!verdicts.has(verdict)) integrity('Invalid inspection verdict.');
     const selected = passageIds.map((key) => this.passages.get(key));
     if (selected.some((passage) => !passage || passage.documentVersionId !== documentVersionId)) integrity('Inspection references another document.');
     const identity = [taskId, questionRevision, criterionRevision, documentVersionId, [...passageIds].sort()];
     if (validationProtocolVersion != null) identity.push(validationProtocolVersion);
+    if (structuredResponseVersion != null) identity.push({ structuredResponseVersion });
     const key = id('inspection', identity);
     const inspection = { inspectionId: key, taskId, questionRevision, criterionRevision, documentVersionId,
       ...(validationProtocolVersion != null ? { validationProtocolVersion } : {}),
+      ...(structuredResponseVersion != null ? { structuredResponseVersion } : {}),
       checkedRanges: selected.map((passage) => [passage.startChar, passage.endChar]), passageIds, verdict, missingFacets };
     this.inspections.set(key, inspection);
     const association = this.associate(taskId, documentVersionId);
@@ -103,10 +105,11 @@ export class EvidenceStore {
     return inspection;
   }
 
-  checked(taskId, passage, { questionRevision = 1, criterionRevision = 1, validationProtocolVersion } = {}) {
+  checked(taskId, passage, { questionRevision = 1, criterionRevision = 1, validationProtocolVersion, structuredResponseVersion } = {}) {
     return [...this.inspections.values()].some((item) => item.taskId === taskId
       && item.questionRevision === questionRevision && item.criterionRevision === criterionRevision
       && (validationProtocolVersion == null || item.validationProtocolVersion === validationProtocolVersion)
+      && (structuredResponseVersion == null || item.structuredResponseVersion === structuredResponseVersion)
       && item.documentVersionId === passage.documentVersionId && item.verdict !== 'not_checked'
       && item.checkedRanges.some(([start, end]) => start <= passage.startChar && end >= passage.endChar));
   }

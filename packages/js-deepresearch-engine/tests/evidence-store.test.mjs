@@ -220,3 +220,58 @@ test('cumulative answers keep explicitly used old evidence without accumulating 
     llm: { async complete() { return JSON.stringify({ judgments: [{ gapId: gap.id, verdict: 'supported', answer: 'Example License; free download with separate model service charges.', quote: texts[2], supportingPassageIds: [passages[0].id] }] }); } } });
   assert.deepEqual(new Set(support.judgments[0].supportingPassageIds), new Set([passages[0].id, passages[2].id]));
 });
+
+test('[V24] inspection parser identity preserves older records without skipping current checks', () => {
+  const store = new EvidenceStore();
+  const version = store.register(source(), 'a');
+  const passage = store.chunks(version.documentVersionId)[0];
+  const args = { taskId: 'a', documentVersionId: version.documentVersionId, passageIds: [passage.id],
+    validationProtocolVersion: 4, verdict: 'checked_without_support' };
+  const old = store.recordInspection(args);
+  const oldSnapshot = globalThis.structuredClone(store.export());
+  const current = { validationProtocolVersion: 4, structuredResponseVersion: 1 };
+  assert.equal(store.checked('a', passage, current), false);
+  assert.equal(store.checked('a', passage, { validationProtocolVersion: 4 }), true);
+  const fresh = store.recordInspection({ ...args, structuredResponseVersion: 1 });
+  assert.notEqual(fresh.inspectionId, old.inspectionId);
+  assert.equal(store.inspections.size, 2);
+  assert.equal(store.checked('a', passage, current), true);
+  assert.equal(store.checked('a', passage, { ...current, structuredResponseVersion: 2 }), false);
+  assert.deepEqual(store.inspections.get(old.inspectionId), oldSnapshot.inspections[0]);
+  const restored = new EvidenceStore(globalThis.structuredClone(store.export()));
+  assert.deepEqual(restored.export(), store.export());
+  assert.deepEqual(new EvidenceStore(oldSnapshot).export(), oldSnapshot);
+});
+
+test('[V24] local gap inspection revisits old parsing results once and freezes the new identity', async () => {
+  const { judgeOpenSlotSupport } = await import('../src/research/gap-slot-support.mjs');
+  const store = new EvidenceStore();
+  const findings = [{ gapId: 'license', sources: [source()] }];
+  store.captureFindings(findings);
+  const version = [...store.versions.values()][0];
+  const passage = store.chunks(version.documentVersionId)[0];
+  const old = store.recordInspection({ taskId: 'license', documentVersionId: version.documentVersionId,
+    passageIds: [passage.id], validationProtocolVersion: 4, verdict: 'checked_without_support' });
+  const gap = { id: 'license', question: 'Which license applies?', requiredSlot: true, status: 'open' };
+  let calls = 0;
+  const llm = { async complete() {
+    calls++;
+    return JSON.stringify({ judgments: [{ gapId: 'license', verdict: 'unsupported', quote: '', answer: '', missingFacets: ['License name'] }] });
+  } };
+  const args = { query: gap.question, gaps: [gap], findings, evidenceStore: store, inspectUnseen: true, llm };
+  const result = await judgeOpenSlotSupport(args);
+  assert.equal(result.attempts, 1);
+  assert.equal(calls, 1);
+  assert.equal(store.inspections.get(old.inspectionId).structuredResponseVersion, undefined);
+  assert.ok([...store.inspections.values()].some(item => item.structuredResponseVersion === 1 && item.validationProtocolVersion === 4));
+  const repeated = await judgeOpenSlotSupport(args);
+  assert.equal(repeated.attempts, 0);
+  assert.equal(calls, 1);
+});
+
+test('[V24] gap cache identity differs from the frozen pre-parser fingerprint', async () => {
+  const { slotSupportFingerprint } = await import('../src/research/gap-slot-support.mjs');
+  // Captured from the pre-migration implementation for this public synthetic input.
+  const previous = 'bda3798b807ebf1f3c3532ce152fabd4784af34d8b75a58729ea49fe8e0ee650';
+  assert.notEqual(slotSupportFingerprint({ id: 'gap-1', question: 'Which license applies?' }, []), previous);
+});
