@@ -390,3 +390,16 @@ npm exec --package=. -- jdr model-sandbox resolve-unknown \
 产物独立保存在本地沙盒目录，包含安全时间线、逐调用指标、汇总报告和哈希 manifest。性能观察、传输完整性、结构合同结果与程序化验收分别统计；结构正确不证明内容正确，超时后的未知用量也不计为零。工程验收使用 `npm run verify:programmatic -- --output-dir <new-local-dir>`，只调用测试自建的模拟服务，不对真实设备速度设置通过门槛。
 
 可通过 `npm exec --package=. -- jdr model-sandbox compare <runDirA> <runDirB> --json` 离线比较两次测试。不同计划只作描述性比较，保留参数与输入哈希差异。实现和验收说明见 [本地模型沙盒实施记录](journal/2026-09-13/local-model-sandbox.md)。
+
+## 可选 Jev 判断层
+
+探索性调研可以接入 TypeSafe Jev（`jev-1.13.0`）作为判断层。它与 rerank 分开配置，默认关闭：不设置 `JDR_JUDGE_PROVIDER=jev`（或 `--judge-provider jev`）并打开至少一个 feature 时，不会创建任何 judge 调用。仅设置 `TYPESAFE_API_KEY` 不会启用。
+
+四个 feature 分别对应：full/extract 来源评估分类（`--judge-source-assessment`，需同时 `--source-assessment true`）、待读候选排序（`--judge-read-priority`）、Planner 查询筛选与排序（`--judge-query-screening`）、slot support 与主张校验前的片段预排序（`--judge-passage-order`）。
+
+```bash
+npm exec --package=. -- jdr research "你的问题" --strategy exploratory \
+  --judge-provider jev --judge-read-priority true --max-judge-requests 50
+```
+
+Jev 只影响排序、候选选择顺序和是否回退到 LLM，不能让 readiness gate、`evidence_sufficient`、slot verified 或 claim supported 从失败变为通过；其用量单独记账，不计入探索下限。服务不可用时回退到原有路径。设计与约束见 [journal/2026-09-23/jev-judge-layer.md](journal/2026-09-23/jev-judge-layer.md)。
