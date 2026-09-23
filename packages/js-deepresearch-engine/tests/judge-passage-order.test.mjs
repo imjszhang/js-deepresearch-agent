@@ -68,7 +68,7 @@ async function supportRun(judge) {
   return { result, order, verdicts: result.judgments.map((item) => item.verdict) };
 }
 
-test('slot support sees the same selected passages with Jev ordering, only in a different order and under a distinct cache key', async () => {
+test('[V26] slot support sees the same selected passages with Jev ordering, only in a different order and under a distinct cache key', async () => {
   const off = await supportRun(null);
   const on = await supportRun(noulJudge(preferAbout).judge);
   const degraded = await supportRun(noulJudge(preferAbout, { status: 503 }).judge);
@@ -89,7 +89,7 @@ test('slot support sees the same selected passages with Jev ordering, only in a 
   assert.deepEqual([...degradedCache.keys()], [...offCache.keys()]);
 });
 
-test('claim validation compares the same passages with Jev ordering and never receives a Jev verdict', async () => {
+test('[V26] claim validation compares the same passages with Jev ordering and never receives a Jev verdict', async () => {
   const { EvidenceStore } = await import('../src/research/evidence-store.mjs');
   const { normalizeClaimCandidates } = await import('../src/research/claim-candidates.mjs');
   const { buildClaimGraph } = await import('../src/research/claim-graph.mjs');

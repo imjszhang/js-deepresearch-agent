@@ -28,7 +28,7 @@ function scorer(state) {
   };
 }
 
-test('screening reorders and marks same-intent duplicates without changing any query text', async () => {
+test('[V26] screening reorders and marks same-intent duplicates without changing any query text', async () => {
   const { judge, requests } = noulJudge((id, state) => scorer(state)(id));
   const screening = await screenPlannedQueries(judge, { gap, queries: planned, searched: gap.searchedQueries });
   assert.equal(requests.length, 1);

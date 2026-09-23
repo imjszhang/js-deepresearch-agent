@@ -40,7 +40,7 @@ function withJudge(judge) {
   return { ...baseSettings, research: { ...baseSettings.research, providers: { judge } } };
 }
 
-test('default configuration creates no judge calls and records no judge artifacts', async (t) => {
+test('[V26] default configuration creates no judge calls and records no judge artifacts', async (t) => {
   const sessionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jdr-judge-default-'));
   t.after(() => fs.rmSync(sessionDir, { recursive: true, force: true }));
   const originalFetch = globalThis.fetch;
@@ -100,7 +100,7 @@ test('query screening keeps planner text and provenance while ordering queued se
   assert.equal(on.quality.readiness.pass, off.quality.readiness.pass);
 });
 
-test('a judge that is always unavailable leaves every feature on the original path', async () => {
+test('[V26] a judge that is always unavailable leaves every feature on the original path', async () => {
   const { JudgeProviderError } = await import('../src/index.mjs');
   let attempts = 0;
   const unavailable = { provider: 'jev', dialect: 'typesafe', model: 'jev-1.13.0',
@@ -117,7 +117,7 @@ test('a judge that is always unavailable leaves every feature on the original pa
   assert.equal(degraded.quality.budget.floorStatus, off.quality.budget.floorStatus);
 });
 
-test('maximally positive Jev answers cannot turn a failed claim or gate into a pass', async () => {
+test('[V26] maximally positive Jev answers cannot turn a failed claim or gate into a pass', async () => {
   const eager = scriptedJudge({ sourceAssessment: true, readPriority: true, queryScreening: true, passageOrder: true }, (id) => (id.includes('_same_') ? 0 : 1));
   const off = await new ResearchRunner().run({ query: '调研 Atlas 这个产品', settings: baseSettings, search: searchWith(results), llm: canonicalLlm({ conflict: true }) });
   const on = await new ResearchRunner().run({ query: '调研 Atlas 这个产品', settings: withJudge(eager.config), search: searchWith(results), llm: canonicalLlm({ conflict: true }) });

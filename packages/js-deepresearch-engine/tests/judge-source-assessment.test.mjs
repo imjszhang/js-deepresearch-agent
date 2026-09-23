@@ -81,7 +81,7 @@ test('confident Jev answers fill the existing assessment enums in full and extra
   }
 });
 
-test('degraded, uncertain or credential-granting Jev verdicts fall back to the original LLM assessment and keep the fetched body', async () => {
+test('[V26] degraded, uncertain or credential-granting Jev verdicts fall back to the original LLM assessment and keep the fetched body', async () => {
   const cases = [
     () => new globalThis.Response('busy', { status: 503 }),
     (body) => ok({ model: 'jev-1.13.0', answers: answersFor(body.questions, { confidence: 0.5 }), usage: {} }),
@@ -113,7 +113,7 @@ test('only a confident Jev unreadable verdict writes bodyQuality and never touch
   assert.equal(source.assessment.method, 'jev');
 });
 
-test('summary mode, disabled switches and local corpus files never send the body to Jev', async () => {
+test('[V26] summary mode, disabled switches and local corpus files never send the body to Jev', async () => {
   const { judge, calls } = jevProviders((body) => ok({ model: 'jev-1.13.0', answers: answersFor(body.questions), usage: {} }));
   const summary = await enrich({ judge, fetchMode: 'summary' });
   assert.equal(summary.assessment.method, 'llm');

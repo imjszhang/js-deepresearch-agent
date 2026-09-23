@@ -52,7 +52,7 @@ test('Jev client sends the fixed model, bearer key and all questions in one requ
   assert.deepEqual(result.usage, { known: true, inputTokens: 30, outputTokens: 2, tokens: 32 });
 });
 
-test('Jev client rejects missing, extra, mistyped and out-of-range answers as structural errors', async () => {
+test('[V26] Jev client rejects missing, extra, mistyped and out-of-range answers as structural errors', async () => {
   const cases = [
     { relevant: goodAnswers.relevant },
     { ...goodAnswers, extra: { type: 'noul', noul: 0.5 } },
@@ -87,7 +87,7 @@ test('Jev score answers are checked against their own level distribution', async
   await assert.rejects(new JevJudgeProvider({ apiKey: KEY, fetch: bad.fetch }).judge({ state: 's', questions: score }), { category: 'structure' });
 });
 
-test('missing Jev usage is reported as unknown instead of zero', async () => {
+test('[V26] missing Jev usage is reported as unknown instead of zero', async () => {
   const { fetch } = fakeFetch(() => respond({ model: 'jev-1.13.0', answers: goodAnswers }));
   const result = await new JevJudgeProvider({ apiKey: KEY, fetch }).judge({ state: 's', questions });
   assert.deepEqual(result.usage, { known: false });
@@ -98,7 +98,7 @@ test('missing Jev usage is reported as unknown instead of zero', async () => {
   assert.equal(budget.usage.judgeTokens, undefined);
 });
 
-test('402, 429 and 5xx degrade while other 4xx surface as client errors without provider text', async () => {
+test('[V26] 402, 429 and 5xx degrade while other 4xx surface as client errors without provider text', async () => {
   const secretBody = 'provider says: state=CONFIDENTIAL-BODY';
   for (const status of [402, 429, 500, 503]) {
     const events = [];
@@ -154,7 +154,7 @@ test('state is truncated by a character budget and the truncation is marked', ()
   assert.deepEqual(prepareJudgeState({ a: 1 }, 100).state, { a: 1 });
 });
 
-test('judge calls are recorded as calls/judge-N without the key, state text or question text', async (t) => {
+test('[V26] judge calls are recorded as calls/judge-N without the key, state text or question text', async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jdr-judge-record-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const recorder = new FileRunRecorder({ sessionDir: dir, query: 'fixture', strategy: 'exploratory' });
@@ -174,7 +174,7 @@ test('judge calls are recorded as calls/judge-N without the key, state text or q
   assert.equal(calls.length, 1, 'identical judgments are served from the run cache');
 });
 
-test('judge budget caps requests and tokens separately from the LLM exploration floor', async () => {
+test('[V26] judge budget caps requests and tokens separately from the LLM exploration floor', async () => {
   const settings = mergeSettings({ research: { budget: { maxJudgeRequests: 2 }, exploratory: { minLlmTokens: 1000 } } });
   const budget = new BudgetManager(settings);
   budget.executionVersion = 2;
@@ -197,7 +197,7 @@ test('judge budget caps requests and tokens separately from the LLM exploration 
   assert.equal((await tokenLimited.judge.judge({ state: 'f', questions })).errorCode, 'JUDGE_BUDGET_EXHAUSTED');
 });
 
-test('resumed runs reuse a recorded judge response once without a new request', async (t) => {
+test('[V26] resumed runs reuse a recorded judge response once without a new request', async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jdr-judge-resume-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const recorder = new FileRunRecorder({ sessionDir: dir, query: 'fixture', strategy: 'exploratory' });

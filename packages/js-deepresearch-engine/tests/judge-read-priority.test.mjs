@@ -38,7 +38,7 @@ test('readPriority orders reads only after required and task-turn tiers and neve
   assert.equal(restored.export().actions.find((item) => item.inputRefs.sourceIds?.[0] === 'high').readPriority, 0.9);
 });
 
-test('old scheduler snapshots without readPriority keep their original dispatch order', () => {
+test('[V26] old scheduler snapshots without readPriority keep their original dispatch order', () => {
   const scheduler = new ActionScheduler();
   for (const id of ['first', 'second', 'third']) scheduler.enqueue(read(id));
   const snapshot = JSON.parse(JSON.stringify(scheduler.export()));

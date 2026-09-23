@@ -1,5 +1,67 @@
 // Fixed required cases are reviewed with the contract; never inferred from this run's pass events.
 const REQUIRED_TEST_CASES = {
+  "V26": [
+    {
+      "file": "packages/js-deepresearch-engine/tests/jev-judge-provider.test.mjs",
+      "name": "[V26] Jev client rejects missing, extra, mistyped and out-of-range answers as structural errors"
+    },
+    {
+      "file": "packages/js-deepresearch-engine/tests/jev-judge-provider.test.mjs",
+      "name": "[V26] missing Jev usage is reported as unknown instead of zero"
+    },
+    {
+      "file": "packages/js-deepresearch-engine/tests/jev-judge-provider.test.mjs",
+      "name": "[V26] 402, 429 and 5xx degrade while other 4xx surface as client errors without provider text"
+    },
+    {
+      "file": "packages/js-deepresearch-engine/tests/jev-judge-provider.test.mjs",
+      "name": "[V26] judge calls are recorded as calls/judge-N without the key, state text or question text"
+    },
+    {
+      "file": "packages/js-deepresearch-engine/tests/jev-judge-provider.test.mjs",
+      "name": "[V26] judge budget caps requests and tokens separately from the LLM exploration floor"
+    },
+    {
+      "file": "packages/js-deepresearch-engine/tests/jev-judge-provider.test.mjs",
+      "name": "[V26] resumed runs reuse a recorded judge response once without a new request"
+    },
+    {
+      "file": "packages/js-deepresearch-engine/tests/judge-integration.test.mjs",
+      "name": "[V26] default configuration creates no judge calls and records no judge artifacts"
+    },
+    {
+      "file": "packages/js-deepresearch-engine/tests/judge-integration.test.mjs",
+      "name": "[V26] a judge that is always unavailable leaves every feature on the original path"
+    },
+    {
+      "file": "packages/js-deepresearch-engine/tests/judge-integration.test.mjs",
+      "name": "[V26] maximally positive Jev answers cannot turn a failed claim or gate into a pass"
+    },
+    {
+      "file": "packages/js-deepresearch-engine/tests/judge-source-assessment.test.mjs",
+      "name": "[V26] degraded, uncertain or credential-granting Jev verdicts fall back to the original LLM assessment and keep the fetched body"
+    },
+    {
+      "file": "packages/js-deepresearch-engine/tests/judge-source-assessment.test.mjs",
+      "name": "[V26] summary mode, disabled switches and local corpus files never send the body to Jev"
+    },
+    {
+      "file": "packages/js-deepresearch-engine/tests/judge-read-priority.test.mjs",
+      "name": "[V26] old scheduler snapshots without readPriority keep their original dispatch order"
+    },
+    {
+      "file": "packages/js-deepresearch-engine/tests/judge-query-screening.test.mjs",
+      "name": "[V26] screening reorders and marks same-intent duplicates without changing any query text"
+    },
+    {
+      "file": "packages/js-deepresearch-engine/tests/judge-passage-order.test.mjs",
+      "name": "[V26] slot support sees the same selected passages with Jev ordering, only in a different order and under a distinct cache key"
+    },
+    {
+      "file": "packages/js-deepresearch-engine/tests/judge-passage-order.test.mjs",
+      "name": "[V26] claim validation compares the same passages with Jev ordering and never receives a Jev verdict"
+    }
+  ],
   "V25": [
   {
     "file": "packages/js-deepresearch-engine/tests/sandbox-transport.test.mjs",
@@ -610,6 +672,7 @@ export const VERIFICATION_SCENARIOS = [
   ['V23', 'legacy entrypoint migration'],
   ['V24', 'structured response boundary and recovery'],
   ['V25', 'local model sandbox isolation, transport, lifecycle and artifacts'],
+  ['V26', 'optional judge layer ordering, fallback and isolation'],
 ].map(([id, contract]) => ({ id, contract, required: true, titlePrefix: `[${id}]`, tests: REQUIRED_TEST_CASES[id] }));
 
 export function scenarioResults(events) {
