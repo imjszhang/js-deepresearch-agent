@@ -195,7 +195,7 @@ export async function runExploratoryLoop(context) {
   }
 
   const evaluateFinalization = createFinalizationGate({ state, loopLocal, emit, budget, llm, signal, trace, checkpointState, refreshState, canContinueLoop, maxRetries, answerGateEnabled, gateMode, maxOpenGaps });
-  const performRead = createReadExecutor({ state, loopLocal, query, llm, signal, emit, settings, budget, embedding, recorder, readPolicy, maxReads, trace });
+  const performRead = createReadExecutor({ state, loopLocal, query, llm, signal, emit, settings, budget, embedding, recorder, readPolicy, maxReads, trace, judge: researchProviders?.judge || null });
 
   const performSearch = createSearchExecutor({ state, search, settings, budget, emit, signal, queryMemory, llm, readPolicy, embedding, researchProviders, trace, maxQueriesPerStep, autoReadTopK, performRead });
 

@@ -15,7 +15,7 @@ import { promoteSuccessfulSources } from '../slot-promotion.mjs';
 import { readAddsNovelty } from '../adaptive/embedding-signals.mjs';
 import { addTrace, selectedFinding } from './exploratory-planning.mjs';
 
-export function createReadExecutor({ state, loopLocal, query, llm, signal, emit, settings, budget, embedding, recorder, readPolicy, maxReads, trace }) {
+export function createReadExecutor({ state, loopLocal, query, llm, signal, emit, settings, budget, embedding, recorder, readPolicy, maxReads, trace, judge = null }) {
   return async function performRead({ sourceIds, gapId, reasonCode, harvest = false }) {
     const tokensBefore = budget?.usage?.llmTokens || 0;
     emit({
@@ -46,6 +46,7 @@ export function createReadExecutor({ state, loopLocal, query, llm, signal, emit,
       observedHosts: [...(state.observedHosts || [])],
       recorder,
       transportMemory: state.transportMemory,
+      judge,
     }))[0];
     state.evidenceStore?.captureFindings([finding]);
     const classifiedSources = [];

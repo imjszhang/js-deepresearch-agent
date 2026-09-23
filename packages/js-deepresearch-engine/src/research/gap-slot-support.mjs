@@ -198,6 +198,7 @@ export function slotSupportFingerprint(gap, passages = [], extras = {}) {
       publisherType: passage.assessment?.publisherType || null,
       contentKind: passage.assessment?.contentKind || null,
       evidenceTier: passage.assessment?.evidenceTier || null,
+      ...(passage.assessment?.method === 'jev' ? { assessmentJudge: passage.assessment.judge || 'jev' } : {}),
     })),
     criterionPool: extras.criterionPool || {},
   });
