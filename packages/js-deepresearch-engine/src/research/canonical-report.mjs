@@ -39,7 +39,7 @@ export async function finalizeCanonicalReport(context) {
   const counts = { provider: 0, parse: 0, semanticContract: 0, render: 0 };
   const originalContract = context.reportContract;
   emit({ stage: 'evaluating_report' });
-  if (!reuse) await validateResearchClaims({ graph, store, gaps, query, llm, signal, recorder, budget, embedding: context.embedding, constraints: brief.constraints || [], researchPhase: 'report',
+  if (!reuse) await validateResearchClaims({ graph, store, gaps, query, llm, signal, recorder, budget, embedding: context.embedding, judge: strategy === 'exploratory' ? context.judge || null : null, constraints: brief.constraints || [], researchPhase: 'report',
     cache: saved && (saved.state.claimReviewVersion !== CLAIM_REVIEW_VERSION || saved.state.structuredResponseVersion !== STRUCTURED_RESPONSE_VERSION) ? {} : null });
   applyValidatedBindings(gaps, graph);
   for (const record of graph.records) for (const ref of record.counterRefs) {

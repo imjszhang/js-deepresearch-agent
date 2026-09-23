@@ -195,7 +195,7 @@ export async function runExploratoryLoop(context) {
   }
 
   const evaluateFinalization = createFinalizationGate({ state, loopLocal, emit, budget, llm, signal, trace, checkpointState, refreshState, canContinueLoop, maxRetries, answerGateEnabled, gateMode, maxOpenGaps });
-  const performRead = createReadExecutor({ state, loopLocal, query, llm, signal, emit, settings, budget, embedding, recorder, readPolicy, maxReads, trace });
+  const performRead = createReadExecutor({ state, loopLocal, query, llm, signal, emit, settings, budget, embedding, recorder, readPolicy, maxReads, trace, judge: researchProviders?.judge || null });
 
   const performSearch = createSearchExecutor({ state, search, settings, budget, emit, signal, queryMemory, llm, readPolicy, embedding, researchProviders, trace, maxQueriesPerStep, autoReadTopK, performRead });
 
@@ -284,7 +284,7 @@ export async function runExploratoryLoop(context) {
 
   try {
     if (state.scheduler && !skipRestoredStop) await runActionExploration({ state, loopLocal, query, llm, search, signal, emit, budget, queryMemory, recorder,
-      trace, readPolicy, exploratory, performSearch, performRead, refreshState, checkpointState, continueExplore });
+      trace, readPolicy, exploratory, performSearch, performRead, refreshState, checkpointState, continueExplore, judge: researchProviders?.judge || null });
     while (!state.scheduler && !skipRestoredStop && (!hasStepCap(state.maxSteps) || state.step < state.maxSteps)) {
       abort(signal);
       const gate = refreshState();
@@ -489,6 +489,7 @@ export async function runExploratoryLoop(context) {
           gapId: gap.id,
           embedding,
           signal,
+          judge: researchProviders?.judge || null,
         });
         if (!searchQueries.length) invalid = 'duplicate_query';
       }
@@ -533,6 +534,7 @@ export async function runExploratoryLoop(context) {
             gapId: recoveryGapId,
             rejectedQueries: [{ query: action?.query || '', reason: invalid }],
             search,
+            judge: researchProviders?.judge || null,
           })
           : null;
         state.actionCosts.record('reflect', (budget?.usage?.llmTokens || 0) - tokensBefore);

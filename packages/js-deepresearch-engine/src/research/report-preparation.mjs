@@ -221,6 +221,7 @@ export async function continueAfterStrategy({
     });
     return finalizePreparedReport({
       embedding: researchProviders.embedding,
+      judge: researchProviders.judge || null,
       embeddingStats: researchProviders.embedding?.stats || null,
       llm,
       signal,

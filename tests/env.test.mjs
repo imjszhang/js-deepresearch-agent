@@ -191,6 +191,17 @@ EXISTING=from-file
     assert.equal(enabled.research.providers.rerank.timeoutMs, 4567);
   });
 
+  it('maps judge settings without enabling Jev from its key alone', () => {
+    const keyed = settingsFromEnv({ TYPESAFE_API_KEY: 'test-key' });
+    assert.equal(keyed.research.providers.judge.apiKey, 'test-key');
+    assert.equal(keyed.research.providers.judge.provider, undefined);
+    assert.equal(keyed.research.providers.judge.features, undefined);
+
+    const enabled = settingsFromEnv({ JDR_JUDGE_PROVIDER: 'jev', JDR_JUDGE_MODEL: 'jev-1.13.0' });
+    assert.equal(enabled.research.providers.judge.provider, 'jev');
+    assert.equal(enabled.research.providers.judge.model, 'jev-1.13.0');
+  });
+
   it('maps relevance admission overrides without enabling a rerank provider', () => {
     const settings = settingsFromEnv({
       JDR_RELEVANCE_ENABLED: 'true',

@@ -205,6 +205,30 @@ describe('CLI utilities', () => {
     assert.equal(settings.research.focused.preReportGate.enabled, true);
   });
 
+  it('maps optional judge flags without an api-key flag', () => {
+    const settings = applyResearchFlags({ research: {} }, {
+      'judge-provider': 'jev',
+      'judge-model': 'jev-1.13.0',
+      'judge-timeout-ms': '2500',
+      'judge-batch-size': '20',
+      'judge-max-state-chars': '9000',
+      'judge-read-priority': 'true',
+      'judge-query-screening': 'false',
+      'max-judge-requests': '5',
+      'max-judge-tokens': '7000',
+    });
+    const judge = settings.research.providers.judge;
+    assert.equal(judge.provider, 'jev');
+    assert.equal(judge.model, 'jev-1.13.0');
+    assert.equal(judge.timeoutMs, 2500);
+    assert.equal(judge.batchSize, 20);
+    assert.equal(judge.maxStateChars, 9000);
+    assert.deepEqual(judge.features, { readPriority: true, queryScreening: false });
+    assert.equal(judge.apiKey, undefined);
+    assert.equal(settings.research.budget.maxJudgeRequests, 5);
+    assert.equal(settings.research.budget.maxJudgeTokens, 7000);
+  });
+
   it('maps optional rerank flags without persisting them', () => {
     const settings = applyResearchFlags({ research: {} }, {
       'max-rerank-requests': '3',

@@ -7,6 +7,7 @@ import { plannerFeedbackFromState } from '../planner-feedback.mjs';
 import { candidateContentFingerprint, rerankEvaluationKey } from '../adaptive/research-state.mjs';
 import { normalizeQuery, querySimilarity } from '../query-memory.mjs';
 import { EXPLORATORY_STOP_REASONS } from '../adaptive/stop-reasons.mjs';
+import { applyQueryScreening, screenPlannedQueries } from '../judge-query-screening.mjs';
 
 export const STOP_REASONS = {
   evidenceSufficient: EXPLORATORY_STOP_REASONS.evidenceSufficient,
@@ -158,7 +159,7 @@ export function recordPlannerMetrics(state, plan, extra = {}) {
   state.clearPlannerFailure({ gapId: extra.gapId || plan.gapId || null });
 }
 
-export async function filterDuplicateQueries(queries, { state, queryMemory, gapId, embedding, signal }) {
+export async function filterDuplicateQueries(queries, { state, queryMemory, gapId, embedding, signal, judge = null }) {
   const normalized = [...new Set(queries.map(normalizeQuery).filter(Boolean))];
   const allSearched = state.searchedQueries().map(normalizeQuery);
   const gap = state.getGap(gapId);
@@ -172,7 +173,7 @@ export async function filterDuplicateQueries(queries, { state, queryMemory, gapI
   const candidates = normalized.filter((query) => !preRejected.includes(query));
   if (!queryMemory?.filterDuplicates) {
     preRejected.forEach(() => state.noteDuplicateQuery?.());
-    return candidates;
+    return screenAccepted(candidates, { state, gap, gapId, judge, signal });
   }
   const result = await queryMemory.filterDuplicates(candidates, {
     gapId,
@@ -196,7 +197,17 @@ export async function filterDuplicateQueries(queries, { state, queryMemory, gapI
       cacheHits: result.cacheHits,
     });
   }
-  return result.accepted;
+  return screenAccepted(result.accepted, { state, gap, gapId, judge, signal });
+}
+
+async function screenAccepted(accepted, { state, gap, gapId, judge, signal }) {
+  if (!judge?.enabled?.('queryScreening') || !accepted.length) return accepted;
+  const screening = await screenPlannedQueries(judge, { gap, queries: accepted, searched: gap?.searchedQueries || [], signal });
+  for (const duplicate of screening.duplicates) {
+    state.noteDuplicateQuery?.();
+    state.embeddingTraces.push({ purpose: 'query_dedup_decision', gapId, query: duplicate.query, rejectedAt: duplicate.reason, duplicateOf: duplicate.duplicateOf, judge: judge.identityKey });
+  }
+  return applyQueryScreening(accepted, screening);
 }
 
 export function contractRepairTargets(state, gate) {
@@ -320,6 +331,7 @@ export async function resolveRecoveryAction(state, {
   gapId = null,
   rejectedQueries = [],
   search = null,
+  judge = null,
 } = {}) {
   const repair = nextSlotRepairAction(state, { readiness: gate, maxQueries: maxQueriesPerStep });
   let gap = state.getGap(repair?.gapId || gapId || state.focusGap()?.id);
@@ -331,6 +343,7 @@ export async function resolveRecoveryAction(state, {
     gapId: gap.id,
     embedding,
     signal,
+    judge,
   });
   const unread = state.pickPolicyReads?.(2, gap.id) || [];
   if (unread.length) {

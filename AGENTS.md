@@ -157,6 +157,19 @@ npm exec --package=. -- jdr research "Explain the current state of local-first A
 | `--rerank-base-url` | `research.providers.rerank.baseUrl` | 可选 rerank API 地址 |
 | `--rerank-api-key` | `research.providers.rerank.apiKey` | 单次运行密钥；优先使用环境变量 |
 | `--rerank-timeout-ms` | `research.providers.rerank.timeoutMs` | 可选 rerank 请求超时 |
+| `--judge-provider` | `research.providers.judge.provider` | `disabled`（默认）\| `jev`；判断层，不是 rerank provider |
+| `--judge-model` | `research.providers.judge.model` | 默认 `jev-1.13.0` |
+| `--judge-base-url` | `research.providers.judge.baseUrl` | 默认 `https://api.typesafe.ai/v1`（请求 `/systemone`） |
+| `--judge-timeout-ms` | `research.providers.judge.timeoutMs` | 单次 Jev 请求超时（默认 30000） |
+| `--judge-batch-size` | `research.providers.judge.batchSize` | 单次请求最多问题数（默认 40） |
+| `--judge-max-state-chars` | `research.providers.judge.maxStateChars` | 发送的 state 字符上限（默认 160000） |
+| `--judge-allow-local-corpus` | `research.providers.judge.allowLocalCorpus` | 是否允许把 `file://` 本地正文发给 Jev（默认 false） |
+| `--judge-source-assessment` | `research.providers.judge.features.sourceAssessment` | full/extract 来源评估分类先问 Jev（还需 `--source-assessment true`） |
+| `--judge-read-priority` | `research.providers.judge.features.readPriority` | 按 gap 缺失事实为待读候选排序 |
+| `--judge-query-screening` | `research.providers.judge.features.queryScreening` | 筛选 Planner 查询中与已搜查询同意图者并排序 |
+| `--judge-passage-order` | `research.providers.judge.features.passageOrder` | slot support / 主张校验前预排序已选片段（仅 exploratory） |
+| `--max-judge-requests` | `research.budget.maxJudgeRequests` | Jev 请求上限，`0` 不限制 |
+| `--max-judge-tokens` | `research.budget.maxJudgeTokens` | Jev token 上限，`0` 不限制；不计入 LLM/探索用量 |
 | `--read-relevance-enabled` | `research.read.relevance.enabled` | 是否启用共享相关性准入门（默认 true） |
 | `--read-relevance-min-score` | `research.read.relevance.minRerankScore` | 外部 rerank 低相关标记阈值（默认 0.01）；用于排序与诊断，不单独禁止读取 |
 | `--read-body-relevance` | `research.read.relevance.bodyValidation` | 摘要前是否校验正文主体相关性（默认 true） |
@@ -692,6 +705,9 @@ npm run benchmark:strategies -- --run "你的问题" --strategies quick,focused,
 | `JINA_API_KEY` | `research.providers.rerank.apiKey`；单独设置不会启用 Jina |
 | `JDR_RERANK_MODEL` | `research.providers.rerank.model` |
 | `JDR_SEMANTIC_TIMEOUT_MS` | `research.providers.rerank.timeoutMs` |
+| `JDR_JUDGE_PROVIDER` | `research.providers.judge.provider`；只有显式设为 `jev` 且打开至少一个 feature 才会调用 |
+| `TYPESAFE_API_KEY` | `research.providers.judge.apiKey`；单独设置不会启用 Jev，也不写入 executionConfig |
+| `JDR_JUDGE_MODEL` | `research.providers.judge.model` |
 | `JDR_RELEVANCE_ENABLED` | `research.read.relevance.enabled` |
 | `JDR_RELEVANCE_MIN_RERANK_SCORE` | `research.read.relevance.minRerankScore` |
 | `JDR_BODY_RELEVANCE_ENABLED` | `research.read.relevance.bodyValidation` |
@@ -733,6 +749,19 @@ Agent 选型建议：
 探索式读取使用共享相关性闭环：`siteQueryMode` 默认 `confirmed`，Planner 仅可对 required host 或本 run SERP 已观察到的 host 生成 `site:`；preferred host 默认只参与排序加权。生成查询中的 `site:` 仍会在结果返回后按真实 hostname 强制校验；若结果 100% 被 site 过滤，该查询只记入 `exhaustedAngles`，不计入 `searchedQueries`，并由 Planner 的 `site_fallback` 模式重写，不得用规则删掉 `site:` 后重搜。新行为只能来自用户显式搜索配置、搜索提供方原始观测、或结构化 LLM 输出；不得新增规则造词、语言检测、静态引擎路由或内容分类域名表。Planner 查询可带可选 `searchOptions` 并原样透传。`summary` 读取改为一次 `source_assessment`（`readability`/`contentKind`/`publisherType`/`firstParty`/`evidenceTier`）。抓取状态、正文质量、来源评估、证据准入是四个独立字段：`fetchStatus` 只记传输事实，`bodyQuality` 记确定性正文判定，`assessmentStatus`（`ok` | `unavailable` | `skipped`）记评估是否跑通。评估返回无效 JSON 只标 `assessmentStatus=unavailable`，**不得**改写 `fetchStatus`、**不得**删除已抓正文，改由规则层（WAF 壳、二进制、过短、实体不匹配）判定是否可用；只有 LLM 真给出 `readability=unreadable` 才是内容判定，且同样只写 `bodyQuality`。评估不可用时 `criterion:first_party` 降级为硬 host 规则（用户显式 host 与 query 字面 host，不含 planner 的 preferred host）。成功搜索 trace 必须带 `queryOrigin`（`user_query` | `llm_planner`）。离线审计字段为 `queriesMissingProvenance`、`ruleGeneratedQueryCount`、`plannerRejectedQueries`、`plannerRetryCount`、`siteFallbackWithoutPlanner`；新 run 缺失 provenance、规则造词或非 Planner 的 site fallback 均判失败，旧 schema 产物标为 not-applicable。候选按目标 gap 分别保存 rerank 分数和准入决策；未执行 rerank 时分数保持 `null`，以 `rerank_not_evaluated` 准入。外部 rerank 分数是排序与诊断信号，低于阈值标记为 `rerank_below_threshold_soft` 并降低优先级，但不能单独禁止读取；`site:` 约束、实体不匹配与正文主体不相关仍是硬拒绝。混合读取批次只过滤不合格来源，不得连带拒绝同批合格来源。抓取正文仍须命中 ResearchBrief 实体，否则标为 `irrelevant`，不生成 summary/passage/finding、不增加 novelty。引用锚定允许 HTML entity 与 Unicode 标点的等价规范化，但不允许模糊改写；研究判断槽可由多条已锚定事实综合支持，不要求来源逐字写出分析结论。`quality.metrics.relevance` 保存 returned/site-rejected/admitted/rerank-accepted/rerank-rejected/body-irrelevant/read-accepted 漏斗；`quality.metrics.relevance` 另有 `assessmentUnavailable` / `admittedWithoutAssessment`。`quality.metrics.recovery` 保存 invalid/recovery/duplicate/site fallback/blocked gap 统计，以及独立于语义无效步的 `transportFailures` / `transportStreak` / `transportBlockedHosts`。`required_host_missing` 失败带 `hostDiagnostics`，区分 `not_retrieved`（没搜到）、`fetch_blocked`（站点拒绝）与 `body_rejected`（抓到但没通过证据检查）。HTTP endpoint 不返回 token usage 时 `budget.unknown.rerankTokens=true`。
 
 历史 Issue #27 起还写入 `brief.json`：ResearchBrief schema v2 兼容 v1 与原字符串 query；gap schema v4 兼容旧 gap，并增加 `contractSlotId`、`preferredHosts`、`requiredHostMode`。每个 required slot 一对一物化，模糊问题去重与动态 gap 上限不能吞掉契约槽；required slot 也不能借用其他槽的正文。用户结构化输入优先，planner 只能补空；用户显式或 query 字面 slot host 可保持 required，Planner 非字面 host 降为 preferred hint。`budget_exhausted` 只表示真实有限 token/search/read cap 阻止继续，具体原因写入 `quality.stopDetail`；重复查询、plateau 与无新角度不再伪装成预算耗尽。有 explicit slots 时 root gap 只做 roll-up，不重复搜索、不独立阻断 readiness。focused 与 exploratory 共用确定性 readiness primitive，normal required slot 也不能被忽略；plateau 只能让 focused 停止追加 repair 或让 exploratory 换角度，不能越过 readiness failure 或 exploratory token floor。共享读取配置为 `research.read.*`，旧 `research.focused.*` 仍作为兼容 fallback；无效的 `plannerParallelism`、`enableCoding` 已移除。`intel import` / archive 会 round-trip `brief`。
+
+### 可选 Jev 判断层（`research.providers.judge`）
+
+判断层与 rerank 是两条独立通道：rerank 给候选打相关度分，judge 以 TypeSafe Jev（`POST {baseUrl}/systemone`，`noul` / `choice` / `score` 问题）回答结构化判断。默认 `provider=disabled` 且四个 feature 全关，此时不构造 judge、不产生 `calls/judge-*`，行为与产物与未接入前一致。只有 `provider=jev` 且对应 feature 为 true 时才调用：
+
+| feature | 作用点 | Jev 能改变的内容 |
+|---|---|---|
+| `sourceAssessment` | full/extract 的结构化来源评估（需同时开 `research.read.sourceAssessment.enabled`） | 仅 readability/contentKind 等分类；置信不足、降级或结果会声明一手/官方/主流身份时回退原 LLM 评估，Jev 不授予来源资质 |
+| `readPriority` | exploratory 待读候选 | `readPriority` 只作为调度排序键，不改变准入、`actionKey` |
+| `queryScreening` | Planner 查询 | 与该 gap 最近 10 条已搜查询同意图（≥ `duplicateIntent`）者记为 `jev_intent` 丢弃，其余按目标相关排序；不造词、不改写查询 |
+| `passageOrder` | slot support 与主张校验的已选片段 | 只改顺序；实际发生重排时顺序身份进入缓存键 |
+
+硬约束：Jev 输出只影响排序、候选选择顺序和是否回退到 LLM，不能让 readiness gate、`evidence_sufficient`、slot verified、claim supported 从失败变成通过。Jev 用量记入独立 `budget.judge*`，不计入 LLM 用量与探索下限；402/429/5xx/超时为 unavailable，连续 3 次后本 run 挂起 judge 并回到原路径，请求记录走 `calls/judge-N` 并参与恢复。`file://` 本地正文默认不发送。只支持 TypeSafe 方言；测试一律注入假 fetch / 脚本化 fixture，不调用真实 Jev。
 
 ### HTTP 取证客户端
 

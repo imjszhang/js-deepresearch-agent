@@ -164,9 +164,19 @@ export function settingsFromEnv(env = process.env) {
   const cacheDir = readEnv('JDR_CONTENT_CACHE_DIR');
   const maxRepairFailuresPerGap = readEnv('JDR_MAX_REPAIR_FAILURES_PER_GAP');
   const maxConsecutiveInvalidSteps = readEnv('JDR_MAX_CONSECUTIVE_INVALID_STEPS');
+  const judgeProvider = readEnv('JDR_JUDGE_PROVIDER');
+  const typesafeApiKey = readEnv('TYPESAFE_API_KEY');
+  const judgeModel = readEnv('JDR_JUDGE_MODEL');
   if (rerankProvider || jinaApiKey || rerankModel || rerankBaseUrl || semanticTimeout
-    || embeddingProvider || embeddingModel || embeddingBaseUrl || embeddingApiKey) {
+    || embeddingProvider || embeddingModel || embeddingBaseUrl || embeddingApiKey
+    || judgeProvider || typesafeApiKey || judgeModel) {
     research.providers = {
+      // A key alone never enables the judge; JDR_JUDGE_PROVIDER and a feature switch must be explicit.
+      ...(judgeProvider || typesafeApiKey || judgeModel ? { judge: {
+        ...(judgeProvider ? { provider: judgeProvider } : {}),
+        ...(typesafeApiKey ? { apiKey: typesafeApiKey } : {}),
+        ...(judgeModel ? { model: judgeModel } : {}),
+      } } : {}),
       ...(rerankProvider || jinaApiKey || rerankModel || rerankBaseUrl || semanticTimeout ? { rerank: {
         ...(rerankProvider ? { provider: rerankProvider } : {}),
         ...(jinaApiKey ? { apiKey: jinaApiKey } : {}),

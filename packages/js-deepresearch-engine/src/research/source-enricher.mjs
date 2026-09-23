@@ -9,6 +9,7 @@ import {
   assessSourceBody,
   assessmentBlocksSuccessfulBody,
 } from './source-assessment.mjs';
+import { judgeSourceAssessment } from './judge-source-assessment.mjs';
 
 function relatedLinksFromFetch(fetched, settings) {
   const selection = focusedSourceSelection(settings);
@@ -56,6 +57,7 @@ function assessmentFields(outcome, fetched = {}) {
     assessmentReason: status === ASSESSMENT_STATUS.unavailable
       ? (outcome.assessment?.reason || 'assessment_unavailable')
       : null,
+    ...(outcome.judgeTrace ? { assessmentJudge: outcome.judgeTrace } : {}),
   };
 }
 
@@ -119,6 +121,7 @@ async function enrichOneSource(source, {
   transportMemory,
   fetchImpl,
   headlessFetch,
+  judge,
 }) {
   const url = String(source.url || '').trim();
   if (!url) {
@@ -324,7 +327,19 @@ async function enrichOneSource(source, {
 
   const extraAssessment = async () => {
     if (!assessmentEnabled) return SKIPPED_ASSESSMENT;
-    return maybeAssessSource(source, assessmentFetched, {
+    const judged = await judgeSourceAssessment(judge, {
+      signal,
+      url: String(fetched.finalUrl || url),
+      title: source.title || fetched.title || '',
+      content: analysisContent,
+      question,
+      query,
+      entities: [...new Set([...(entities || []), ...(entityAliases || [])])],
+      preferredHosts: relevanceGap?.preferredHosts || [],
+      observedHosts: observedHosts || [],
+    });
+    if (judged?.outcome) return { ...judged.outcome, judgeTrace: judged.trace };
+    const outcome = await maybeAssessSource(source, assessmentFetched, {
       llm,
       signal,
       query,
@@ -334,6 +349,7 @@ async function enrichOneSource(source, {
       relevanceGap,
       observedHosts,
     });
+    return judged?.trace ? { ...outcome, judgeTrace: judged.trace } : outcome;
   };
 
   if (fetchMode === 'full') {
@@ -414,6 +430,7 @@ export async function enrichFindingSources(finding, options = {}) {
     transportMemory,
     fetchImpl,
     headlessFetch,
+    judge,
     seenUrls = new Set(),
     enrichedCount = { value: 0 },
   } = options;
@@ -479,6 +496,7 @@ export async function enrichFindingSources(finding, options = {}) {
           transportMemory,
           fetchImpl,
           headlessFetch,
+          judge,
         });
         enrichedByUrl.set(source.url, enriched);
         if (enriched.fetchStatus === 'ok') {

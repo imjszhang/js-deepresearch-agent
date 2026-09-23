@@ -5,6 +5,9 @@ import { addTrace, plannerContext, recordPlannerMetrics } from './exploratory-pl
 import { isExecutionInterruption } from '../../search/search-health.mjs';
 import { buildClaimGraph, deliverableBinding } from '../claim-graph.mjs';
 import { validateResearchClaims, applyValidatedBindings } from '../claim-validation.mjs';
+import { actionKey } from '../adaptive/action-scheduler.mjs';
+import { judgeReadPriorities } from '../judge-read-priority.mjs';
+import { applyQueryScreening, screenPlannedQueries } from '../judge-query-screening.mjs';
 
 function stateCounts(state) {
   return { candidates: state.candidates.size, versions: state.evidenceStore.versions.size,
@@ -21,7 +24,7 @@ function dependencies(state, gapId) {
 }
 
 export async function runActionExploration({ state, loopLocal, query, llm, search, signal, emit, budget, queryMemory,
-  trace, readPolicy, exploratory, recorder, performSearch, performRead, refreshState, checkpointState, continueExplore = false }) {
+  trace, readPolicy, exploratory, recorder, performSearch, performRead, refreshState, checkpointState, continueExplore = false, judge = null }) {
   const scheduler = state.scheduler;
   if (continueExplore) scheduler.continueSegment();
   scheduler.recover();
@@ -44,7 +47,23 @@ export async function runActionExploration({ state, loopLocal, query, llm, searc
   let noChangeCycles = scheduler.noChangeCycles || 0;
   let cycleStart = scheduler.cycleStart || semanticProgress(state);
   const planningTurns = scheduler.planningTurns;
-  function seedLocal() {
+  const readPriorityCache = new Map();
+  async function readSpecs(gap, base) {
+    const specs = state.pickPolicyReads(3, gap.id)
+      .map((candidate) => ({ candidate, spec: { ...base, type: 'read_candidate', inputRefs: { sourceIds: [candidate.id || candidate.url] } } }))
+      .filter((item) => !scheduler.actions.has(actionKey(item.spec)));
+    if (!judge?.enabled?.('readPriority') || !specs.length) return specs.map((item) => item.spec);
+    const { priorities, trace: judged } = await judgeReadPriorities(judge, { gap, candidates: specs.map((item) => item.candidate), cache: readPriorityCache, signal });
+    if (judged.requests || judged.degraded) {
+      addTrace(trace, state, 'judge_read_priority', { targetGapIds: [gap.id], judge: judge.identityKey, candidates: specs.length,
+        scored: priorities.size, requests: judged.requests, degraded: judged.degraded, errorCodes: judged.errorCodes, skippedLocal: judged.skippedLocal }, budget);
+    }
+    return specs.map(({ candidate, spec }) => {
+      const priority = priorities.get(candidate.id || candidate.url);
+      return priority === undefined ? spec : { ...spec, readPriority: priority };
+    });
+  }
+  async function seedLocal() {
     state.evidenceStore.captureFindings(state.findings);
     const tasks = state.gaps.filter((gap) => !gap.rollup);
     for (const gap of tasks) {
@@ -62,19 +81,17 @@ export async function runActionExploration({ state, loopLocal, query, llm, searc
       const unseen = selectSlotPassages(gap, state.findings, { query, brief: state.brief, profile: state.profile,
         evidenceStore: state.evidenceStore, inspectUnseen: true, topK: 5 });
       if (unseen.length) scheduler.enqueue({ ...base, type: gap.status === 'verified' ? 'check_conflict' : 'inspect_document', inputRefs: { passageIds: unseen.map((passage) => passage.id) } });
-      for (const candidate of state.pickPolicyReads(3, gap.id)) {
-        scheduler.enqueue({ ...base, type: 'read_candidate', inputRefs: { sourceIds: [candidate.id || candidate.url] } });
-      }
+      for (const spec of await readSpecs(gap, base)) scheduler.enqueue(spec);
     }
   }
 
   while (!scheduler.terminal) {
     if (signal?.aborted) { stop('user_cancelled', null); signal.throwIfAborted(); }
-    seedLocal();
+    await seedLocal();
     const graph = buildClaimGraph({ gaps: state.gaps, passages: [...state.evidenceStore.passages.values()] });
     if (graph.records.length) {
       const validation = await validateResearchClaims({ graph, store: state.evidenceStore, gaps: state.gaps, query,
-        llm, signal, recorder, budget, researchPhase: 'exploratory', constraints: state.brief.constraints || [], cache: state.claimValidationCache });
+        llm, signal, recorder, budget, researchPhase: 'exploratory', constraints: state.brief.constraints || [], cache: state.claimValidationCache, judge });
       applyValidatedBindings(state.gaps, validation.graph);
       state.claimValidationCache = validation.cache;
       state.validatedClaimIds = [...new Set(graph.bindings.filter(deliverableBinding).map(b => b.claimId))].sort();
@@ -117,8 +134,19 @@ export async function runActionExploration({ state, loopLocal, query, llm, searc
       }
       state.actionCosts.record('reflect', (budget?.usage.llmTokens || 0) - before);
       recordPlannerMetrics(state, plan, { gapId: gap.id });
+      let plannedQueries = plan.planned || [];
+      if (judge?.enabled?.('queryScreening') && plannedQueries.length) {
+        const screening = await screenPlannedQueries(judge, { gap, queries: plannedQueries.map((item) => item.query), searched: gap.searchedQueries || [], signal });
+        plannedQueries = applyQueryScreening(plannedQueries, screening, (item) => item.query);
+        for (const duplicate of screening.duplicates) {
+          state.noteDuplicateQuery?.();
+          state.embeddingTraces?.push({ purpose: 'query_dedup_decision', gapId: gap.id, query: duplicate.query, rejectedAt: duplicate.reason, duplicateOf: duplicate.duplicateOf, judge: judge.identityKey });
+        }
+        addTrace(trace, state, 'judge_query_screening', { targetGapIds: [gap.id], ...screening.trace,
+          excluded: screening.duplicates, order: plannedQueries.map((item) => item.query) }, budget);
+      }
       let enqueued = 0;
-      for (const planned of plan.planned || []) {
+      for (const planned of plannedQueries) {
         const accepted = validatePlannedQuery(planned.query, { gap, entities: state.brief.entities || [],
           siteQueryMode: readPolicy.relevance.siteQueryMode, evidenceScope: state.evidenceScope,
           observedHosts: [...state.observedHosts], softScope: true });
@@ -163,7 +191,7 @@ export async function runActionExploration({ state, loopLocal, query, llm, searc
       } else {
         const support = await judgeOpenSlotSupport({ llm, signal, query, gaps: [gap], findings: state.findings,
           brief: state.brief, profile: state.profile, evidenceStore: state.evidenceStore, inspectUnseen: true,
-          onlyGapIds: [gapId], cache: state.slotSupportCache });
+          onlyGapIds: [gapId], cache: state.slotSupportCache, judge });
         applySlotSupportJudgments(state.gaps, support.judgments); state.syncGapCoverage();
         outcome = { execution: support.unknown ? 'failed' : 'succeeded', inspected: support.selections.length,
           newSupport: support.judgments.filter((item) => item.verdict === 'supported').length, retryable: false,

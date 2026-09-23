@@ -5,6 +5,7 @@ import { loadNamedCheckpoint } from './run-recorder.mjs';
 import { selectClaimReviewContext } from './claim-review-context.mjs';
 import { validateClaimGraph, propagateClaimVerdicts } from './claim-graph.mjs';
 import { VALIDATION_PROTOCOL_VERSION } from './claim-candidates.mjs';
+import { applyPassageOrder, judgePassageOrder } from './judge-passage-order.mjs';
 
 export const CLAIM_REVIEW_VERSION = VALIDATION_PROTOCOL_VERSION;
 const fingerprint = value => crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -28,11 +29,15 @@ export function acceptsClaimValidation(value, claims) {
 }
 
 export async function validateResearchClaims({ graph, store, gaps, query, llm, signal, recorder = null, budget = null,
-  embedding = null, constraints = [], researchPhase = null, cache: suppliedCache = null, validationProtocolVersion = VALIDATION_PROTOCOL_VERSION }) {
+  embedding = null, constraints = [], researchPhase = null, cache: suppliedCache = null, validationProtocolVersion = VALIDATION_PROTOCOL_VERSION, judge = null }) {
   validateClaimGraph(graph, store);
   const saved = !suppliedCache && recorder?.sessionDir ? loadNamedCheckpoint(recorder.sessionDir, 'claim-validation-cache') : null;
   const cache = suppliedCache || (saved?.state.validationProtocolVersion === validationProtocolVersion && saved.state.structuredResponseVersion === STRUCTURED_RESPONSE_VERSION ? saved.state.cache : {}) || {};
   const reviewContext = await selectClaimReviewContext({ graph, store, gaps, query, embedding, signal });
+  const { orders } = await judgePassageOrder(judge, { signal, groups: graph.records.filter(record => (reviewContext.get(record.claimId) || []).length > 1)
+    .map(record => ({ key: record.claimId, focus: record.proposition,
+      passages: reviewContext.get(record.claimId).map(passage => ({ ...passage, url: store.versions.get(passage.documentVersionId)?.url })) })) });
+  for (const [claimId, order] of orders) reviewContext.set(claimId, applyPassageOrder(reviewContext.get(claimId), order));
   const keys = new Map(), pending = [];
   for (const record of graph.records) {
     const key = fingerprint({ validationProtocolVersion, structuredResponseVersion: STRUCTURED_RESPONSE_VERSION, query, claim: { kind: record.kind, proposition: record.proposition,
@@ -40,7 +45,8 @@ export async function validateResearchClaims({ graph, store, gaps, query, llm, s
       supportRefs: record.supportRefs, counterRefs: record.counterRefs, premiseClaimIds: record.premiseClaimIds },
       constraints, tasks: graph.bindings.filter(b => b.claimId === record.claimId).map(b => ({ taskId: b.taskId,
         question: gaps.find(g => g.id === b.taskId)?.question, constraints: gaps.find(g => g.id === b.taskId)?.constraintIds })),
-      comparisons: (reviewContext.get(record.claimId) || []).map(p => [p.id, p.documentVersionId, fingerprint(p.text)]) });
+      comparisons: (reviewContext.get(record.claimId) || []).map(p => [p.id, p.documentVersionId, fingerprint(p.text)]),
+      ...(orders.has(record.claimId) ? { comparisonOrder: judge.identityKey } : {}) });
     keys.set(record.claimId, key);
     if (cache[key]) {
       Object.assign(record, { evaluation: globalThis.structuredClone(cache[key].evaluation), counterRefs: globalThis.structuredClone(cache[key].counterRefs), validationIdentity: key });

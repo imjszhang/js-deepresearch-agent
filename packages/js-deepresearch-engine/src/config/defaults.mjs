@@ -66,6 +66,8 @@ export const defaultSettings = Object.freeze({
       maxSourceReads: 16,
       maxRerankRequests: 0,
       maxRerankTokens: 0,
+      maxJudgeRequests: 0,
+      maxJudgeTokens: 0,
       maxEstimatedCost: 0,
       reserveReportTokens: 0,
     },
@@ -85,6 +87,28 @@ export const defaultSettings = Object.freeze({
         apiKey: '',
         batchSize: 100,
         timeoutMs: 30000,
+      },
+      judge: {
+        provider: 'disabled',
+        model: 'jev-1.13.0',
+        baseUrl: 'https://api.typesafe.ai/v1',
+        apiKey: '',
+        timeoutMs: 30000,
+        batchSize: 40,
+        maxStateChars: 160000,
+        allowLocalCorpus: false,
+        features: {
+          sourceAssessment: false,
+          readPriority: false,
+          queryScreening: false,
+          passageOrder: false,
+        },
+        thresholds: {
+          assessmentConfidence: 0.8,
+          unreadable: 0.9,
+          firstParty: 0.8,
+          duplicateIntent: 0.9,
+        },
       },
     },
     read: {
@@ -272,6 +296,18 @@ export function mergeSettings(overrides = {}) {
         rerank: {
           ...defaultSettings.research.providers.rerank,
           ...(researchOverrides.providers?.rerank || {}),
+        },
+        judge: {
+          ...defaultSettings.research.providers.judge,
+          ...(researchOverrides.providers?.judge || {}),
+          features: {
+            ...defaultSettings.research.providers.judge.features,
+            ...(researchOverrides.providers?.judge?.features || {}),
+          },
+          thresholds: {
+            ...defaultSettings.research.providers.judge.thresholds,
+            ...(researchOverrides.providers?.judge?.thresholds || {}),
+          },
         },
       },
       read: {
