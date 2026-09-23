@@ -83,3 +83,19 @@ test('read priority is attached to queued reads without changing which candidate
   assert.equal(on.trace.filter((entry) => entry.action === 'judge_read_priority').length, 1);
   assert.equal(on.quality.readiness.pass, off.quality.readiness.pass);
 });
+
+test('query screening keeps planner text and provenance while ordering queued searches', async () => {
+  const judge = scriptedJudge({ queryScreening: true }, (id, state) => (id.endsWith('_target') ? (state.queries[Number(id.slice(1, id.indexOf('_')))].ref === 'q0' ? 0.1 : 0.9) : 0));
+  const on = await new ResearchRunner().run({ query: '调研 Atlas 这个产品', settings: withJudge(judge.config), search: searchWith(results), llm: canonicalLlm() });
+  const screenings = on.trace.filter((entry) => entry.action === 'judge_query_screening');
+  const searches = on.trace.filter((entry) => entry.action === 'search' && entry.queryOrigin === 'llm_planner');
+  const plannerTexts = judge.calls[0].state.queries.map((item) => item.text);
+  assert.equal(screenings.length, 1);
+  assert.deepEqual(screenings[0].order, [plannerTexts[1], plannerTexts[0]]);
+  assert.equal(searches[0].query, plannerTexts[1]);
+  assert.ok(searches.every((entry) => plannerTexts.includes(entry.query)));
+  const off = await new ResearchRunner().run({ query: '调研 Atlas 这个产品', settings: baseSettings, search: searchWith(results), llm: canonicalLlm() });
+  const offSearches = off.trace.filter((entry) => entry.action === 'search' && entry.queryOrigin === 'llm_planner');
+  assert.equal(offSearches[0].query, plannerTexts[0]);
+  assert.equal(on.quality.readiness.pass, off.quality.readiness.pass);
+});

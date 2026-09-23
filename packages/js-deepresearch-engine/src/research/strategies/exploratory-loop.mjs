@@ -489,6 +489,7 @@ export async function runExploratoryLoop(context) {
           gapId: gap.id,
           embedding,
           signal,
+          judge: researchProviders?.judge || null,
         });
         if (!searchQueries.length) invalid = 'duplicate_query';
       }
@@ -533,6 +534,7 @@ export async function runExploratoryLoop(context) {
             gapId: recoveryGapId,
             rejectedQueries: [{ query: action?.query || '', reason: invalid }],
             search,
+            judge: researchProviders?.judge || null,
           })
           : null;
         state.actionCosts.record('reflect', (budget?.usage?.llmTokens || 0) - tokensBefore);

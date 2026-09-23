@@ -7,6 +7,7 @@ import { buildClaimGraph, deliverableBinding } from '../claim-graph.mjs';
 import { validateResearchClaims, applyValidatedBindings } from '../claim-validation.mjs';
 import { actionKey } from '../adaptive/action-scheduler.mjs';
 import { judgeReadPriorities } from '../judge-read-priority.mjs';
+import { applyQueryScreening, screenPlannedQueries } from '../judge-query-screening.mjs';
 
 function stateCounts(state) {
   return { candidates: state.candidates.size, versions: state.evidenceStore.versions.size,
@@ -133,8 +134,19 @@ export async function runActionExploration({ state, loopLocal, query, llm, searc
       }
       state.actionCosts.record('reflect', (budget?.usage.llmTokens || 0) - before);
       recordPlannerMetrics(state, plan, { gapId: gap.id });
+      let plannedQueries = plan.planned || [];
+      if (judge?.enabled?.('queryScreening') && plannedQueries.length) {
+        const screening = await screenPlannedQueries(judge, { gap, queries: plannedQueries.map((item) => item.query), searched: gap.searchedQueries || [], signal });
+        plannedQueries = applyQueryScreening(plannedQueries, screening, (item) => item.query);
+        for (const duplicate of screening.duplicates) {
+          state.noteDuplicateQuery?.();
+          state.embeddingTraces?.push({ purpose: 'query_dedup_decision', gapId: gap.id, query: duplicate.query, rejectedAt: duplicate.reason, duplicateOf: duplicate.duplicateOf, judge: judge.identityKey });
+        }
+        addTrace(trace, state, 'judge_query_screening', { targetGapIds: [gap.id], ...screening.trace,
+          excluded: screening.duplicates, order: plannedQueries.map((item) => item.query) }, budget);
+      }
       let enqueued = 0;
-      for (const planned of plan.planned || []) {
+      for (const planned of plannedQueries) {
         const accepted = validatePlannedQuery(planned.query, { gap, entities: state.brief.entities || [],
           siteQueryMode: readPolicy.relevance.siteQueryMode, evidenceScope: state.evidenceScope,
           observedHosts: [...state.observedHosts], softScope: true });
