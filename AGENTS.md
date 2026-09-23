@@ -146,7 +146,8 @@ npm exec --package=. -- jdr research "Explain the current state of local-first A
 | `--questions` | `research.questionsPerIteration` | 每轮生成问题数 |
 | `--concurrency` | `research.concurrency` | 并发搜索数 |
 | `--work-dir` | `research.workDir` | 产物根目录（相对 cwd 或绝对路径） |
-| `--focused-fetch-mode` | `research.focused.fetchMode` | `summary`（默认）\| `disabled` \| `full`；抓取 URL 正文或 LLM 摘要 |
+| `--focused-fetch-mode` | `research.focused.fetchMode` + `research.read.fetchMode` | `summary`（默认）\| `disabled` \| `full` \| `extract`；抓取 URL 正文或 LLM 摘要。同时写共享读取键，否则会被已保存的 `research.read.fetchMode` 覆盖 |
+| `--read-fetch-mode` | `research.read.fetchMode` | 共享读取方式（focused / exploratory 实际读取的键）；与 `--focused-fetch-mode` 同时给出时以本项为准 |
 | `--focused-fetch-backend` | `research.focused.fetchBackend` | `auto`（默认）\| `http` \| `js-eyes`；知乎来源优先走 js-eyes 浏览器读取 |
 | `--focused-max-urls` | `research.focused.maxUrlsTotal` | 单次调研最多 enrich 的 URL 数 |
 | `--focused-enable-filter` | `research.focused.enableRelevanceFilter` | 是否启用 LLM 来源相关性过滤 |
@@ -747,7 +748,7 @@ Agent 选型建议：
 
 | 配置键 / Flag | 默认 | 说明 |
 |---|---|---|
-| `research.focused.fetchMode` / `--focused-fetch-mode` | `summary` | `disabled` 仅 snippet；`full` 抓取正文 |
+| `research.read.fetchMode` / `--focused-fetch-mode` / `--read-fetch-mode` | `summary` | `disabled` 仅 snippet；`full` 抓取正文。旧键 `research.focused.fetchMode` 只在共享键缺失时生效，而默认设置和已保存设置总带共享键，所以 CLI 与 Web UI 会同时写两者 |
 | `research.focused.fetchBackend` / `--focused-fetch-backend` | `auto` | `js-eyes` 强制浏览器读取；`http` 仅 HTTP fetch |
 | `research.focused.maxUrlsTotal` / `--focused-max-urls` | `12` | 全局 enrich URL 上限 |
 | `research.focused.enableRelevanceFilter` / `--focused-enable-filter` | `false` | LLM 相关性过滤 |

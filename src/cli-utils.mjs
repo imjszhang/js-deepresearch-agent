@@ -178,6 +178,7 @@ export function applyResearchFlags(settings, flags) {
     'search-language': 'search.language',
     'search-engines': 'search.options.engines',
     'search-categories': 'search.options.categories',
+    'read-fetch-mode': 'research.read.fetchMode',
     'source-assessment': 'research.read.sourceAssessment.enabled',
     'read-source-assessment': 'research.read.sourceAssessment.enabled',
     'read-backends': 'research.read.backends',
@@ -224,6 +225,11 @@ export function applyResearchFlags(settings, flags) {
     if (flags[flag] !== undefined) {
       setDeepValue(settings, key, flags[flag]);
     }
+  }
+  // The shared read key always carries a persisted default and overrides the legacy focused key.
+  const legacyFetchMode = flags['focused-fetch-mode'] ?? flags['source-fetch-mode'];
+  if (legacyFetchMode !== undefined && flags['read-fetch-mode'] === undefined) {
+    setDeepValue(settings, 'research.read.fetchMode', legacyFetchMode);
   }
   if (flags['http-host-headers'] !== undefined) {
     const hostHeaders = settings.http?.hostHeaders;
