@@ -108,8 +108,9 @@ export class ResearchRunner {
       fetch: proxiedFetch,
       recorder,
       onEvent: (event) => {
-        const action = event.operation === 'embed' ? 'embed' : 'rerank';
+        const action = ['embed', 'judge'].includes(event.operation) ? event.operation : 'rerank';
         trace.push({ step: trace.length + 1, action, reasonCode: `${event.operation}_${event.status}`, ...event, createdAt: new Date().toISOString() });
+        if (event.operation === 'judge') { emit({ stage: `judge_${event.status}`, ...event }); return; }
         const stage = event.operation === 'embed'
           ? (event.status === 'started' ? 'embed_started' : (event.status === 'degraded' ? 'embed_degraded' : 'embed_completed'))
           : (event.status === 'started' ? 'rerank_started' : (event.status === 'degraded' ? 'rerank_degraded' : 'rerank_completed'));
@@ -612,7 +613,7 @@ export class ResearchRunner {
       fetch: proxiedFetch,
       recorder,
       onEvent: (event) => {
-        const action = event.operation === 'embed' ? 'embed' : 'rerank';
+        const action = ['embed', 'judge'].includes(event.operation) ? event.operation : 'rerank';
         trace.push({
           step: trace.length + 1,
           action,

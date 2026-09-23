@@ -43,6 +43,11 @@ export class BudgetManager {
       candidateEvaluationTokens: limit(budget.maxCandidateEvaluationTokens),
       postReportEvaluationTokens: limit(budget.maxPostReportEvaluationTokens),
     };
+    // Judge counters stay out of the ledger until configured or used, so runs
+    // without a judge keep their previous budget artifacts.
+    if (limit(budget.maxJudgeRequests)) this.limits.judgeRequests = limit(budget.maxJudgeRequests);
+    if (limit(budget.maxJudgeTokens)) this.limits.judgeTokens = limit(budget.maxJudgeTokens);
+    this.settledJudgeCallIds = new Set();
     this.maxReportOutputTokens = limit(report.maxOutputTokens);
     this.reserveReportTokens = 0;
     this.estimatedReportPromptTokens = 0;
@@ -238,6 +243,30 @@ export class BudgetManager {
     }
   }
 
+  canUseJudge() {
+    const tokenCap = this.limits.judgeTokens || 0;
+    return this.canClaim('judgeRequests') && (tokenCap === 0 || (this.usage.judgeTokens || 0) < tokenCap);
+  }
+
+  /** Judge usage never enters the LLM ledger, so it cannot count toward the exploration floor. */
+  recordJudgeUsage(usage, { callId = null } = {}) {
+    if (callId && this.settledJudgeCallIds.has(callId)) return false;
+    if (callId) this.settledJudgeCallIds.add(callId);
+    const tokens = Number(usage?.tokens);
+    if (usage?.known === true && Number.isFinite(tokens) && tokens >= 0) {
+      this.usage.judgeTokens = (this.usage.judgeTokens || 0) + tokens;
+    } else {
+      this.unknown.judgeTokens = true;
+    }
+    this.onChange?.();
+    return true;
+  }
+
+  markJudgeUsageUnknown() {
+    this.unknown.judgeTokens = true;
+    this.onChange?.();
+  }
+
   canClaim(kind, amount = 1, options = {}) {
     if (kind === 'llmTokens') {
       if (this.limits.totalLlmTokens > 0 && (this.usage.llmTokens || 0) + this.reservedTokens() + amount > this.limits.totalLlmTokens) {
@@ -299,6 +328,7 @@ export class BudgetManager {
       ...this.snapshot(),
       defaultLlmMaxTokens: this.defaultLlmMaxTokens,
       exhaustedKinds: [...this.exhaustedKinds],
+      ...(this.settledJudgeCallIds.size ? { settledJudgeCallIds: [...this.settledJudgeCallIds] } : {}),
     };
   }
 
@@ -307,6 +337,7 @@ export class BudgetManager {
     this.legacyUsageUnknown = Boolean(checkpoint.legacyUsageUnknown);
     this.reservations = new Map((checkpoint.reservations || []).map((entry) => [entry.attemptId, entry]));
     this.settledAttemptIds = new Set(checkpoint.settledAttemptIds || []);
+    this.settledJudgeCallIds = new Set(checkpoint.settledJudgeCallIds || []);
     if (checkpoint.limits) this.limits = { ...this.limits, ...checkpoint.limits };
     if (checkpoint.usage) this.usage = { ...this.usage, ...checkpoint.usage };
     if (checkpoint.unknown) this.unknown = { ...this.unknown, ...checkpoint.unknown };

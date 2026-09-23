@@ -96,6 +96,7 @@ export class SettingsStore {
           ...envProviders,
           embedding: { ...(storedProviders.embedding || {}), ...(envProviders.embedding || {}) },
           rerank: { ...(storedProviders.rerank || {}), ...(envProviders.rerank || {}) },
+          judge: { ...(storedProviders.judge || {}), ...(envProviders.judge || {}) },
         },
       },
     };
