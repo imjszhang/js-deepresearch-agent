@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { mergeSettings, resolveReadSettings } from 'js-deepresearch-engine';
 import {
   applyResearchFlags,
   formatHistory,
@@ -80,6 +81,33 @@ describe('CLI utilities', () => {
     assert.equal(settings.research.focused.maxUrlsTotal, 12);
     assert.equal(settings.research.focused.enableRelevanceFilter, true);
     assert.equal(settings.research.focused.maxSourcesForReport, 20);
+  });
+
+  it('applies the focused fetch mode flag to the shared read settings', () => {
+    for (const strategy of ['focused', 'exploratory']) {
+      const persisted = mergeSettings({ research: { strategy } });
+      assert.equal(persisted.research.read.fetchMode, 'summary');
+      const settings = applyResearchFlags(persisted, { 'focused-fetch-mode': 'full' });
+      assert.equal(settings.research.focused.fetchMode, 'full');
+      assert.equal(settings.research.read.fetchMode, 'full');
+      assert.equal(resolveReadSettings(mergeSettings(settings), { strategy }).fetchMode, 'full');
+    }
+    const alias = applyResearchFlags(mergeSettings({}), { 'source-fetch-mode': 'disabled' });
+    assert.equal(resolveReadSettings(mergeSettings(alias)).fetchMode, 'disabled');
+  });
+
+  it('lets the explicit read fetch mode flag win over the focused alias', () => {
+    const settings = applyResearchFlags(mergeSettings({}), {
+      'focused-fetch-mode': 'full',
+      'read-fetch-mode': 'extract',
+    });
+    assert.equal(settings.research.focused.fetchMode, 'full');
+    assert.equal(resolveReadSettings(mergeSettings(settings), { strategy: 'exploratory' }).fetchMode, 'extract');
+  });
+
+  it('leaves persisted read fetch mode untouched without a fetch mode flag', () => {
+    const settings = applyResearchFlags(mergeSettings({ research: { read: { fetchMode: 'extract' } } }), {});
+    assert.equal(settings.research.read.fetchMode, 'extract');
   });
 
   it('maps focused fetch backend flag into research settings', () => {

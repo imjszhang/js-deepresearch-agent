@@ -227,6 +227,10 @@ function collectSettings() {
           },
         } : {}),
       },
+      read: {
+        ...(loadedSettings?.research?.read || {}),
+        ...(strategy === 'focused' ? { fetchMode: value('#focusedFetchMode') || 'summary' } : {}),
+      },
       exploratory: {
         ...(loadedSettings?.research?.exploratory || {}),
         ...(strategy === 'exploratory' ? {

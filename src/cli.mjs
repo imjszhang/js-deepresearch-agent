@@ -476,7 +476,7 @@ Commands:
     Optional source assessment extra call in full/extract: --source-assessment true
     Optional judge (default disabled; key from TYPESAFE_API_KEY): --judge-provider disabled|jev --judge-model jev-1.13.0 --judge-timeout-ms 30000 --judge-batch-size 40 --judge-max-state-chars 160000 --max-judge-requests 0 --max-judge-tokens 0
       Judge features (ordering / fallback only): --judge-source-assessment true --judge-read-priority true --judge-query-screening true --judge-passage-order true --judge-allow-local-corpus false
-    Focused: --focused-fetch-mode summary|disabled|full|extract --focused-fetch-backend auto|http|js-eyes --focused-max-urls 12 --focused-cluster-results true|false --focused-max-per-hostname 2
+    Focused: --focused-fetch-mode summary|disabled|full|extract (also sets --read-fetch-mode unless given) --focused-fetch-backend auto|http|js-eyes --focused-max-urls 12 --focused-cluster-results true|false --focused-max-per-hostname 2
     Evidence HTTP: --http2 true|false --http-cookie-retry true|false --http-max-response-bytes 10485760 --http-allowed-content-types text/html,application/pdf --http-host-headers '{"example.com":{"Referer":"https://search.example/"}}'
       Host header overrides are exact-host (or *.example.com) browser-header tuning only; Cookie/Authorization/framing headers are rejected.
     Exploratory: --exploratory-max-steps 0 --exploratory-max-reads-per-step 4 --exploratory-min-llm-tokens 600000 --exploratory-max-llm-tokens 1000000 --exploratory-max-search-requests 0 --exploratory-max-source-reads 0 --max-repair-failures-per-gap 3 --max-consecutive-invalid-steps 6
