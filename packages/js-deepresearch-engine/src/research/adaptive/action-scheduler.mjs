@@ -42,6 +42,7 @@ export class ActionScheduler {
     candidates.sort((a, b) => Number(b.required) - Number(a.required)
       || (this.taskTurns.get(a.targetTaskIds[0]) || 0) - (this.taskTurns.get(b.targetTaskIds[0]) || 0)
       || localRank[a.type] - localRank[b.type]
+      || (b.readPriority ?? -1) - (a.readPriority ?? -1)
       || Number(a.relevance === 'uncertain') - Number(b.relevance === 'uncertain')
       || a.queuedAtRound - b.queuedAtRound);
     return candidates[0] || null;

@@ -284,7 +284,7 @@ export async function runExploratoryLoop(context) {
 
   try {
     if (state.scheduler && !skipRestoredStop) await runActionExploration({ state, loopLocal, query, llm, search, signal, emit, budget, queryMemory, recorder,
-      trace, readPolicy, exploratory, performSearch, performRead, refreshState, checkpointState, continueExplore });
+      trace, readPolicy, exploratory, performSearch, performRead, refreshState, checkpointState, continueExplore, judge: researchProviders?.judge || null });
     while (!state.scheduler && !skipRestoredStop && (!hasStepCap(state.maxSteps) || state.step < state.maxSteps)) {
       abort(signal);
       const gate = refreshState();
