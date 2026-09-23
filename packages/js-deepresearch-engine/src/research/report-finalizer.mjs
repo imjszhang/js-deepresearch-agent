@@ -47,12 +47,13 @@ export async function finalizePreparedReport({
   trace,
   embeddingStats = null,
   embedding = null,
+  judge = null,
 }) {
     if (resolvedBrief?.executionVersion === 2 && strategy !== 'quick') return finalizeCanonicalReport({
       llm, signal, emit, recorder, budget, settings, strategy, query, resolvedBrief, findings, gaps, passageArtifacts,
       reportSettings, evidenceOptions, exploratoryLoop, focusedControl, preReport, readiness, stopReason, stopDetail,
       controlProfile, contractUnavailable, focusedFailures, limitationBase, reportContract, reportPlan, openJudgment,
-      incompleteContract, reportLimitations, canonical, budgetBeforeReport, trace, embeddingStats, embedding,
+      incompleteContract, reportLimitations, canonical, budgetBeforeReport, trace, embeddingStats, embedding, judge,
     });
     canonical ||= buildResearchLimitations(limitationBase);
     budgetBeforeReport ||= budget.snapshot();

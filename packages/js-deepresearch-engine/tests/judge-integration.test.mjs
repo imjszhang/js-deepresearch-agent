@@ -99,3 +99,32 @@ test('query screening keeps planner text and provenance while ordering queued se
   assert.equal(offSearches[0].query, plannerTexts[0]);
   assert.equal(on.quality.readiness.pass, off.quality.readiness.pass);
 });
+
+test('a judge that is always unavailable leaves every feature on the original path', async () => {
+  const { JudgeProviderError } = await import('../src/index.mjs');
+  let attempts = 0;
+  const unavailable = { provider: 'jev', dialect: 'typesafe', model: 'jev-1.13.0',
+    features: { sourceAssessment: true, readPriority: true, queryScreening: true, passageOrder: true },
+    async judge() { attempts += 1; throw new JudgeProviderError('unavailable', 'JUDGE_SERVER_ERROR', { status: 503, provider: 'jev' }); } };
+  const off = await new ResearchRunner().run({ query: '调研 Atlas 这个产品', settings: baseSettings, search: searchWith(results), llm: canonicalLlm() });
+  const degraded = await new ResearchRunner().run({ query: '调研 Atlas 这个产品', settings: withJudge(unavailable), search: searchWith(results), llm: canonicalLlm() });
+  assert.ok(attempts > 0 && attempts <= 3);
+  assert.equal(degraded.report, off.report);
+  assert.deepEqual(degraded.reportPlan.bindings, off.reportPlan.bindings);
+  assert.equal(degraded.quality.gate, off.quality.gate);
+  assert.equal(degraded.quality.completionStatus, off.quality.completionStatus);
+  assert.equal(degraded.quality.budget.usage.llmTokens, off.quality.budget.usage.llmTokens);
+  assert.equal(degraded.quality.budget.floorStatus, off.quality.budget.floorStatus);
+});
+
+test('maximally positive Jev answers cannot turn a failed claim or gate into a pass', async () => {
+  const eager = scriptedJudge({ sourceAssessment: true, readPriority: true, queryScreening: true, passageOrder: true }, (id) => (id.includes('_same_') ? 0 : 1));
+  const off = await new ResearchRunner().run({ query: '调研 Atlas 这个产品', settings: baseSettings, search: searchWith(results), llm: canonicalLlm({ conflict: true }) });
+  const on = await new ResearchRunner().run({ query: '调研 Atlas 这个产品', settings: withJudge(eager.config), search: searchWith(results), llm: canonicalLlm({ conflict: true }) });
+  assert.ok(eager.calls.length > 0);
+  assert.notEqual(off.quality.gate, 'pass');
+  assert.equal(on.quality.gate, off.quality.gate);
+  assert.equal(on.quality.completionStatus, off.quality.completionStatus);
+  assert.equal(on.quality.stopReason === 'evidence_sufficient', off.quality.stopReason === 'evidence_sufficient');
+  assert.equal(on.claims.filter((claim) => claim.verdict === 'supported').length, off.claims.filter((claim) => claim.verdict === 'supported').length);
+});

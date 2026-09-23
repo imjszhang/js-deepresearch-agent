@@ -16,6 +16,7 @@ import { completeStructuredJson } from './structured-llm.mjs';
 import { STRUCTURED_RESPONSE_VERSION } from './structured-response.mjs';
 import { normalizeClaimCandidates, VALIDATION_PROTOCOL_VERSION } from './claim-candidates.mjs';
 import { isExecutionInterruption } from '../search/search-health.mjs';
+import { applyPassageOrder, judgePassageOrder } from './judge-passage-order.mjs';
 
 export const SLOT_SUPPORT_VERDICTS = Object.freeze([
   'supported',
@@ -201,6 +202,7 @@ export function slotSupportFingerprint(gap, passages = [], extras = {}) {
       ...(passage.assessment?.method === 'jev' ? { assessmentJudge: passage.assessment.judge || 'jev' } : {}),
     })),
     criterionPool: extras.criterionPool || {},
+    ...(extras.passageOrder ? { passageOrder: extras.passageOrder } : {}),
   });
   return createHash('sha256').update(payload).digest('hex');
 }
@@ -511,6 +513,7 @@ export async function judgeOpenSlotSupport({
   evidenceStore = null,
   inspectUnseen = false,
   onlyGapIds = null,
+  judge = null,
 } = {}) {
   evidenceStore?.captureFindings(findings);
   const extras = { brief, query, profile, findings, evidenceStore, inspectUnseen };
@@ -535,11 +538,18 @@ export async function judgeOpenSlotSupport({
       evaluation,
       slotMode: ['derived_judgment', 'comparison'].includes(gap.taskType) || (!brief.executionVersion && brief?.queryShape === 'judgment') ? 'research_judgment' : 'source_fact',
       consequentialClaims: brief?.consequentialClaims || [],
-      cacheKey: slotSupportFingerprint(gap, passages, { criterionPool }),
-      selection: describeSlotSelection(gap, passages, { evaluation, extras }),
+      criterionPool,
     });
   }
   if (!targets.length) return emptySupportResult();
+  const { orders } = await judgePassageOrder(judge, { signal, groups: targets.map((target) => ({ key: target.gap.id,
+    focus: [target.gap.question, ...(target.gap.slotSupport?.missingFacets || [])].filter(Boolean).join('\n'), passages: target.passages })) });
+  for (const target of targets) {
+    const order = orders.get(target.gap.id);
+    if (order) target.passages = applyPassageOrder(target.passages, order);
+    target.cacheKey = slotSupportFingerprint(target.gap, target.passages, { criterionPool: target.criterionPool, ...(order ? { passageOrder: judge.identityKey } : {}) });
+    target.selection = describeSlotSelection(target.gap, target.passages, { evaluation: target.evaluation, extras });
+  }
 
   const cachedJudgments = [];
   const pending = [];

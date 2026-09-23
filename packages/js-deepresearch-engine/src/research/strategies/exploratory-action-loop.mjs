@@ -91,7 +91,7 @@ export async function runActionExploration({ state, loopLocal, query, llm, searc
     const graph = buildClaimGraph({ gaps: state.gaps, passages: [...state.evidenceStore.passages.values()] });
     if (graph.records.length) {
       const validation = await validateResearchClaims({ graph, store: state.evidenceStore, gaps: state.gaps, query,
-        llm, signal, recorder, budget, researchPhase: 'exploratory', constraints: state.brief.constraints || [], cache: state.claimValidationCache });
+        llm, signal, recorder, budget, researchPhase: 'exploratory', constraints: state.brief.constraints || [], cache: state.claimValidationCache, judge });
       applyValidatedBindings(state.gaps, validation.graph);
       state.claimValidationCache = validation.cache;
       state.validatedClaimIds = [...new Set(graph.bindings.filter(deliverableBinding).map(b => b.claimId))].sort();
@@ -191,7 +191,7 @@ export async function runActionExploration({ state, loopLocal, query, llm, searc
       } else {
         const support = await judgeOpenSlotSupport({ llm, signal, query, gaps: [gap], findings: state.findings,
           brief: state.brief, profile: state.profile, evidenceStore: state.evidenceStore, inspectUnseen: true,
-          onlyGapIds: [gapId], cache: state.slotSupportCache });
+          onlyGapIds: [gapId], cache: state.slotSupportCache, judge });
         applySlotSupportJudgments(state.gaps, support.judgments); state.syncGapCoverage();
         outcome = { execution: support.unknown ? 'failed' : 'succeeded', inspected: support.selections.length,
           newSupport: support.judgments.filter((item) => item.verdict === 'supported').length, retryable: false,

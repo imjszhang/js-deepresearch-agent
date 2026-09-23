@@ -212,6 +212,7 @@ export function createReadExecutor({ state, loopLocal, query, llm, signal, emit,
         profile: state.profile,
         cache: state.slotSupportCache,
         evidenceStore: state.evidenceStore,
+        judge,
       });
       applySlotSupportJudgments(state.gaps, support.judgments);
       state.syncGapCoverage();

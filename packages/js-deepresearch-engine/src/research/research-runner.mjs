@@ -389,6 +389,7 @@ export class ResearchRunner {
       return await finalizePreparedReport({
         embeddingStats: pre.state.embeddingStats || null,
         embedding: researchProviders.embedding,
+        judge: researchProviders.judge || null,
         llm,
         signal,
         emit,
